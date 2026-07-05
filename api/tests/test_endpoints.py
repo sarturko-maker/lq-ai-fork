@@ -388,6 +388,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("DELETE", "/api/v1/practice-areas/{key}"),
     ("POST", "/api/v1/practice-areas/{key}/tool-groups"),
     ("DELETE", "/api/v1/practice-areas/{key}/tool-groups/{group_key}"),
+    # SETUP-4b (fork, ADR-F062 addendum) — bulk reposition. Dedicated coverage in
+    # tests/test_practice_areas.py.
+    ("POST", "/api/v1/practice-areas/reorder"),
     # ADR-F054 (fork) — capability panel. Dedicated coverage in
     # tests/test_practice_area_playbooks_api.py + tests/test_matter_capabilities_api.py.
     ("POST", "/api/v1/practice-areas/{key}/playbooks"),

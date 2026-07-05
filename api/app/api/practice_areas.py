@@ -11,6 +11,8 @@
   (gateway bypass, ADR-F010) is a 400.
 * ``POST``/``DELETE`` ``/{key}/skills`` — ADMIN attach/detach of a
   filesystem-canonical skill (by name; registry-validated).
+* ``POST /api/v1/practice-areas/reorder`` — ADMIN bulk reposition (SETUP-4b,
+  ADR-F062 addendum); body is the full desired key order.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import Select, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,11 +41,13 @@ from app.models.practice_area import (
 )
 from app.models.project import Project
 from app.schemas.practice_areas import (
+    BoundPlaybook,
     PlaybookAttachRequest,
     PracticeAreaConfigUpdate,
     PracticeAreaCreate,
     PracticeAreaListResponse,
     PracticeAreaRead,
+    PracticeAreaReorderRequest,
     SkillAttachRequest,
     ToolGroupAttachRequest,
 )
@@ -80,7 +84,111 @@ async def _bound_skill_names(db: AsyncSession, area_id: uuid.UUID) -> list[str]:
     return list(rows)
 
 
-def _to_read(area: PracticeArea, bound_skills: list[str]) -> PracticeAreaRead:
+def _canonical_group_order(keys: set[str]) -> list[str]:
+    """REGISTRY-CANONICAL order (ADR-F062 D4): ``TOOL_GROUP_REGISTRY`` insertion
+    order filtered to ``keys`` — never DB row order (SETUP-4b, ``bound_tool_groups``)."""
+    return [k for k in TOOL_GROUP_REGISTRY if k in keys]
+
+
+async def _bound_tool_group_keys(db: AsyncSession, area_id: uuid.UUID) -> list[str]:
+    """One area's bound tool-group keys, registry-canonical order (mutation paths)."""
+    rows = (
+        (
+            await db.execute(
+                select(PracticeAreaToolGroup.group_key).where(
+                    PracticeAreaToolGroup.practice_area_id == area_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return _canonical_group_order(set(rows))
+
+
+async def _bound_playbooks(db: AsyncSession, area_id: uuid.UUID) -> list[BoundPlaybook]:
+    """One area's bound (non-deleted) playbooks, name order (mutation paths).
+
+    ``Playbook.name`` is not unique — the ``id`` tiebreaker keeps same-named
+    playbooks from flapping order between reads (review fix 5)."""
+    rows = (
+        await db.execute(
+            select(Playbook.id, Playbook.name)
+            .join(PracticeAreaPlaybook, PracticeAreaPlaybook.playbook_id == Playbook.id)
+            .where(
+                PracticeAreaPlaybook.practice_area_id == area_id,
+                Playbook.deleted_at.is_(None),
+            )
+            .order_by(Playbook.name, Playbook.id)
+        )
+    ).all()
+    return [BoundPlaybook(id=pb_id, name=name) for pb_id, name in rows]
+
+
+async def _all_bound_skill_names(
+    db: AsyncSession, area_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[str]]:
+    """Batched skill-name lookup for the list path — ONE query across every area
+    (no N+1, SETUP-4b review)."""
+    out: dict[uuid.UUID, list[str]] = {aid: [] for aid in area_ids}
+    if not area_ids:
+        return out
+    rows = await db.execute(
+        select(PracticeAreaSkill.practice_area_id, PracticeAreaSkill.skill_name)
+        .where(PracticeAreaSkill.practice_area_id.in_(area_ids))
+        .order_by(PracticeAreaSkill.practice_area_id, PracticeAreaSkill.skill_name)
+    )
+    for area_id, name in rows:
+        out[area_id].append(name)
+    return out
+
+
+async def _all_bound_tool_group_keys(
+    db: AsyncSession, area_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[str]]:
+    """Batched tool-group lookup for the list path — ONE query across every area,
+    then registry-canonical order per area (ADR-F062 D4)."""
+    raw: dict[uuid.UUID, set[str]] = {aid: set() for aid in area_ids}
+    if area_ids:
+        rows = await db.execute(
+            select(PracticeAreaToolGroup.practice_area_id, PracticeAreaToolGroup.group_key).where(
+                PracticeAreaToolGroup.practice_area_id.in_(area_ids)
+            )
+        )
+        for area_id, key in rows:
+            raw[area_id].add(key)
+    return {aid: _canonical_group_order(keys) for aid, keys in raw.items()}
+
+
+async def _all_bound_playbooks(
+    db: AsyncSession, area_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[BoundPlaybook]]:
+    """Batched playbook lookup for the list path — ONE query across every area
+    (no N+1, SETUP-4b review)."""
+    out: dict[uuid.UUID, list[BoundPlaybook]] = {aid: [] for aid in area_ids}
+    if not area_ids:
+        return out
+    rows = await db.execute(
+        select(PracticeAreaPlaybook.practice_area_id, Playbook.id, Playbook.name)
+        .join(Playbook, Playbook.id == PracticeAreaPlaybook.playbook_id)
+        .where(
+            PracticeAreaPlaybook.practice_area_id.in_(area_ids),
+            Playbook.deleted_at.is_(None),
+        )
+        # name is not unique — the id tiebreaker keeps order stable (review fix 5).
+        .order_by(PracticeAreaPlaybook.practice_area_id, Playbook.name, Playbook.id)
+    )
+    for area_id, pb_id, pb_name in rows:
+        out[area_id].append(BoundPlaybook(id=pb_id, name=pb_name))
+    return out
+
+
+def _to_read(
+    area: PracticeArea,
+    bound_skills: list[str],
+    bound_tool_groups: list[str],
+    bound_playbooks: list[BoundPlaybook],
+) -> PracticeAreaRead:
     return PracticeAreaRead(
         id=area.id,
         key=area.key,
@@ -92,9 +200,40 @@ def _to_read(area: PracticeArea, bound_skills: list[str]) -> PracticeAreaRead:
         default_tier_floor=area.default_tier_floor,
         agent_config=area.agent_config or {},
         bound_skills=bound_skills,
+        bound_tool_groups=bound_tool_groups,
+        bound_playbooks=bound_playbooks,
         created_at=area.created_at,
         updated_at=area.updated_at,
     )
+
+
+async def _to_read_single(db: AsyncSession, area: PracticeArea) -> PracticeAreaRead:
+    """``_to_read`` for a single mutated area (PATCH/POST) — per-area loads are fine
+    off the hot list path (SETUP-4b review: batch only where N grows with the list)."""
+    return _to_read(
+        area,
+        await _bound_skill_names(db, area.id),
+        await _bound_tool_group_keys(db, area.id),
+        await _bound_playbooks(db, area.id),
+    )
+
+
+async def _list_read_models(db: AsyncSession, areas: list[PracticeArea]) -> list[PracticeAreaRead]:
+    """``_to_read`` for every area in one shot — ONE query per join table, not one
+    per area (SETUP-4b review, no N+1)."""
+    area_ids = [a.id for a in areas]
+    skills_by_area = await _all_bound_skill_names(db, area_ids)
+    groups_by_area = await _all_bound_tool_group_keys(db, area_ids)
+    playbooks_by_area = await _all_bound_playbooks(db, area_ids)
+    return [
+        _to_read(
+            area,
+            skills_by_area[area.id],
+            groups_by_area[area.id],
+            playbooks_by_area[area.id],
+        )
+        for area in areas
+    ]
 
 
 async def _load_area_or_404(db: AsyncSession, key: str) -> PracticeArea:
@@ -146,10 +285,7 @@ async def list_practice_areas(
         .scalars()
         .all()
     )
-    out: list[PracticeAreaRead] = []
-    for area in rows:
-        out.append(_to_read(area, await _bound_skill_names(db, area.id)))
-    return PracticeAreaListResponse(practice_areas=out)
+    return PracticeAreaListResponse(practice_areas=await _list_read_models(db, list(rows)))
 
 
 @router.patch(
@@ -173,6 +309,10 @@ async def update_practice_area_config(
     area = await _load_area_or_404(db, key)
 
     fields = payload.model_dump(exclude_unset=True)
+    if "name" in fields:
+        area.name = fields["name"]
+    if "unit_label" in fields:
+        area.unit_label = fields["unit_label"]
     if "profile_md" in fields:
         area.profile_md = fields["profile_md"]
     if "default_tier_floor" in fields:
@@ -212,7 +352,7 @@ async def update_practice_area_config(
     )
     await db.commit()
     await db.refresh(area)
-    return _to_read(area, await _bound_skill_names(db, area.id))
+    return await _to_read_single(db, area)
 
 
 @router.post(
@@ -293,7 +433,81 @@ async def create_practice_area(
     )
     await db.commit()
     await db.refresh(area)
-    return _to_read(area, await _bound_skill_names(db, area.id))
+    return await _to_read_single(db, area)
+
+
+# Registered ABOVE the ``/{key}...`` parameterized routes for clarity (SETUP-4b, D4):
+# no real ambiguity exists today (no other POST matches a bare path segment), but a
+# static path should never read as "shadowed by" a dynamic one.
+@router.post(
+    "/reorder",
+    response_model=PracticeAreaListResponse,
+    summary="Reorder practice areas (admin).",
+)
+async def reorder_practice_areas(
+    payload: PracticeAreaReorderRequest,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> PracticeAreaListResponse:
+    """POST /api/v1/practice-areas/reorder — SETUP-4b (ADR-F062 addendum).
+
+    Body ``{keys}`` must be EXACTLY a permutation of every existing area key — the
+    same set AND the same count (a duplicate key collapses the set, so length is
+    checked too). A partial list, an unknown key, or a duplicate is a 422 (reject,
+    don't sanitize: a mismatch means a stale client, so the UI just refetches and
+    retries — this is not the area's own :func:`_load_area_or_404` 404 posture,
+    because there is no single resource identity here).
+
+    Locks every area row ``FOR UPDATE`` ordered by ``key`` (deadlock-safe: any two
+    concurrent reorders — or a reorder racing a create/delete — take row locks in the
+    same global order), then renumbers ``position = list index`` and stamps
+    ``updated_at``. Audits the new key order (an identifier list + count, never raw
+    content). ``position`` carries no unique constraint (existing ``ORDER BY
+    position, key`` keeps ties stable), so the renumbering is a plain bulk update, not
+    a swap dance.
+    """
+    if len(payload.keys) != len(set(payload.keys)):
+        raise HTTPException(
+            status_code=422,
+            detail="keys must not contain duplicates.",
+        )
+
+    areas = (
+        (await db.execute(select(PracticeArea).order_by(PracticeArea.key).with_for_update()))
+        .scalars()
+        .all()
+    )
+    existing_keys = {a.key for a in areas}
+    if set(payload.keys) != existing_keys:
+        raise HTTPException(
+            status_code=422,
+            detail="keys must be exactly the current set of practice-area keys.",
+        )
+
+    by_key = {a.key: a for a in areas}
+    now = datetime.now(UTC)
+    for index, key in enumerate(payload.keys):
+        area = by_key[key]
+        area.position = index
+        area.updated_at = now
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="practice_area.reorder",
+        resource_type="practice_area",
+        request=request,
+        details={"keys": payload.keys, "count": len(payload.keys)},
+    )
+    await db.commit()
+
+    rows = (
+        (await db.execute(select(PracticeArea).order_by(PracticeArea.position, PracticeArea.key)))
+        .scalars()
+        .all()
+    )
+    return PracticeAreaListResponse(practice_areas=await _list_read_models(db, list(rows)))
 
 
 @router.delete(

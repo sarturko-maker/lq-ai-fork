@@ -109,3 +109,51 @@ data). The F054 status flip + addendum paperwork is reserved for SETUP-5 — thi
   matters + audit rows SET NULL. Stale `matter_capability_toggles` rows are tolerated at resolve time.
 - ADR-F054 D1 is superseded for *availability*; its status flip + addendum are SETUP-5. No new dependency;
   the gateway is untouched.
+
+## Addendum — SETUP-4b (2026-07-04)
+
+SETUP-4b builds the web admin UI over SETUP-4a's endpoints (`/lq-ai/admin/areas`,
+`/lq-ai/admin/areas/{key}`, `/lq-ai/admin/capabilities`) and adds four small backend
+enablers to make that UI possible. No F054 status flip, no budget-profile defaults, no
+viewer RBAC (all SETUP-5); no migration.
+
+- **Read-model fields (D2).** `PracticeAreaRead` gains `bound_tool_groups: list[str]` and
+  `bound_playbooks: list[BoundPlaybook]` (`{id, name}`). `bound_tool_groups` is
+  REGISTRY-CANONICAL order — `TOOL_GROUP_REGISTRY` insertion order filtered to the area's
+  rows, never DB row or attach order (the same ordering invariant D4 established for
+  composition, now surfaced on the read model too). The list path (`GET /practice-areas`)
+  batches one query per join table across every area rather than looping per-area, so the
+  admin UI's list page costs O(1) extra round-trips, not O(areas).
+
+- **`PATCH .../{key}` gains `name`/`unit_label` (D3).** Same partial-update
+  (`exclude_unset`) semantics as the existing `profile_md`/`default_tier_floor`/
+  `agent_config` fields; bounds mirror `PracticeAreaCreate` (`min_length=1,
+  max_length=200`). Lets the detail page rename an area or relabel its unit-of-work noun
+  post-creation without a new endpoint.
+
+- **`POST /practice-areas/reorder` (D4).** Body `{keys: list[str]}` must be EXACTLY a
+  permutation of every existing area key — compared as both a set (no missing/extra key)
+  and a length (a duplicate collapses the set without changing membership, so length is
+  checked separately) — else 422 (reject, don't sanitize: a mismatch means the admin's
+  browser tab is looking at a stale list, so the UI's fix is to refetch and retry, not for
+  the server to guess intent). The handler locks every area row `FOR UPDATE ORDER BY key`
+  (deadlock-safe: two concurrent reorders, or a reorder racing a create/delete, always
+  acquire row locks in the same global key order) before renumbering `position = list
+  index` and stamping `updated_at`. `position` carries no unique constraint — the existing
+  `ORDER BY position, key` keeps ties stable — so this is a plain bulk update, not a swap
+  dance. Audited `practice_area.reorder` with the key list + count only.
+
+- **Model menu (D8) — NO new endpoint (simplified in review).** The plan originally called
+  for a `GET /admin/model-menu` endpoint stripping the gateway's alias list to
+  `{alias, tier}`; it was implemented and then DELETED in this slice's adversarial review.
+  The alias+tier pair is ALREADY member-visible: `GET /api/v1/models` (open to every
+  `ActiveUser`, rendered by `ModelPicker.svelte`) forwards the gateway's merged
+  model-discovery payload verbatim, where each alias row carries `routed_inference_tier` —
+  so a new, *narrower*, admin-only projection of already-broader-audience data added
+  backend surface without adding any confidentiality. The capabilities page instead calls
+  the existing `modelsApi.listModels()` and derives the read-only rows client-side in a
+  pure page-helper (`aliasMenuRows`: filter `lq_ai_kind === 'alias'`, map
+  `{alias: id, tier: routed_inference_tier ?? null}`), degrading to a muted
+  "Model menu unavailable." note on error. The F061 operator fence is untouched throughout
+  (alias CRUD, provider keys, and the full sanitized `GET /admin/config` remain
+  operator-only); no `/api/v1` path count change from D8.

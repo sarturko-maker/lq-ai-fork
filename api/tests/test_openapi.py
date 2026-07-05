@@ -250,6 +250,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # ADR-F054 (fork) — admin playbook attach/detach (capability availability)
         "/api/v1/practice-areas/{key}/playbooks",
         "/api/v1/practice-areas/{key}/playbooks/{playbook_id}",
+        # SETUP-4b (fork, ADR-F062 addendum) — bulk reposition
+        "/api/v1/practice-areas/reorder",
         # PRIV-3 (fork) — ROPA register read API (ADR-F019)
         "/api/v1/ropa/processing-activities",
         "/api/v1/ropa/processing-activities/{activity_id}",
@@ -385,7 +387,12 @@ async def test_openapi_paths_match_sketch() -> None:
     #   (/practice-areas/{key}/tool-groups + .../{group_key} = 2; POST /practice-areas
     #   and DELETE /practice-areas/{key} reuse existing paths → +0 here) + deployment
     #   capability toggles (GET/PATCH /admin/capabilities = 1 path).
-    assert len(actual) == 170  # +3: ADR-F054 capability panel (GET/PUT
+    # +1: SETUP-4b (ADR-F062 addendum) — admin Areas + Capabilities UI backend:
+    #   POST /practice-areas/reorder (bulk reposition). (A GET /admin/model-menu
+    #   was added then DELETED in the same slice's review — the alias+tier pair is
+    #   already member-visible via GET /api/v1/models; the admin UI derives it
+    #   client-side.)
+    assert len(actual) == 171  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

@@ -21,6 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.main import app
+from app.models.audit import AuditLog
+from app.models.playbook import Playbook
 from app.models.practice_area import PracticeArea, PracticeAreaSkill
 from app.models.user import User
 from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_db
@@ -1128,3 +1130,212 @@ async def test_create_practice_area_rejects_empty_tool_group_item(
         json={"key": "bounded", "name": "X", "unit_label": "Y", "tool_groups": [""]},
     )
     assert resp.status_code == 422
+
+
+# --- SETUP-4b: read-model bound_tool_groups/bound_playbooks + PATCH name/unit_label +
+# POST /practice-areas/reorder (ADR-F062 addendum) ---------------------------------
+
+
+async def test_read_model_bound_tool_groups_is_registry_canonical_order(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    """``bound_tool_groups`` is REGISTRY-CANONICAL order (redlining, tabular, ropa,
+    assessment) — never DB row / attach order (ADR-F062 D4). Proven by attaching in
+    the EXACT REVERSE of canonical order."""
+    area = PracticeArea(key="canonorder", name="Canon Order", unit_label="Matter", position=910)
+    db_session.add(area)
+    pb = Playbook(name="Order playbook", contract_type="NDA", description="d")
+    db_session.add(pb)
+    await db_session.flush()
+
+    for group_key in ("assessment", "ropa", "tabular", "redlining"):
+        resp = await client.post(
+            "/api/v1/practice-areas/canonorder/tool-groups",
+            headers=_bearer(admin),
+            json={"group_key": group_key},
+        )
+        assert resp.status_code == 204, group_key
+    attach_pb = await client.post(
+        "/api/v1/practice-areas/canonorder/playbooks",
+        headers=_bearer(admin),
+        json={"playbook_id": str(pb.id)},
+    )
+    assert attach_pb.status_code == 204
+
+    resp = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
+    assert resp.status_code == 200
+    row = next(a for a in resp.json()["practice_areas"] if a["key"] == "canonorder")
+    assert row["bound_tool_groups"] == ["redlining", "tabular", "ropa", "assessment"]
+    assert row["bound_playbooks"] == [{"id": str(pb.id), "name": "Order playbook"}]
+
+
+async def test_admin_patch_name_and_unit_label(client: AsyncClient, admin: User) -> None:
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"name": "Disputes & Litigation", "unit_label": "Case"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "Disputes & Litigation"
+    assert body["unit_label"] == "Case"
+
+    # Persisted, not just echoed.
+    reread = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
+    row = next(a for a in reread.json()["practice_areas"] if a["key"] == "disputes")
+    assert row["name"] == "Disputes & Litigation"
+    assert row["unit_label"] == "Case"
+
+
+async def test_admin_patch_name_rejects_empty_string(client: AsyncClient, admin: User) -> None:
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"name": ""},
+    )
+    assert resp.status_code == 422
+
+
+async def test_admin_patch_unit_label_rejects_empty_string(
+    client: AsyncClient, admin: User
+) -> None:
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"unit_label": ""},
+    )
+    assert resp.status_code == 422
+
+
+async def test_admin_patch_name_rejects_explicit_null(client: AsyncClient, admin: User) -> None:
+    """Review fix 1: an explicit JSON null used to slip past min_length (the None
+    union arm) and crash the NOT NULL commit with an unhandled 500 — now a clean
+    boundary 422 from the field validator."""
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"name": None},
+    )
+    assert resp.status_code == 422
+
+
+async def test_admin_patch_unit_label_rejects_explicit_null(
+    client: AsyncClient, admin: User
+) -> None:
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"unit_label": None},
+    )
+    assert resp.status_code == 422
+
+
+async def test_admin_patch_name_with_unit_label_unset_still_works(
+    client: AsyncClient, admin: User
+) -> None:
+    """Review fix 1 companion: the null-rejecting validator must NOT fire for an
+    UNSET field (validators skip unvalidated defaults), so partial updates keep
+    working — name set, unit_label omitted leaves unit_label untouched."""
+    before = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
+    unit_before = next(a for a in before.json()["practice_areas"] if a["key"] == "employment")[
+        "unit_label"
+    ]
+
+    resp = await client.patch(
+        "/api/v1/practice-areas/employment",
+        headers=_bearer(admin),
+        json={"name": "People & Employment"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "People & Employment"
+    assert body["unit_label"] == unit_before  # unset field untouched
+
+
+_ALL_SEED_KEYS = [k for k, *_ in _EXPECTED_SEED]
+
+
+async def test_reorder_renumbers_positions_and_returns_ordered_list(
+    client: AsyncClient, admin: User
+) -> None:
+    read = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
+    keys = [a["key"] for a in read.json()["practice_areas"]]
+    assert keys == _ALL_SEED_KEYS
+
+    reversed_keys = list(reversed(keys))
+    resp = await client.post(
+        "/api/v1/practice-areas/reorder",
+        headers=_bearer(admin),
+        json={"keys": reversed_keys},
+    )
+    assert resp.status_code == 200
+    body = resp.json()["practice_areas"]
+    assert [a["key"] for a in body] == reversed_keys
+    assert [a["position"] for a in body] == list(range(len(reversed_keys)))
+
+    # Persisted, not just echoed.
+    reread = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
+    assert [a["key"] for a in reread.json()["practice_areas"]] == reversed_keys
+
+
+async def test_reorder_rejects_missing_key(client: AsyncClient, admin: User) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas/reorder",
+        headers=_bearer(admin),
+        json={"keys": _ALL_SEED_KEYS[:-1]},  # missing the last seed key
+    )
+    assert resp.status_code == 422
+
+
+async def test_reorder_rejects_extra_key(client: AsyncClient, admin: User) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas/reorder",
+        headers=_bearer(admin),
+        json={"keys": [*_ALL_SEED_KEYS, "not-a-real-area"]},
+    )
+    assert resp.status_code == 422
+
+
+async def test_reorder_rejects_duplicate_key(client: AsyncClient, admin: User) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas/reorder",
+        headers=_bearer(admin),
+        json={"keys": [_ALL_SEED_KEYS[0], *_ALL_SEED_KEYS]},  # first key repeated
+    )
+    assert resp.status_code == 422
+
+
+async def test_reorder_requires_admin(client: AsyncClient, user: User) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas/reorder",
+        headers=_bearer(user),
+        json={"keys": _ALL_SEED_KEYS},
+    )
+    assert resp.status_code == 403
+
+
+async def test_reorder_writes_audit_row_with_keys_and_count(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    new_order = [*_ALL_SEED_KEYS[1:], _ALL_SEED_KEYS[0]]
+    resp = await client.post(
+        "/api/v1/practice-areas/reorder",
+        headers=_bearer(admin),
+        json={"keys": new_order},
+    )
+    assert resp.status_code == 200
+
+    row = (
+        (
+            await db_session.execute(
+                select(AuditLog)
+                .where(AuditLog.action == "practice_area.reorder")
+                .order_by(AuditLog.timestamp.desc())
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert row is not None
+    assert row.details["keys"] == new_order
+    assert row.details["count"] == len(new_order)

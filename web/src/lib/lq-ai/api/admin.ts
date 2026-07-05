@@ -196,3 +196,59 @@ export async function enableUser(userId: string): Promise<UserDisableResponse> {
 		method: 'POST'
 	});
 }
+
+// ----- Deployment-wide (Level 0) capability toggles (SETUP-4a/4b, ADR-F062) -----
+
+/** One deployment capability + its effective Level-0 enabled state. Deliberately a
+ *  narrower shape than the matter-panel `CapabilityEntry` (types.ts) — there is no
+ *  `available`/`default_enabled`/`toggleable` at this level, only `enabled`. */
+export interface DeploymentCapabilityRead {
+	capability_kind: 'skill' | 'tool' | 'playbook';
+	capability_key: string;
+	label: string;
+	description: string | null;
+	enabled: boolean;
+}
+
+/** A kind-grouped section (Tools / Skills / Playbooks) of the deployment inventory. */
+export interface DeploymentCapabilitySection {
+	kind: 'skill' | 'tool' | 'playbook';
+	label: string;
+	entries: DeploymentCapabilityRead[];
+}
+
+/** GET/PATCH /api/v1/admin/capabilities body/response. */
+export interface DeploymentCapabilitiesResponse {
+	sections: DeploymentCapabilitySection[];
+}
+
+/** One Level-0 on/off toggle in a `PATCH /admin/capabilities` body. */
+export interface DeploymentToggleInput {
+	kind: 'skill' | 'tool' | 'playbook';
+	key: string;
+	enabled: boolean;
+}
+
+/** GET /api/v1/admin/capabilities — the whole-deployment inventory (admin). */
+export async function getDeploymentCapabilities(): Promise<DeploymentCapabilitiesResponse> {
+	return apiRequest<DeploymentCapabilitiesResponse>('/admin/capabilities');
+}
+
+/**
+ * PATCH /api/v1/admin/capabilities — sparse Level-0 toggle writes (admin). The
+ * server validates ALL toggles before writing ANY; an unknown (kind, key) is 422
+ * (deliberate divergence from the per-area attach endpoints' 404 posture).
+ */
+export async function patchDeploymentCapabilities(
+	toggles: DeploymentToggleInput[]
+): Promise<DeploymentCapabilitiesResponse> {
+	return apiRequest<DeploymentCapabilitiesResponse>('/admin/capabilities', {
+		method: 'PATCH',
+		body: { toggles }
+	});
+}
+
+// NOTE (SETUP-4b review fix 3): a `getModelMenu` client for GET /admin/model-menu
+// briefly lived here and was DELETED along with the endpoint — the alias+tier pair
+// is already member-visible via `modelsApi.listModels()` (GET /api/v1/models); the
+// capabilities page derives it client-side.
