@@ -218,23 +218,32 @@ check. Read + halt endpoints stay on :data:`ActiveUser` per the M4-C2
 opt-out split."""
 
 
-# PRD §5.2 RBAC three-role system (Wave C). ``viewer`` users can read
-# resources they own but cannot mutate; ``admin`` and ``member`` can
-# both mutate. Backed by ``users.role`` (migration 0017) with a
-# server-default of ``member`` so existing rows + new signups
-# inherit mutating access without explicit promotion.
-_MUTATING_ROLES = frozenset({"admin", "member"})
+# PRD §5.2 RBAC three-role system (Wave C); ``operator`` added SETUP-5b
+# (ADR-F064 D1). ``viewer`` users can read resources they own but cannot
+# mutate; ``admin``, ``member`` AND ``operator`` may all mutate. ``operator``
+# is included because the platform operator owns its OWN rows (test matters,
+# chats, runs) and mutates them member-like — ADR-F064 D2 removes only the
+# operator's CROSS-USER tenant-data visibility (a business-logic seam), never
+# its ability to act on rows it owns. Backed by ``users.role`` (migrations
+# 0017/0085) with a server-default of ``member`` so existing rows + new
+# signups inherit mutating access without explicit promotion.
+_MUTATING_ROLES = frozenset({"admin", "member", "operator"})
 
 
 async def get_mutating_user(user: ActiveUser) -> User:
     """``ActiveUser`` plus a role check that excludes ``viewer``.
 
-    Wave C. Apply to state-changing endpoints (POST/PATCH/DELETE) so
-    operators can hand out read-only logins for auditors / observers.
-    Read-only endpoints (GET) keep using ``ActiveUser`` directly.
+    SETUP-5b (ADR-F064 D1). Applied to every tenant-data state-changing
+    endpoint (POST/PATCH/PUT/DELETE on owned resources) so a ``viewer``
+    login is an ENFORCED read-only account (auditors / observers), not just
+    a label. Read-only endpoints (GET), self-service ``/auth`` + ``/users/me``
+    routes, and service-to-service surfaces keep their own gate — the full
+    map is the drift-guard allowlist in ``tests/test_mutation_rbac.py``.
 
-    Returns 403 with ``code='forbidden'`` and a body mentioning the
-    role requirement so a CLI / UI can render a useful message.
+    Returns 403 with ``code='forbidden'`` and a body naming the role
+    requirement so a CLI / UI can render a useful message. The 403 fires on
+    the CALLER'S OWN role BEFORE any resource lookup, so it never leaks a
+    resource's existence — cross-user access stays 404 in the handler body.
     """
 
     if getattr(user, "role", "member") not in _MUTATING_ROLES:

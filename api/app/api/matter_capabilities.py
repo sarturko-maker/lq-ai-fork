@@ -31,7 +31,7 @@ from app.agents.capabilities import (
     build_area_inventory,
     empty_inventory,
 )
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.api.projects import _load_visible_project
 from app.audit import audit_action
 from app.db.session import get_db
@@ -204,7 +204,7 @@ async def get_matter_capabilities(
 async def update_matter_capabilities(
     project_id: uuid.UUID,
     payload: CapabilityOverridesUpdate,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> CapabilityInventoryResponse:

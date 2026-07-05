@@ -83,7 +83,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db, get_session_factory
@@ -186,7 +186,7 @@ async def get_playbook(
 )
 async def create_playbook(
     body: PlaybookCreate,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookSchema:
@@ -263,7 +263,7 @@ async def create_playbook(
 async def update_playbook(
     playbook_id: uuid.UUID,
     body: PlaybookUpdate,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookSchema:
@@ -381,7 +381,7 @@ async def update_playbook(
 )
 async def delete_playbook(
     playbook_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
@@ -442,7 +442,7 @@ async def delete_playbook(
 async def execute_playbook(
     playbook_id: uuid.UUID,
     body: PlaybookExecutionCreate,
-    user: ActiveUser,
+    user: MutatingUser,
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
@@ -548,7 +548,7 @@ async def get_playbook_execution(
 )
 async def create_easy_playbook_generation(
     body: EasyPlaybookGenerationCreate,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> EasyPlaybookGenerationSchema:

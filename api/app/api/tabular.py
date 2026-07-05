@@ -65,7 +65,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.api.projects import _load_visible_project
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
@@ -283,7 +283,7 @@ async def preview_tabular_cost(
 async def create_tabular_execution(
     body: TabularExecutionCreate,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TabularExecutionResponse:
     """Kick off a tabular execution against the supplied document corpus.
@@ -462,7 +462,7 @@ async def get_tabular_execution(
 )
 async def delete_tabular_execution(
     execution_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
@@ -489,7 +489,7 @@ async def delete_tabular_execution(
 )
 async def cancel_tabular_execution(
     execution_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TabularExecutionResponse:
@@ -633,7 +633,7 @@ def _clear_cell_override(
 async def override_tabular_cell(
     execution_id: uuid.UUID,
     payload: CellOverrideRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TabularExecutionResponse:
@@ -682,7 +682,7 @@ async def override_tabular_cell(
 )
 async def clear_tabular_cell_override(
     execution_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     document_id: Annotated[uuid.UUID, Query()],

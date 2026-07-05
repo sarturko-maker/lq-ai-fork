@@ -31,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.matter_roster_tools import live_participants
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import MutatingUser
 from app.api.projects import _load_visible_project
 from app.audit import audit_action
 from app.db.session import get_db
@@ -182,7 +182,7 @@ async def _load_active_participant(
 async def create_matter_participant(
     project_id: uuid.UUID,
     payload: ParticipantCreateRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> ParticipantRead:
@@ -230,7 +230,7 @@ async def update_matter_participant(
     project_id: uuid.UUID,
     entry_id: uuid.UUID,
     payload: ParticipantUpdateRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> ParticipantRead:
@@ -289,7 +289,7 @@ async def update_matter_participant(
 async def retire_matter_participant(
     project_id: uuid.UUID,
     entry_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> ParticipantRetireResponse:

@@ -55,7 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.matter_fact_tools import live_corrections, live_facts, memory_log
 from app.agents.matter_memory_tools import snapshot_and_rewrite_wiki
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.api.matter_roster import roster_read
 from app.api.projects import _load_visible_project
 from app.audit import audit_action
@@ -110,7 +110,7 @@ class CorrectionResponse(BaseModel):
 async def create_matter_correction(
     project_id: uuid.UUID,
     payload: CorrectionCreateRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> CorrectionResponse:
@@ -317,7 +317,7 @@ async def read_matter_memory(
 async def revert_matter_wiki(
     project_id: uuid.UUID,
     payload: WikiRevertRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> WikiRevertResponse:
@@ -430,7 +430,7 @@ class RetireResponse(BaseModel):
 async def retire_matter_correction(
     project_id: uuid.UUID,
     entry_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> RetireResponse:
@@ -494,7 +494,7 @@ async def retire_matter_correction(
 async def retire_matter_fact(
     project_id: uuid.UUID,
     entry_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> RetireResponse:

@@ -70,7 +70,7 @@ from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.api.skills import _resolve_skill_for_user
 from app.audit import audit_action
 from app.citation import extract_citations, verify
@@ -418,7 +418,7 @@ def _decode_cursor_or_400(value: str) -> Cursor:
 )
 async def create_chat(
     payload: ChatCreateRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ChatResponse:
     chat = Chat(
@@ -668,7 +668,7 @@ async def get_chat(
 async def update_chat(
     chat_id: str,
     payload: ChatUpdateRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ChatResponse:
     cid = _validate_chat_id(chat_id)
@@ -718,7 +718,7 @@ async def update_chat(
 )
 async def delete_chat(
     chat_id: str,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     cid = _validate_chat_id(chat_id)
@@ -1033,7 +1033,7 @@ def _format_attached_files_block(files: list[tuple[str, str]]) -> str:
 async def send_message(
     chat_id: str,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> JSONResponse | StreamingResponse:

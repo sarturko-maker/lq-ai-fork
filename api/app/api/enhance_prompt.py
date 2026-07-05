@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import MutatingUser
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
 from app.errors import LQAIError
@@ -332,7 +332,7 @@ async def _load_chat_history(
 async def enhance_prompt(
     payload: EnhancePromptRequest,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> EnhancePromptResponse:
@@ -446,7 +446,7 @@ async def enhance_prompt(
 async def update_enhance_prompt_outcome(
     interaction_id: uuid.UUID,
     payload: EnhancePromptOutcomeUpdate,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> EnhancePromptResponse:
     """PATCH /api/v1/enhance-prompt/{id} — update used/edited flags.

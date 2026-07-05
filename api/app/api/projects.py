@@ -62,7 +62,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, NotFound, ValidationError
@@ -353,7 +353,7 @@ def _registry(request: Request) -> MutableSkillRegistry:
 )
 async def create_project(
     payload: ProjectCreateRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectResponse:
     # Wave D.2 Task 2.1 — reject the reserved ``__*__`` slug family before
@@ -499,7 +499,7 @@ async def get_project(
 async def update_project(
     project_id: str,
     payload: ProjectUpdateRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectResponse:
     pid = _validate_project_id(project_id)
@@ -611,7 +611,7 @@ async def update_project(
 )
 async def delete_project(
     project_id: str,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     pid = _validate_project_id(project_id)
@@ -659,7 +659,7 @@ async def delete_project(
     ),
 )
 async def ensure_sandbox(
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     response: Response,
 ) -> ProjectResponse:
@@ -757,7 +757,7 @@ async def ensure_sandbox(
 async def attach_file(
     project_id: str,
     payload: AttachFileRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     pid = _validate_project_id(project_id)
@@ -816,7 +816,7 @@ async def attach_file(
 async def detach_file(
     project_id: str,
     file_id: str,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     pid = _validate_project_id(project_id)
@@ -883,7 +883,7 @@ async def detach_file(
 async def attach_skill(
     project_id: str,
     payload: AttachSkillRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> Response:
@@ -939,7 +939,7 @@ async def attach_skill(
 async def detach_skill(
     project_id: str,
     skill_name: str,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     pid = _validate_project_id(project_id)
@@ -1022,7 +1022,7 @@ async def _load_visible_kb(
 async def attach_knowledge_base(
     project_id: str,
     payload: AttachKnowledgeBaseRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> ProjectResponse:
@@ -1109,7 +1109,7 @@ async def attach_knowledge_base(
 async def detach_knowledge_base(
     project_id: str,
     kb_id: str,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> Response:

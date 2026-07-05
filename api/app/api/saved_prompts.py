@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.models.saved_prompt import SavedPrompt
@@ -185,7 +185,7 @@ async def list_prompts(
 async def create_prompt(
     payload: SavedPromptCreate,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SavedPromptResponse:
     """POST /api/v1/saved-prompts — create + return the new row."""
@@ -246,7 +246,7 @@ async def update_prompt(
     prompt_id: uuid.UUID,
     payload: SavedPromptUpdate,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SavedPromptResponse:
     """PATCH /api/v1/saved-prompts/{id} — partial update."""
@@ -297,7 +297,7 @@ async def update_prompt(
 async def delete_prompt(
     prompt_id: uuid.UUID,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     """DELETE /api/v1/saved-prompts/{id} — owner-only delete."""

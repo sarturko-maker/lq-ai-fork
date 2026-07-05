@@ -42,7 +42,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
@@ -243,7 +243,7 @@ async def _file_has_null_embedding_chunks(db: AsyncSession, file_id: uuid.UUID) 
 )
 async def create_kb(
     payload: KnowledgeBaseCreateRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> KnowledgeBaseResponse:
@@ -346,7 +346,7 @@ async def get_kb(
 async def update_kb(
     kb_id: str,
     payload: KnowledgeBaseUpdateRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> KnowledgeBaseResponse:
@@ -414,7 +414,7 @@ async def update_kb(
 )
 async def delete_kb(
     kb_id: str,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
@@ -460,7 +460,7 @@ async def delete_kb(
 async def attach_file(
     kb_id: str,
     payload: AttachFileRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
@@ -658,7 +658,7 @@ async def list_kb_files(
 async def detach_file(
     kb_id: str,
     file_id: str,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
