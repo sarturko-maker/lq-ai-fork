@@ -13,7 +13,10 @@
 		{ href: '/lq-ai/admin/users', label: 'Users' },
 		// SETUP-4b (ADR-F062 addendum) — plain admin links, NOT operator-gated.
 		{ href: '/lq-ai/admin/areas', label: 'Practice areas' },
-		{ href: '/lq-ai/admin/capabilities', label: 'Capabilities' },
+		// STORE-2 (ADR-F065): Capabilities split into Store (browse what ships)
+		// + Library (what this org adopted) — the old page is now a redirect stub.
+		{ href: '/lq-ai/admin/store', label: 'Store' },
+		{ href: '/lq-ai/admin/library', label: 'Library' },
 		...($auth.user?.role === 'operator' ? [{ href: '/lq-ai/admin/models', label: 'Models' }] : []),
 		{ href: '/lq-ai/admin/word-addin', label: 'Word add-in' },
 		{ href: '/lq-ai/admin/intake-bridges', label: 'Intake bridges' },
