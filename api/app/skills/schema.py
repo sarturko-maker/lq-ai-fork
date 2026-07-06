@@ -363,6 +363,27 @@ def extract_inputs(name: str, frontmatter: SkillFrontmatter) -> SkillInputs:
 # --- Internal helpers --------------------------------------------------------
 
 
+def _top_level_str(frontmatter: SkillFrontmatter, field: str) -> str | None:
+    """Read a top-level frontmatter extra field, ``str``-typed only.
+
+    STORE-2 D5: the community skill corpus (35+ skills for ``author:``,
+    37+ for ``version:``) declares these at the top level of the
+    frontmatter rather than nested under ``lq_ai:``. ``SkillFrontmatter``
+    allows unknown top-level keys (``extra="allow"``, schema.py:180), so
+    they land in ``model_extra`` and were previously dropped silently.
+    Only ``str`` values are accepted — a YAML ``version: 1.0`` float (or
+    any other non-string) is left to fall through to the caller's own
+    default rather than being coerced, so a malformed value is honestly
+    absent instead of silently wrong.
+    """
+
+    extras = frontmatter.model_extra or {}
+    value = extras.get(field)
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
 def derive_summary(
     name: str,
     frontmatter: SkillFrontmatter,
@@ -381,11 +402,21 @@ def derive_summary(
       lq-skills submodule).
     Callers that do not pass ``source`` get ``"built-in"`` to preserve
     backward compatibility.
+
+    ``author``/``version`` resolve from two locations, mirroring
+    :func:`extract_inputs`'s dual-location pattern (STORE-2 D5): the
+    ``lq_ai:`` block first (``lq.author`` / ``lq.version``), falling back
+    to a top-level ``author:`` / ``version:`` frontmatter key via
+    :func:`_top_level_str` when the ``lq_ai:`` block omits it. ``lq_ai:``
+    wins on conflict. All built-in skills nest under ``lq_ai:`` (this
+    fallback is a no-op for them); the community submodule is the corpus
+    this closes the gap for.
     """
 
     lq = frontmatter.lq_ai
     title = lq.title or _humanise(name)
-    version = lq.version or "unversioned"
+    version = lq.version or _top_level_str(frontmatter, "version") or "unversioned"
+    author = lq.author or _top_level_str(frontmatter, "author")
     return SkillSummary(
         name=name,
         version=version,
@@ -393,7 +424,7 @@ def derive_summary(
         source=source,
         title=title,
         description=frontmatter.description,
-        author=lq.author,
+        author=author,
         tags=list(lq.tags),
         jurisdiction=lq.jurisdiction,
         minimum_inference_tier=lq.minimum_inference_tier,
