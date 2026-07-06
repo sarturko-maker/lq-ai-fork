@@ -16,6 +16,7 @@ enabled=false ⇒ remove). These prove:
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -29,11 +30,14 @@ from app.models.audit import AuditLog
 from app.models.playbook import Playbook
 from app.models.practice_area import OrgLibraryEntry
 from app.models.user import User
+from app.skills import load_registry
+from app.skills.registry import MutableSkillRegistry
 from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_db
 
 pytestmark = pytest.mark.integration
 
 _URL = "/api/v1/admin/capabilities"
+_REAL_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 
 
 @pytest_asyncio.fixture
@@ -80,6 +84,69 @@ async def test_get_lists_registry_tool_groups_with_library_membership(
     for e in _section(body, "tool")["entries"]:
         assert e["in_library"] is True
         assert e["enabled"] == e["in_library"]
+
+
+async def test_tool_entries_carry_recommended_for_and_source(
+    client: AsyncClient, admin: User
+) -> None:
+    """STORE-2 D-A: additive `source`/`recommended_for` fields on tool entries.
+
+    Tool entries are `source="built-in"` always (no adopt/registry state affects
+    provenance); `recommended_for` is sourced from `RECOMMENDED_LIBRARY_SETS`
+    (commercial -> redlining+tabular, privacy -> ropa+assessment).
+    """
+    resp = await client.get(_URL, headers=_bearer(admin))
+    body = resp.json()
+    by_key = {e["capability_key"]: e for e in _section(body, "tool")["entries"]}
+    assert by_key["redlining"]["source"] == "built-in"
+    assert by_key["redlining"]["recommended_for"] == ["commercial"]
+    assert by_key["tabular"]["recommended_for"] == ["commercial"]
+    assert by_key["ropa"]["recommended_for"] == ["privacy"]
+    assert by_key["assessment"]["recommended_for"] == ["privacy"]
+    # A tool group has no author/version — those are skill-only fields.
+    assert by_key["redlining"]["author"] is None
+    assert by_key["redlining"]["version"] is None
+
+
+async def test_skill_entries_carry_provenance_from_the_real_registry(
+    client: AsyncClient, admin: User
+) -> None:
+    """A real built-in skill's source/author/version/tags/recommended_for surface."""
+    if not _REAL_SKILLS_DIR.is_dir():
+        pytest.skip(f"real skills directory not present: {_REAL_SKILLS_DIR}")
+
+    prior = getattr(app.state, "skill_registry", None)
+    app.state.skill_registry = MutableSkillRegistry(load_registry(_REAL_SKILLS_DIR))
+    try:
+        resp = await client.get(_URL, headers=_bearer(admin))
+        body = resp.json()
+        by_key = {e["capability_key"]: e for e in _section(body, "skill")["entries"]}
+        nda = by_key["nda-review"]
+        assert nda["source"] == "built-in"
+        assert nda["author"] == "LegalQuants"
+        assert nda["version"] == "1.0.1"
+        assert set(nda["recommended_for"]) == {"commercial", "m-and-a", "employment"}
+    finally:
+        if prior is None:
+            delattr(app.state, "skill_registry")
+        else:
+            app.state.skill_registry = prior
+
+
+async def test_playbook_entries_have_no_source(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    """Playbooks carry no provenance field today (D-A) — `source` stays None."""
+    pb = Playbook(name="Prov Test Book", contract_type="NDA", description="")
+    db_session.add(pb)
+    await db_session.flush()
+    resp = await client.get(_URL, headers=_bearer(admin))
+    body = resp.json()
+    entry = next(
+        e for e in _section(body, "playbook")["entries"] if e["capability_key"] == str(pb.id)
+    )
+    assert entry["source"] is None
+    assert entry["recommended_for"] == []
 
 
 async def test_get_requires_admin(client: AsyncClient, user: User) -> None:
