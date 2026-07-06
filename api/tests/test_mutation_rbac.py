@@ -141,13 +141,14 @@ def test_mutating_route_entry_count_pinned() -> None:
 
 @pytest.mark.unit
 def test_api_v1_path_count_pinned() -> None:
-    """STORE-1 (ADR-F065) adds 2 routes (the Org Library adopt/remove pair): 171 → 173."""
+    """STORE-1 (ADR-F065) adds 2 routes (the Org Library adopt/remove pair): 171 → 173.
+    STORE-2 (ADR-F065 D-B) adds 1 route (GET /api/v1/library, member-readable): 173 → 174."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 173
+    assert len(paths) == 174
 
 
 @pytest.mark.unit
