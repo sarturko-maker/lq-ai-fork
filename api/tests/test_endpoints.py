@@ -327,6 +327,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # tests/test_org_library_api.py.
     ("POST", "/api/v1/admin/library"),
     ("DELETE", "/api/v1/admin/library/{kind}/{key}"),
+    # STORE-2 (ADR-F065 D-B) — member-readable Org Library read model. Dedicated
+    # coverage in tests/test_library_read_api.py.
+    ("GET", "/api/v1/library"),
     # Wave D.2 — sandbox ensure, skills autocomplete, user-skill versions, KB files
     ("POST", "/api/v1/projects/sandbox/ensure"),
     ("GET", "/api/v1/skills/autocomplete"),
