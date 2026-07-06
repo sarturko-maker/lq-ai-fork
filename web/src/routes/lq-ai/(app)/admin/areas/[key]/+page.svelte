@@ -28,7 +28,11 @@
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
 
-	import { catalogEntriesForKind, describeMutationError } from '$lib/lq-ai/admin/page-helpers';
+	import {
+		catalogEntriesForKind,
+		describeMutationError,
+		libraryOnly
+	} from '$lib/lq-ai/admin/page-helpers';
 	import {
 		bindingLabel,
 		diffPatch,
@@ -36,6 +40,7 @@
 		formatDeleteConflict,
 		hasMultipleLedgerBearingGroups,
 		parseRosterDraft,
+		pickerEmptyState,
 		unboundOptions
 	} from './page-helpers';
 
@@ -53,9 +58,11 @@
 
 	// Catalog projections via the SHARED helper (review fix 4 — the previous
 	// inline copy here duplicated the list page's tested implementation).
-	const skillCatalog = $derived(catalogEntriesForKind(catalog, 'skill'));
-	const toolCatalog = $derived(catalogEntriesForKind(catalog, 'tool'));
-	const playbookCatalog = $derived(catalogEntriesForKind(catalog, 'playbook'));
+	// STORE-2: narrowed to Library-adopted entries only — an area's bindings
+	// pick from the Library, never directly from the Store (ADR-F065).
+	const skillCatalog = $derived(libraryOnly(catalogEntriesForKind(catalog, 'skill')));
+	const toolCatalog = $derived(libraryOnly(catalogEntriesForKind(catalog, 'tool')));
+	const playbookCatalog = $derived(libraryOnly(catalogEntriesForKind(catalog, 'playbook')));
 
 	// Attach `<select>` option sets — computed here (not `{@const}`, which must be
 	// an IMMEDIATE child of an {#if}/{:else}/etc., not nested inside a <section>).
@@ -474,6 +481,15 @@
 						Attach
 					</Button>
 				</div>
+			{:else if pickerEmptyState(toolCatalog, groupOptions) === 'library-empty'}
+				<p class="text-xs text-muted-foreground" data-testid="lq-admin-area-groups-empty">
+					Your library has no tools yet —
+					<a href="/lq-ai/admin/store" class="underline">browse the Store</a>.
+				</p>
+			{:else if pickerEmptyState(toolCatalog, groupOptions) === 'all-attached'}
+				<p class="text-xs text-muted-foreground" data-testid="lq-admin-area-groups-empty">
+					Everything in your library is already attached.
+				</p>
 			{/if}
 		</section>
 
@@ -483,7 +499,12 @@
 			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-skills-list">
 				{#each area.bound_skills as skillName (skillName)}
 					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-						<span class="text-sm text-foreground">{bindingLabel(skillCatalog, skillName)}</span>
+						<a
+							href="/lq-ai/skills/{encodeURIComponent(skillName)}"
+							class="text-sm text-foreground hover:underline"
+						>
+							{bindingLabel(skillCatalog, skillName)}
+						</a>
 						<Button
 							type="button"
 							size="sm"
@@ -525,6 +546,15 @@
 						Attach
 					</Button>
 				</div>
+			{:else if pickerEmptyState(skillCatalog, skillOptions) === 'library-empty'}
+				<p class="text-xs text-muted-foreground" data-testid="lq-admin-area-skills-empty">
+					Your library has no skills yet —
+					<a href="/lq-ai/admin/store" class="underline">browse the Store</a>.
+				</p>
+			{:else if pickerEmptyState(skillCatalog, skillOptions) === 'all-attached'}
+				<p class="text-xs text-muted-foreground" data-testid="lq-admin-area-skills-empty">
+					Everything in your library is already attached.
+				</p>
 			{/if}
 		</section>
 
@@ -576,6 +606,15 @@
 						Attach
 					</Button>
 				</div>
+			{:else if pickerEmptyState(playbookCatalog, playbookOptions) === 'library-empty'}
+				<p class="text-xs text-muted-foreground" data-testid="lq-admin-area-playbooks-empty">
+					Your library has no playbooks yet —
+					<a href="/lq-ai/admin/store" class="underline">browse the Store</a>.
+				</p>
+			{:else if pickerEmptyState(playbookCatalog, playbookOptions) === 'all-attached'}
+				<p class="text-xs text-muted-foreground" data-testid="lq-admin-area-playbooks-empty">
+					Everything in your library is already attached.
+				</p>
 			{/if}
 		</section>
 

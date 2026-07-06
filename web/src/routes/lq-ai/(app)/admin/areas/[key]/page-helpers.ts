@@ -109,6 +109,28 @@ export function unboundOptions(options: CatalogOption[], boundKeys: string[]): C
 }
 
 /**
+ * STORE-2 — which empty-state copy an attach picker shows when its `<select>`
+ * has nothing to offer, distinguishing two honestly different reasons:
+ *
+ * * `'library-empty'` — the org's Library has NO entries of this kind at all
+ *   (the picker's Library-scoped catalog, i.e. `libraryOnly(...)`, is empty) —
+ *   the fix is to visit the Store.
+ * * `'all-attached'` — the Library has entries of this kind, but every one is
+ *   already bound to this area — nothing left to attach.
+ *
+ * `null` when the picker has options to show (no empty state needed).
+ */
+export type PickerEmptyState = 'library-empty' | 'all-attached' | null;
+
+export function pickerEmptyState(
+	libraryScopedCatalog: CatalogOption[],
+	unbound: CatalogOption[]
+): PickerEmptyState {
+	if (unbound.length > 0) return null;
+	return libraryScopedCatalog.length === 0 ? 'library-empty' : 'all-attached';
+}
+
+/**
  * Ledger-bearing tool groups (SETUP-4b) — source of truth is
  * `TOOL_GROUP_REGISTRY` in `api/app/agents/capabilities.py` (`ledger_factory`
  * set on `redlining` → `DealChangeLedger`, `ropa` → `RopaChangeLedger`). The
