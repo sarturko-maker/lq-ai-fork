@@ -768,8 +768,12 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   (proposed)**. Slices: STORE-0 ✓ (ADR + this reorder, doc-only) → STORE-1 ✓ (PR #225 — mig 0088
   `org_library_entries`, adopt-in predicate at the chokepoint, adopt/remove endpoints, bind-time
   422, toggles table DROPPED, fresh-org-empty via the users-at-migration gate, old Capabilities
-  page kept working as a Library shim) → **STORE-2 Store+Library admin pages** (+G5 skill links +
-  the D5 provenance-parser fallback) → STORE-3 live re-rehearsal (acceptance test). THEN **ONBOARD-1 template
+  page kept working as a Library shim) → STORE-2 ✓ (PR #226 — Store page w/ Recommended-for-{area}
+  rails + one-click Add-all off the new drift-guarded `RECOMMENDED_LIBRARY_SETS`, provenance
+  badges, admin Library page w/ where-used + D6 remove-confirm, member read-only `/lq-ai/library`
+  on the new ActiveUser `GET /api/v1/library`, Capabilities→redirect, Library-scoped area pickers,
+  G5 skill links, D5 provenance fallback; plan `plans/STORE-2-store-library-pages.md`) →
+  **STORE-3 live re-rehearsal (acceptance test — the ONLY remaining slice)**. THEN **ONBOARD-1 template
   catalog** (templates adopt-on-apply; unit-of-work vocabulary first-class — "Investigation"
   missing, structure-beyond-label is ADR territory) → **ONBOARD-2 admin wizard** (SETUP-3c folds in
   as entry point). Remaining ONBOARD gaps queued: G1 boot-email validation, G2 House Brief page +

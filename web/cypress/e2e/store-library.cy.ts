@@ -52,6 +52,10 @@ describe('Store + Library (STORE-2)', () => {
 			.first()
 			.then(($btn) => {
 				const adoptedTestId = ($btn.attr('data-testid') || '').replace('lq-store-add-', '');
+				// The Store page's testids use the entryId `kind:key` grammar; the
+				// Library page's use `kind-key` — translate when crossing pages
+				// (caught live in the STORE-2 gate browser pass).
+				const libraryTestId = adoptedTestId.replace(':', '-');
 				const adoptedLabel = $btn
 					.closest('[data-testid^="lq-store-card-"]')
 					.find('p, a')
@@ -93,13 +97,13 @@ describe('Store + Library (STORE-2)', () => {
 				cy.get('[role="dialog"]').should('not.exist');
 
 				// ── 5. Remove the entry WE adopted (unattached -> no warning line) ──
-				cy.get(`[data-testid="lq-library-remove-${adoptedTestId}"]`).click();
+				cy.get(`[data-testid="lq-library-remove-${libraryTestId}"]`).click();
 				cy.get('[role="dialog"]').should('be.visible');
 				cy.get('[role="dialog"]').contains('Not attached to any practice area.').should('exist');
 				cy.get('[data-testid="lq-library-remove-warning"]').should('not.exist');
 				cy.get('[data-testid="lq-library-remove-confirm"]').click();
 				cy.get('[role="dialog"]').should('not.exist');
-				cy.get(`[data-testid="lq-library-card-${adoptedTestId}"]`).should('not.exist');
+				cy.get(`[data-testid="lq-library-card-${libraryTestId}"]`).should('not.exist');
 			});
 
 		// ── 6. Area-detail: Playbooks picker shows the Store empty-state link ──
