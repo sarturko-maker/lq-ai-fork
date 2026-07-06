@@ -764,9 +764,10 @@ async def compose_and_execute_run(
         # SETUP-4a (ADR-F062, supersedes ADR-F054 D1): the area's domain tool GROUPS are
         # now built by a data-driven REGISTRY LOOP, not a hardcoded per-area branch.
         # ``enabled_tool_groups`` is the area's practice_area_tool_groups rows ∩ the code
-        # registry ∩ the per-matter/Level-0 toggles (resolved above via the one inventory
-        # chokepoint), so a group grants iff (row present) AND (registry entry exists) AND
-        # (no toggle disables it) — absence at ANY level ⇒ its tools are never built and
+        # registry ∩ Org Library adoption ∩ the per-matter toggles (resolved above via the
+        # one inventory chokepoint), so a group grants iff (row present) AND (registry
+        # entry exists) AND (adopted into the Org Library, ADR-F065) AND (no per-matter
+        # toggle disables it) — absence at ANY level ⇒ its tools are never built and
         # never enter GuardContext.granted (R6 fail-closes). The loop iterates the registry
         # in canonical order (redlining → tabular → ropa → assessment) filtered by this
         # set, so the ordered grant set is byte-identical to the pre-slice per-area branch

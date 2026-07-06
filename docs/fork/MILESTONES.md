@@ -765,10 +765,11 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   clean and clear UX"):** Catalog ("Store") / Org Library / Area Binding — adopt-in polarity
   replaces the disable-only Level-0 toggles; provenance surfaced; non-technical-admin UX binding.
   Plan `plans/STORE-org-library.md` (maintainer-reviewed, 4 questions decided) + **ADR-F065
-  (proposed)**. Slices: STORE-0 ✓ (ADR + this reorder, doc-only) → **STORE-1 Library substrate**
-  (migration + seed-from-effective-state + toggle supersession; adopt/remove endpoints; bind-time
-  check; `build_area_inventory` predicate swap; drift-guard matrix) → STORE-2 Store+Library admin
-  pages (+G5 skill links) → STORE-3 live re-rehearsal (acceptance test). THEN **ONBOARD-1 template
+  (proposed)**. Slices: STORE-0 ✓ (ADR + this reorder, doc-only) → STORE-1 ✓ (PR #225 — mig 0088
+  `org_library_entries`, adopt-in predicate at the chokepoint, adopt/remove endpoints, bind-time
+  422, toggles table DROPPED, fresh-org-empty via the users-at-migration gate, old Capabilities
+  page kept working as a Library shim) → **STORE-2 Store+Library admin pages** (+G5 skill links +
+  the D5 provenance-parser fallback) → STORE-3 live re-rehearsal (acceptance test). THEN **ONBOARD-1 template
   catalog** (templates adopt-on-apply; unit-of-work vocabulary first-class — "Investigation"
   missing, structure-beyond-label is ADR territory) → **ONBOARD-2 admin wizard** (SETUP-3c folds in
   as entry point). Remaining ONBOARD gaps queued: G1 boot-email validation, G2 House Brief page +
