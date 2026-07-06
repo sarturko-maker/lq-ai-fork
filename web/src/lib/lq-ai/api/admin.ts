@@ -239,31 +239,17 @@ export interface DeploymentCapabilitiesResponse {
 	sections: DeploymentCapabilitySection[];
 }
 
-/** One Level-0 on/off toggle in a `PATCH /admin/capabilities` body. */
-export interface DeploymentToggleInput {
-	kind: 'skill' | 'tool' | 'playbook';
-	key: string;
-	enabled: boolean;
-}
-
 /** GET /api/v1/admin/capabilities — the whole-deployment inventory (admin). */
 export async function getDeploymentCapabilities(): Promise<DeploymentCapabilitiesResponse> {
 	return apiRequest<DeploymentCapabilitiesResponse>('/admin/capabilities');
 }
 
-/**
- * PATCH /api/v1/admin/capabilities — sparse Level-0 toggle writes (admin). The
- * server validates ALL toggles before writing ANY; an unknown (kind, key) is 422
- * (deliberate divergence from the per-area attach endpoints' 404 posture).
- */
-export async function patchDeploymentCapabilities(
-	toggles: DeploymentToggleInput[]
-): Promise<DeploymentCapabilitiesResponse> {
-	return apiRequest<DeploymentCapabilitiesResponse>('/admin/capabilities', {
-		method: 'PATCH',
-		body: { toggles }
-	});
-}
+// NOTE (STORE-2 review fix): the `patchDeploymentCapabilities` client (PATCH
+// /admin/capabilities Level-0 toggles) lost its only caller when the old
+// Capabilities page became a redirect stub, and was deleted with it. The
+// SERVER keeps the PATCH endpoint as the STORE-1 compat shim over the Library
+// (enabled=true ⇒ adopt / false ⇒ remove); the web writes through
+// `adoptLibraryEntry`/`removeLibraryEntry` below instead.
 
 // NOTE (SETUP-4b review fix 3): a `getModelMenu` client for GET /admin/model-menu
 // briefly lived here and was DELETED along with the endpoint — the alias+tier pair

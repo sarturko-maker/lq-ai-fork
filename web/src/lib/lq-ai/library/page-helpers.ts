@@ -38,7 +38,10 @@ export function provenanceBadge(entry: {
 	if (!entry.source) return null;
 	const bits = [SOURCE_LABELS[entry.source] ?? entry.source];
 	if (entry.author) bits.push(entry.author);
-	if (entry.version) bits.push(`v${entry.version}`);
+	// derive_summary never sends null for a resolvable skill — a versionless one
+	// arrives as the sentinel "unversioned" (D-E), which must not render as
+	// "vunversioned" (review fix, STORE-2).
+	if (entry.version && entry.version !== 'unversioned') bits.push(`v${entry.version}`);
 	return bits.join(' · ');
 }
 

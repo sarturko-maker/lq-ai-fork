@@ -220,7 +220,10 @@
 				<section aria-label={section.label} data-testid={`lq-store-section-${section.kind}`}>
 					<SectionHeader size="section" title={section.label} class="mb-3" />
 					{#if section.entries.length === 0}
-						<p class="text-xs text-muted-foreground">Nothing here yet.</p>
+						<!-- A search miss must not read as an empty catalog (review fix). -->
+						<p class="text-xs text-muted-foreground">
+							{searchTerm ? `No matches for “${searchTerm}”.` : 'Nothing here yet.'}
+						</p>
 					{:else}
 						<CardGrid cols={3}>
 							{#each section.entries as entry (entryId(entry))}

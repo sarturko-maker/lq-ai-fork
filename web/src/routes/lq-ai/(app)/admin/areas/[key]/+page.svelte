@@ -58,10 +58,16 @@
 
 	// Catalog projections via the SHARED helper (review fix 4 — the previous
 	// inline copy here duplicated the list page's tested implementation).
-	// STORE-2: narrowed to Library-adopted entries only — an area's bindings
-	// pick from the Library, never directly from the Store (ADR-F065).
-	const skillCatalog = $derived(libraryOnly(catalogEntriesForKind(catalog, 'skill')));
-	const toolCatalog = $derived(libraryOnly(catalogEntriesForKind(catalog, 'tool')));
+	// STORE-2: the attach PICKERS are narrowed to Library-adopted entries only —
+	// an area's bindings pick from the Library, never directly from the Store
+	// (ADR-F065). Label lookups for ALREADY-BOUND rows use the FULL catalog: a
+	// bound entry whose Library adoption was later removed (a valid D-F state —
+	// "stays attached but stops resolving") must keep its human label rather
+	// than regress to the raw key (STORE-2 review fix).
+	const skillCatalogAll = $derived(catalogEntriesForKind(catalog, 'skill'));
+	const toolCatalogAll = $derived(catalogEntriesForKind(catalog, 'tool'));
+	const skillCatalog = $derived(libraryOnly(skillCatalogAll));
+	const toolCatalog = $derived(libraryOnly(toolCatalogAll));
 	const playbookCatalog = $derived(libraryOnly(catalogEntriesForKind(catalog, 'playbook')));
 
 	// Attach `<select>` option sets — computed here (not `{@const}`, which must be
@@ -439,7 +445,7 @@
 			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-groups-list">
 				{#each area.bound_tool_groups as groupKey (groupKey)}
 					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-						<span class="text-sm text-foreground">{bindingLabel(toolCatalog, groupKey)}</span>
+						<span class="text-sm text-foreground">{bindingLabel(toolCatalogAll, groupKey)}</span>
 						<Button
 							type="button"
 							size="sm"
@@ -503,7 +509,7 @@
 							href="/lq-ai/skills/{encodeURIComponent(skillName)}"
 							class="text-sm text-foreground hover:underline"
 						>
-							{bindingLabel(skillCatalog, skillName)}
+							{bindingLabel(skillCatalogAll, skillName)}
 						</a>
 						<Button
 							type="button"

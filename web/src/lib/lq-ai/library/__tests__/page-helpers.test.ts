@@ -53,6 +53,14 @@ describe('provenanceBadge', () => {
 		expect(provenanceBadge({ source: null, author: null, version: null })).toBeNull();
 	});
 
+	it('suppresses the backend "unversioned" sentinel — never renders "vunversioned"', () => {
+		// derive_summary sends the sentinel (not null) for a versionless skill (D-E);
+		// the badge must treat it as no-version (STORE-2 review fix).
+		expect(
+			provenanceBadge({ source: 'community', author: 'Jamie Tso', version: 'unversioned' })
+		).toBe('Community · Jamie Tso');
+	});
+
 	it('falls back to the raw source string for an unmapped value', () => {
 		expect(provenanceBadge({ source: 'exotic', author: null, version: null })).toBe('exotic');
 	});
