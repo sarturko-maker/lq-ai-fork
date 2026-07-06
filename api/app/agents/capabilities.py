@@ -224,6 +224,81 @@ TOOL_GROUP_REGISTRY: dict[str, ToolGroupDef] = {
 }
 
 
+# --- recommended Library sets (STORE-2 D-C) ----------------------------------
+#
+# The Store page's "Recommended for {area}" rail needs a runtime source for "what does
+# LQ ship bound to each area by default" — no such constant existed before STORE-2 (the
+# shipped defaults live only as migration literals, spread across six files because each
+# later craft slice added one more skill by hand-rolled SQL rather than editing a shared
+# map). This constant is the drift-guarded transcription of that union — content MUST
+# match the seed migrations exactly (a guard test in ``tests/agents/test_capabilities.py``
+# pins every referenced tool key against ``TOOL_GROUP_REGISTRY`` and every skill name
+# against the real ``skills/`` corpus, so a renamed skill breaks CI instead of silently
+# dropping a recommendation). It is read-only display data for the Store page — it does
+# NOT feed ``build_area_inventory`` or any resolution chokepoint.
+#
+# Provenance (area key -> kind -> tuple of keys, insertion order canonical):
+#   * skills: ``0056_default_area_skill_bindings.py`` (``_DEFAULT_BINDINGS``, the initial
+#     per-area seed) plus the later one-off craft-skill bindings:
+#     ``0067_commercial_surgical_redline_skill.py`` (surgical-redline, commercial),
+#     ``0069_matter_memory_skill_binding.py`` (matter-memory, every standard area),
+#     ``0072_commercial_negotiation_review_skill.py`` (negotiation-review, commercial),
+#     ``0073_commercial_roster_and_reconciliation.py`` (deal-review, commercial),
+#     ``0083_bind_tabular_review_skill.py`` (tabular-review, commercial).
+#   * tools: ``0086_tool_group_registry_deployment_toggles.py`` (``_SEED_TOOL_GROUPS``).
+#   * playbooks: no seed migration binds any playbook to any area by default (verified —
+#     no ``practice_area_playbooks`` INSERT exists in any migration), so no area has a
+#     recommended playbook set today.
+RECOMMENDED_LIBRARY_SETS: dict[str, dict[str, tuple[str, ...]]] = {
+    "commercial": {
+        KIND_TOOL: ("redlining", "tabular"),
+        KIND_SKILL: (
+            "msa-review-commercial-purchase",
+            "msa-review-saas",
+            "contract-qa",
+            "nda-review",
+            "surgical-redline",
+            "matter-memory",
+            "negotiation-review",
+            "deal-review",
+            "tabular-review",
+        ),
+    },
+    "privacy": {
+        KIND_TOOL: ("ropa", "assessment"),
+        KIND_SKILL: (
+            "dpa-checklist-review",
+            "vendor-privacy-policy-first-pass",
+            "contract-qa",
+            "matter-memory",
+        ),
+    },
+    "m-and-a": {
+        KIND_SKILL: (
+            "nda-review",
+            "contract-qa",
+            "contract-snapshot",
+            "matter-memory",
+        ),
+    },
+    "disputes": {
+        KIND_SKILL: (
+            "contract-qa",
+            "action-items-from-client-alert",
+            "matter-memory",
+        ),
+    },
+    "employment": {
+        KIND_SKILL: (
+            "contract-qa",
+            "nda-review",
+            "action-items-from-client-alert",
+            "matter-memory",
+        ),
+    },
+}
+
+
 def build_area_tool_groups(
     ctx: GroupBuildContext,
     group_keys: Iterable[str],
