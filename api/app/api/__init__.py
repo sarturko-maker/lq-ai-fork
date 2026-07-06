@@ -40,6 +40,7 @@ from app.api import (
     integrations_teams,
     internal,
     knowledge_bases,
+    library,
     matter_capabilities,
     matter_files,
     matter_memory,
@@ -116,6 +117,10 @@ api_router.include_router(models.router, dependencies=_active)
 api_router.include_router(files.router, dependencies=_active)
 api_router.include_router(knowledge_bases.router, dependencies=_active)
 api_router.include_router(organization_profile.router, dependencies=_active)
+# STORE-2 (ADR-F065 D-B): the member-readable Org Library read model. Any active
+# user can see what their firm's agents actually run on (transparency) — the
+# admin write surface (adopt/remove) stays fenced at `admin.router` below.
+api_router.include_router(library.router, dependencies=_active)
 # C3a (ADR-F042): the matter-memory pin endpoint — the ONLY writer of a
 # human-pinned correction (author from the session; per-user isolated, 404 on
 # cross-user). The agent's matter-wiki auto-write has no endpoint (it is a guarded
