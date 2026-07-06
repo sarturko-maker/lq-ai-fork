@@ -28,12 +28,18 @@ export interface CatalogOption {
 	key: string;
 	label: string;
 	description: string | null;
+	/** STORE-2 D-A: whether the org has adopted this capability into its
+	 *  Library. Area-detail pickers filter to `in_library === true` (Store-
+	 *  scoped bindings, ADR-F065) via {@link libraryOnly} before computing
+	 *  `unboundOptions`. */
+	in_library: boolean;
 }
 
 /**
  * SETUP-4b D7 — the attach catalogs come from `GET /admin/capabilities` (no
  * dedicated catalog endpoint). Project one kind's section into
- * `{key, label, description}` rows for attach controls and binding labels.
+ * `{key, label, description, in_library}` rows for attach controls and
+ * binding labels.
  */
 export function catalogEntriesForKind(
 	catalog: DeploymentCapabilitiesResponse | null,
@@ -45,6 +51,16 @@ export function catalogEntriesForKind(
 	return section.entries.map((e) => ({
 		key: e.capability_key,
 		label: e.label,
-		description: e.description
+		description: e.description,
+		in_library: e.in_library
 	}));
+}
+
+/**
+ * STORE-2 — narrow a catalog projection to Library-adopted entries only
+ * (ADR-F065: area bindings pick from the Library, never directly from the
+ * Store). Applied BEFORE `unboundOptions` in every area-detail attach picker.
+ */
+export function libraryOnly(options: CatalogOption[]): CatalogOption[] {
+	return options.filter((o) => o.in_library);
 }
