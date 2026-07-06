@@ -373,7 +373,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   staging URL + a passed restore drill.** Then the SAAS-2 handoff hardening (pin
 >   `FORWARDED_ALLOW_IPS` to Caddy's IP, promote CSP, rotate gateway key, lock Collabora egress).
 >   Runbook: `docs/fork/runbooks/staging-bringup.md`.
-> - **ONBOARD-0 ✓ DONE + STORE-0 ✓ (2026-07-05) — ▶▶ PICK UP EXACTLY HERE = STORE-1.**
+> - **ONBOARD-0 ✓ DONE + STORE-0 ✓ (2026-07-05).**
 >   ONBOARD-0 dress rehearsal: dev stack RESET onto main (maintainer-sanctioned `down -v`; fresh DB
 >   @0087; admin (maintainer's own email) + operator `operator@lq-ai.internal` + one invited
 >   member live — creds in the session scratchpad, passwords since changed by the maintainer where
@@ -391,16 +391,57 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   operator content kill-switch — single off-state = not-in-Library; fresh orgs start EMPTY under
 >   a binding non-technical-admin UX constraint (Recommended-for-{area} rail + one-click add-all);
 >   existing deployments upgrade via seed-from-effective-state). **ADR-F065 proposed.**
->   **STORE-1 spec (delegate to Sonnet per working model):** migration 0088 `org_library_entries`
->   (kind/key/adopted_by/adopted_at) + seed-from-effective-state + supersede
->   `deployment_capability_toggles` (mig 0086; repurpose-vs-drop = implementer call, record it);
->   adopt/remove endpoints (AdminUser, 404-not-403, audit counts/types/IDs); bind-time Library
->   check (422 → Store pointer); `build_area_inventory` predicate swap (capabilities.py, KEEP
->   REQUIRED-kwarg fail-closed); GET `/admin/capabilities` grows `in_library` (old page keeps
->   working); drift-guard matrix test (adopted+bound resolves / not-adopted+bound narrows /
->   absent). HARD GATES: `tests/agents/test_registry_parity.py` golden must keep passing;
->   AIC #188-190 renumber their migs on rebase (0088 is safe to mint). THEN STORE-2 (Store+Library
->   pages, +G5 links), STORE-3 (live re-rehearsal = acceptance). Memory: [[onboard-milestone-plan]].
+>   STORE-1 spec executed — see the next bullet. Memory: [[onboard-milestone-plan]].
+> - **STORE-1 ✓ (branch `fork/store-1-org-library`, PR #225) — ▶▶ PICK UP EXACTLY HERE = STORE-2.**
+>   The Library substrate is LIVE. Opus implemented in a worktree (working model); lead verified,
+>   ran the 4-lens adversarial review (security deep pass on the new admin mutation endpoints:
+>   ZERO findings; 1 nit fixed — the composition.py grant-seam comment) + live-verified. Landed:
+>   **mig 0088** `org_library_entries` (PK capability_kind+capability_key ∈ {skill,tool,playbook};
+>   playbook key = uuid::text; adopted_by/adopted_at) — seed-from-effective-state (bound-anywhere ∧
+>   not-disabled) GATED on users-table non-emptiness at migration time (fresh deployment ⇒ EMPTY
+>   Library, maintainer decision 3; the gate lives in upgrade(); `_seed(conn)` stays pure /
+>   idempotent / importlib-testable and tolerates the toggles table being absent via to_regclass);
+>   `deployment_capability_toggles` DROPPED (implementer call recorded in the mig docstring + the
+>   F065 addendum; downgrade recreates it EMPTY = lossy, on record). `build_area_inventory` kwarg
+>   `deployment_toggles`→`library_entries` (REQUIRED kw-only, fail-closed posture kept), membership
+>   predicate for all 3 kinds; a per-matter toggle can NOT resurrect a non-adopted capability
+>   (never an entry). NEW `POST /api/v1/admin/library` (409 dup / 422 unknown-key, validated per
+>   catalog like the old PATCH) + `DELETE /api/v1/admin/library/{kind}/{key}` (idempotent 204) —
+>   AdminUser (the operator PASSES: platform config, F061 D3 / F064 D2); audit `library.adopt` /
+>   `library.remove` / `library.update` with {kind,key} only. PATCH `/admin/capabilities` is now a
+>   compat SHIM over the Library (enabled=true ⇒ adopt / false ⇒ remove); GET grows `in_library`
+>   (`enabled` = deprecated alias) so the old Capabilities page keeps working — web untouched.
+>   Bind-time 422 "not in your organisation's library" on the 3 attach endpoints + area
+>   create-with-tool_groups, DISTINCT from the 404-unknown-registry layer. Gate: CI green; pristine
+>   full suite **3347/42**; registry-parity golden UNMODIFIED; mig up/down/up on throwaway
+>   pgvector; **isolated HTTP smoke 20/20** (fresh-org: whole catalog in_library=false → adopt →
+>   bind lifecycle → shim → audit rows); **live upgrade rehearsal on the dev stack** — 0087→0088
+>   applied on boot, seeded EXACTLY 13 skills + 4 tool groups + 0 playbooks (the maintainer's inert
+>   enabled=true redlining toggle row correctly didn't subtract), users/projects/runs intact, api
+>   healthy — upgrade day changed NOTHING visible (the D2 promise, proven on real data). Route pins
+>   now 173 paths / 126 mutating. **TRAPS:** (1) a bare `gh pr create` resolves to the FROZEN
+>   upstream — `gh repo set-default` now pinned + a CLAUDE.md line; ALWAYS pass
+>   `--repo sarturko-maker/lq-ai-fork`. (2) full-suite container mounts must be the WORKTREE ROOT
+>   (`-v <wt>:/repo -w /repo/api`) — an api-only mount breaks the env-example/wizard tests
+>   (parents[2] repo-root resolution). (3) run the full suite ALONE on this box (CPU-contention
+>   flakes ~10 timing-sensitive agents tests; identical tests pass solo). (4) container alembic
+>   runs need `/skills` mounted (mig 0032 seeds built-in playbooks from it).
+>   **STORE-2 spec (web slice — Sonnet-line implementer, lead verifies):** the two admin pages from
+>   `plans/STORE-org-library.md` §UX — **Store** (`/lq-ai/admin/store`: browse the shipped catalog
+>   grouped by kind, provenance badges, click-through to the skill source viewer = G5, ONE verb per
+>   card: Add to Library / In Library ✓) + **Library** (`/lq-ai/admin/library`: the adopted set,
+>   where-used "bound in: Commercial, …", Remove with the D6 confirm listing affected areas) + the
+>   old Capabilities page → route redirect; area-detail pickers become Library-scoped with a Store
+>   empty-state link; skill names link to the source viewer everywhere; read-only Library view for
+>   non-admin users (transparency rule). The **non-technical-admin UX constraint is BINDING**:
+>   plain language, a "Recommended for {area}" rail with one-click add-all (source = the shipped
+>   default binding map), teaching empty states. STORE-2 also carries the **D5 provenance-parser
+>   fallback** (derive_summary reads only the `lq_ai:` block — fall back to top-level
+>   `author:`/`version:` in `SkillFrontmatter.model_extra`; template = extract_inputs' dual-location
+>   pattern, api/app/skills/schema.py:324-341; 10+ community skills carry top-level keys). Backend
+>   enablers allowed but THIN: a where-used read model + the recommended-set source. THEN STORE-3
+>   (maintainer live re-rehearsal on a FRESH org = the milestone's acceptance test). Memory:
+>   [[onboard-milestone-plan]].
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 PARKED (task #456; resumes after the

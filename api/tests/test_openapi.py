@@ -130,8 +130,11 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/users/invites/{invite_id}",
         "/api/v1/admin/users/{user_id}/disable",
         "/api/v1/admin/users/{user_id}/enable",
-        # SETUP-4a (ADR-F062) — deployment-wide (Level 0) capability toggles
+        # SETUP-4a (ADR-F062) — capability inventory (now the Org Library shim, ADR-F065)
         "/api/v1/admin/capabilities",
+        # STORE-1 (ADR-F065) — Org Library adopt/remove
+        "/api/v1/admin/library",
+        "/api/v1/admin/library/{kind}/{key}",
         # SETUP-3a (ADR-F061) — unauthenticated lifecycle endpoints
         "/api/v1/auth/accept-invite",
         "/api/v1/auth/password-reset-request",
@@ -392,7 +395,9 @@ async def test_openapi_paths_match_sketch() -> None:
     #   was added then DELETED in the same slice's review — the alias+tier pair is
     #   already member-visible via GET /api/v1/models; the admin UI derives it
     #   client-side.)
-    assert len(actual) == 171  # +3: ADR-F054 capability panel (GET/PUT
+    # +2: STORE-1 (ADR-F065) — Org Library adopt/remove (POST /admin/library +
+    #   DELETE /admin/library/{kind}/{key} = 2 new paths).
+    assert len(actual) == 173  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

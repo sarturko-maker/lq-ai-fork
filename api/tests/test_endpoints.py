@@ -319,10 +319,14 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("DELETE", "/api/v1/admin/users/invites/{invite_id}"),
     ("POST", "/api/v1/admin/users/{user_id}/disable"),
     ("POST", "/api/v1/admin/users/{user_id}/enable"),
-    # SETUP-4a (ADR-F062) — deployment-wide (Level 0) capability toggles.
+    # SETUP-4a (ADR-F062) — capability inventory (now the Org Library shim, ADR-F065).
     # Dedicated coverage in tests/test_deployment_capabilities_api.py.
     ("GET", "/api/v1/admin/capabilities"),
     ("PATCH", "/api/v1/admin/capabilities"),
+    # STORE-1 (ADR-F065) — Org Library adopt/remove. Dedicated coverage in
+    # tests/test_org_library_api.py.
+    ("POST", "/api/v1/admin/library"),
+    ("DELETE", "/api/v1/admin/library/{kind}/{key}"),
     # Wave D.2 — sandbox ensure, skills autocomplete, user-skill versions, KB files
     ("POST", "/api/v1/projects/sandbox/ensure"),
     ("GET", "/api/v1/skills/autocomplete"),

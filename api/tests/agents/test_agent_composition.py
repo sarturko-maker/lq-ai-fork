@@ -43,7 +43,7 @@ from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.organization_profile import OrganizationProfile
 from app.models.playbook import Playbook, PlaybookPosition
-from app.models.practice_area import PracticeAreaPlaybook
+from app.models.practice_area import OrgLibraryEntry, PracticeAreaPlaybook
 from app.models.project import (
     MatterCapabilityToggle,
     MatterMemoryEntry,
@@ -1746,6 +1746,9 @@ async def _bind_playbook(env: CompositionEnv, area_id: uuid.UUID, *, standard: s
             )
         )
         db.add(PracticeAreaPlaybook(practice_area_id=area_id, playbook_id=pb.id))
+        # STORE-1 (ADR-F065): the playbook tier resolves through the adopt-in Library —
+        # adopt it so it reaches the prompt (the conftest seed adopts 0 playbooks).
+        db.add(OrgLibraryEntry(capability_kind="playbook", capability_key=str(pb.id)))
         await db.commit()
         return pb.id
 
@@ -1753,6 +1756,14 @@ async def _bind_playbook(env: CompositionEnv, area_id: uuid.UUID, *, standard: s
 async def _delete_playbook(env: CompositionEnv, playbook_id: uuid.UUID) -> None:
     async with env.factory() as db:
         await db.execute(delete(Playbook).where(Playbook.id == playbook_id))
+        # The Library row has no FK to playbooks (capability_key is text) — remove it too so
+        # the shared test DB is left clean (no orphan adoption).
+        await db.execute(
+            delete(OrgLibraryEntry).where(
+                OrgLibraryEntry.capability_kind == "playbook",
+                OrgLibraryEntry.capability_key == str(playbook_id),
+            )
+        )
         await db.commit()
 
 
@@ -1922,26 +1933,22 @@ async def _del_tool_group(env: CompositionEnv, area_id: uuid.UUID, group_key: st
         await db.commit()
 
 
-async def _add_deployment_toggle(
-    env: CompositionEnv, kind: str, key: str, *, enabled: bool
-) -> None:
-    from app.models.practice_area import DeploymentCapabilityToggle
+async def _add_library_entry(env: CompositionEnv, kind: str, key: str) -> None:
+    from app.models.practice_area import OrgLibraryEntry
 
     async with env.factory() as db:
-        db.add(
-            DeploymentCapabilityToggle(capability_kind=kind, capability_key=key, enabled=enabled)
-        )
+        db.add(OrgLibraryEntry(capability_kind=kind, capability_key=key))
         await db.commit()
 
 
-async def _del_deployment_toggle(env: CompositionEnv, kind: str, key: str) -> None:
-    from app.models.practice_area import DeploymentCapabilityToggle
+async def _del_library_entry(env: CompositionEnv, kind: str, key: str) -> None:
+    from app.models.practice_area import OrgLibraryEntry
 
     async with env.factory() as db:
         await db.execute(
-            delete(DeploymentCapabilityToggle).where(
-                DeploymentCapabilityToggle.capability_kind == kind,
-                DeploymentCapabilityToggle.capability_key == key,
+            delete(OrgLibraryEntry).where(
+                OrgLibraryEntry.capability_kind == kind,
+                OrgLibraryEntry.capability_key == key,
             )
         )
         await db.commit()
@@ -1972,16 +1979,17 @@ async def test_cross_area_attach_grants_group_on_a_different_area(
         await _del_tool_group(comp_env, commercial_id, "ropa")
 
 
-async def test_level0_disabled_group_not_granted_in_composition(
+async def test_not_adopted_group_not_granted_in_composition(
     comp_env: CompositionEnv,
 ) -> None:
-    """ADR-F062: a deployment-disabled (Level 0) tool group is removed from the AVAILABLE
-    set at the one inventory chokepoint, so composition never builds it — the guarded
-    dispatch that proves a grant is ABSENT. Privacy's ROPA group, disabled deployment-wide,
-    is not granted even though the area has the seeded row."""
+    """ADR-F065: a tool group NOT in the org's Library is removed from the AVAILABLE set at
+    the one inventory chokepoint, so composition never builds it — the guarded dispatch that
+    proves a grant is ABSENT. Privacy's ROPA group (a seeded binding, adopted by the conftest
+    upgraded-deployment seed) is not granted once removed from the Library. Restores the
+    adoption afterward so sibling tests (which rely on ROPA being adopted) are unaffected."""
     privacy_id = await _area_id(comp_env, "privacy")
     await _file_matter_under(comp_env, privacy_id)
-    await _add_deployment_toggle(comp_env, "tool", "ropa", enabled=False)
+    await _del_library_entry(comp_env, "tool", "ropa")
     try:
         run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
         model = ScriptedToolCallingModel(
@@ -1994,7 +2002,7 @@ async def test_level0_disabled_group_not_granted_in_composition(
         )
         assert "list_processing_activities" not in await _audit_tools(comp_env, run_id)
     finally:
-        await _del_deployment_toggle(comp_env, "tool", "ropa")
+        await _add_library_entry(comp_env, "tool", "ropa")
 
 
 # --- SETUP-4a review F2: the tabular_enabled prompt flag at its REAL seam ----------------

@@ -19,6 +19,7 @@ admin URL by swapping the database name to `postgres`.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import secrets
 from collections.abc import AsyncIterator
@@ -114,6 +115,24 @@ async def test_engine(test_db_url: str) -> AsyncIterator[AsyncEngine]:
             os.environ["DATABASE_URL"] = saved
 
     engine = create_async_engine(test_db_url, future=True)
+
+    # STORE-1 (ADR-F065): the test DB migrates with ZERO users, so migration 0088's
+    # users-empty gate SKIPS the Library seed and leaves org_library_entries EMPTY. That is
+    # the fresh-org path (pinned independently in tests/test_migrations.py). The MAJORITY of
+    # the suite is default-on behaviour, which now resolves through the adopt-in Library —
+    # so here we emulate an EXISTING deployment post-upgrade by running 0088's pure _seed
+    # once (adopts everything bound-anywhere: the seeded skills + the 4 tool-group keys, 0
+    # playbooks). _seed is idempotent and resilient to the (already-dropped) toggle table.
+    versions = API_DIR / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0088_seed", versions / "0088_org_library_entries.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    async with engine.begin() as conn:
+        await conn.run_sync(module._seed)
+
     try:
         yield engine
     finally:

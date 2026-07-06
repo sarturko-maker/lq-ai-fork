@@ -39,8 +39,9 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from sqlalchemy import ColumnElement, Select, Text, and_, func, select, update
+from sqlalchemy import ColumnElement, Select, Text, and_, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.capabilities import (
@@ -59,7 +60,7 @@ from app.models.audit import AuditLog
 from app.models.document import Document as DocumentORM
 from app.models.file import File as FileORM
 from app.models.playbook import Playbook as PlaybookORM
-from app.models.practice_area import DeploymentCapabilityToggle
+from app.models.practice_area import OrgLibraryEntry
 from app.models.user import User as UserORM, UserSession as UserSessionORM
 from app.models.user_auth_token import UserAuthToken
 from app.skills.registry import MutableSkillRegistry, SkillRegistry
@@ -1398,29 +1399,40 @@ async def get_ingest_health(
 
 
 # ---------------------------------------------------------------------------
-# SETUP-4a (ADR-F062) — deployment-wide (Level 0) capability toggles.
+# STORE-1 (ADR-F065) — the Org Library: adopt-in capability availability.
 #
-# The org-admin's surface: the whole-deployment inventory of every code-registry tool
-# group + registry skill + live playbook, each with its effective Level-0 state, plus a
-# sparse toggle write. Level 0 only NARROWS — an enabled=false row removes a capability
-# from EVERY area's AVAILABLE set (panel, composition, skills, playbook tier) through the
-# one build_area_inventory chokepoint. AdminUser (F061 fence: org-admin config, not the
-# operator's key/egress surface). Audited with kinds/keys/enabled only.
+# Replaces the Level-0 disable-only deployment toggles (ADR-F062, superseded). A capability
+# (registry tool group / registry skill / live playbook) is AVAILABLE to any area's runs ONLY
+# if the org ADOPTED it into ``org_library_entries`` — absence is the single off-state, and
+# the one ``build_area_inventory`` chokepoint intersects an area's bindings with Library
+# membership. Two surfaces here:
+#   * NEW POST/DELETE /admin/library — adopt / remove a single capability (STORE-2 UX target).
+#   * GET/PATCH /admin/capabilities — the OLD Capabilities page kept working as a compatibility
+#     shim over the Library: GET grows ``in_library`` (``enabled`` is now a deprecated alias
+#     for it — single off-state); PATCH maps enabled=true⇒adopt, enabled=false⇒remove.
+# AdminUser (F061 fence: org-admin/platform config, not the operator's key/egress surface;
+# F064 D2 keeps content-config operator-accessible — the operator PASSES AdminUser). Audited
+# with kinds/keys/counts only.
 # ---------------------------------------------------------------------------
 
 
 class DeploymentCapabilityRead(BaseModel):
-    """One deployment capability + its effective Level-0 enabled state."""
+    """One catalog capability + whether the org adopted it into its Library.
+
+    ``in_library`` is the STORE-1 truth (adopt-in). ``enabled`` is a DEPRECATED alias kept for
+    the old Capabilities page during the STORE-2 transition — it always equals ``in_library``
+    (single off-state: *not in your Library*)."""
 
     capability_kind: str
     capability_key: str
     label: str
     description: str | None
+    in_library: bool
     enabled: bool
 
 
 class DeploymentCapabilitySection(BaseModel):
-    """A kind-grouped section (Tools / Skills / Playbooks) of the deployment inventory."""
+    """A kind-grouped section (Tools / Skills / Playbooks) of the catalog inventory."""
 
     kind: str
     label: str
@@ -1428,13 +1440,14 @@ class DeploymentCapabilitySection(BaseModel):
 
 
 class DeploymentCapabilitiesResponse(BaseModel):
-    """The deployment-wide capability inventory (GET response / PATCH echo)."""
+    """The catalog inventory + per-capability Library membership (GET response / PATCH echo)."""
 
     sections: list[DeploymentCapabilitySection]
 
 
 class DeploymentToggleInput(BaseModel):
-    """One Level-0 on/off the org-admin sets. ``extra='forbid'`` rejects stray fields."""
+    """One capability the org-admin adopts (enabled=true) or removes (enabled=false) via the
+    old Capabilities page. ``extra='forbid'`` rejects stray fields."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1444,12 +1457,21 @@ class DeploymentToggleInput(BaseModel):
 
 
 class DeploymentCapabilitiesUpdate(BaseModel):
-    """The PATCH body — a bounded sparse set of Level-0 toggles. Validated at the boundary;
+    """The PATCH body — a bounded set of adopt/remove intents. Validated at the boundary;
     the handler additionally rejects any (kind, key) absent from the registry/DB (422)."""
 
     model_config = ConfigDict(extra="forbid")
 
     toggles: list[DeploymentToggleInput] = Field(default_factory=list, max_length=500)
+
+
+class LibraryEntryInput(BaseModel):
+    """POST /admin/library body — adopt one catalog capability. ``extra='forbid'``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["skill", "tool", "playbook"]
+    key: str = Field(min_length=1, max_length=200)
 
 
 def _admin_registry_or_none(request: Request) -> SkillRegistry | None:
@@ -1462,10 +1484,10 @@ def _admin_registry_or_none(request: Request) -> SkillRegistry | None:
     return holder.current() if holder is not None else None
 
 
-async def _deployment_disabled(db: AsyncSession) -> set[tuple[str, str]]:
-    """The (kind, key) set the deployment has DISABLED — only disabled rows narrow."""
-    rows = (await db.execute(select(DeploymentCapabilityToggle))).scalars().all()
-    return {(r.capability_kind, r.capability_key) for r in rows if not r.enabled}
+async def _library_keys(db: AsyncSession) -> set[tuple[str, str]]:
+    """The (kind, key) set the org has ADOPTED into its Library (ADR-F065)."""
+    rows = (await db.execute(select(OrgLibraryEntry))).scalars().all()
+    return {(r.capability_kind, r.capability_key) for r in rows}
 
 
 async def _live_playbooks(db: AsyncSession) -> list[PlaybookORM]:
@@ -1482,20 +1504,51 @@ async def _live_playbooks(db: AsyncSession) -> list[PlaybookORM]:
     )
 
 
+async def _validate_catalog_key(db: AsyncSession, request: Request, kind: str, key: str) -> None:
+    """Reject a (kind, key) absent from its catalog (422 — reject, don't sanitize).
+
+    Shared by the adopt endpoint and the PATCH shim so the validation cannot drift: a tool
+    group in the code registry, a skill in the skill registry (registry missing ⇒ 422 for
+    skill adopts), a non-deleted playbook id. A literal HTTPException(422) (NOT a domain
+    ValidationError, which maps to 400) — no dead row lands.
+    """
+    if kind == KIND_TOOL:
+        if key not in TOOL_GROUP_REGISTRY:
+            raise HTTPException(
+                status_code=422, detail=f"Tool group {key!r} is not in the registry."
+            )
+    elif kind == KIND_SKILL:
+        registry = _admin_registry_or_none(request)
+        if registry is None or registry.get(key) is None:
+            raise HTTPException(status_code=422, detail=f"Skill {key!r} is not in the registry.")
+    else:  # KIND_PLAYBOOK
+        live_ids = {str(pb.id) for pb in await _live_playbooks(db)}
+        if key not in live_ids:
+            raise HTTPException(
+                status_code=422, detail=f"Playbook {key!r} is not an available playbook."
+            )
+
+
 async def _deployment_inventory(
     db: AsyncSession, request: Request
 ) -> DeploymentCapabilitiesResponse:
-    disabled = await _deployment_disabled(db)
+    in_library = await _library_keys(db)
     registry = _admin_registry_or_none(request)
 
-    tool_entries = [
-        DeploymentCapabilityRead(
-            capability_kind=KIND_TOOL,
-            capability_key=group_key,
-            label=tdef.spec.label,
-            description=tdef.spec.description,
-            enabled=(KIND_TOOL, group_key) not in disabled,
+    def _read(kind: str, key: str, label: str, description: str | None) -> DeploymentCapabilityRead:
+        adopted = (kind, key) in in_library
+        # enabled is the deprecated alias for in_library (single off-state, STORE-1).
+        return DeploymentCapabilityRead(
+            capability_kind=kind,
+            capability_key=key,
+            label=label,
+            description=description,
+            in_library=adopted,
+            enabled=adopted,
         )
+
+    tool_entries = [
+        _read(KIND_TOOL, group_key, tdef.spec.label, tdef.spec.description)
         for group_key, tdef in TOOL_GROUP_REGISTRY.items()
     ]
 
@@ -1507,22 +1560,15 @@ async def _deployment_inventory(
                 continue
             summary = record.summary()
             skill_entries.append(
-                DeploymentCapabilityRead(
-                    capability_kind=KIND_SKILL,
-                    capability_key=name,
-                    label=summary.title or name,
-                    description=summary.description,
-                    enabled=(KIND_SKILL, name) not in disabled,
-                )
+                _read(KIND_SKILL, name, summary.title or name, summary.description)
             )
 
     playbook_entries = [
-        DeploymentCapabilityRead(
-            capability_kind=KIND_PLAYBOOK,
-            capability_key=str(pb.id),
-            label=f"{pb.name} ({pb.contract_type})" if pb.contract_type else pb.name,
-            description=(pb.description or None),
-            enabled=(KIND_PLAYBOOK, str(pb.id)) not in disabled,
+        _read(
+            KIND_PLAYBOOK,
+            str(pb.id),
+            f"{pb.name} ({pb.contract_type})" if pb.contract_type else pb.name,
+            pb.description or None,
         )
         for pb in await _live_playbooks(db)
     ]
@@ -1538,10 +1584,96 @@ async def _deployment_inventory(
     )
 
 
+@router.post(
+    "/library",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    summary="Adopt a capability into the Org Library (admin).",
+)
+async def adopt_library_entry(
+    payload: LibraryEntryInput,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> Response:
+    """POST /api/v1/admin/library — adopt one catalog capability into the Library (ADR-F065).
+
+    ``kind`` is bounded by the schema (skill|tool|playbook); ``key`` is validated against the
+    matching catalog (tool group in the code registry, skill in the skill registry, non-deleted
+    playbook id) — unknown ⇒ 422. Re-adopting an already-adopted capability ⇒ 409 (the house
+    attach pattern). Records ``adopted_by``. Audited with kind/key only.
+    """
+    await _validate_catalog_key(db, request, payload.kind, payload.key)
+    db.add(
+        OrgLibraryEntry(
+            capability_kind=payload.kind, capability_key=payload.key, adopted_by=admin.id
+        )
+    )
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise Conflict(
+            "Capability is already in the library.",
+            details={"kind": payload.kind, "key": payload.key},
+        ) from exc
+    # kind/key only — identifiers, never content.
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="library.adopt",
+        resource_type="org_library",
+        resource_id=payload.key,
+        request=request,
+        details={"kind": payload.kind, "key": payload.key},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/library/{kind}/{key}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    summary="Remove a capability from the Org Library (admin).",
+)
+async def remove_library_entry(
+    kind: Literal["skill", "tool", "playbook"],
+    key: str,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> Response:
+    """DELETE /api/v1/admin/library/{kind}/{key} — remove a capability (ADR-F065).
+
+    Idempotent: removing a not-adopted capability is a no-op 204 (the desired end state
+    holds — the house detach pattern). No where-used guard here — the D6 confirm is STORE-2
+    UX, and an area binding that loses Library membership degrades gracefully (resolve-time
+    narrowing). ``kind`` is bounded by the path Literal. Audited with kind/key only.
+    """
+    await db.execute(
+        delete(OrgLibraryEntry).where(
+            OrgLibraryEntry.capability_kind == kind,
+            OrgLibraryEntry.capability_key == key,
+        )
+    )
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="library.remove",
+        resource_type="org_library",
+        resource_id=key,
+        request=request,
+        details={"kind": kind, "key": key},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/capabilities",
     response_model=DeploymentCapabilitiesResponse,
-    summary="Deployment-wide capability inventory + Level-0 state (admin).",
+    summary="Catalog inventory + Org Library membership (admin).",
 )
 async def get_deployment_capabilities(
     _admin: AdminUser,
@@ -1549,14 +1681,15 @@ async def get_deployment_capabilities(
     request: Request,
 ) -> DeploymentCapabilitiesResponse:
     """GET /api/v1/admin/capabilities — every registry tool group + registry skill + live
-    playbook, each with its effective deployment (Level-0) enabled state (ADR-F062)."""
+    playbook, each with whether the org adopted it into its Library (ADR-F065). Compatibility
+    shim for the old Capabilities page: ``enabled`` is a deprecated alias for ``in_library``."""
     return await _deployment_inventory(db, request)
 
 
 @router.patch(
     "/capabilities",
     response_model=DeploymentCapabilitiesResponse,
-    summary="Set deployment-wide (Level 0) capability toggles (admin).",
+    summary="Adopt/remove capabilities via the old Capabilities page (admin).",
 )
 async def update_deployment_capabilities(
     payload: DeploymentCapabilitiesUpdate,
@@ -1564,70 +1697,59 @@ async def update_deployment_capabilities(
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
 ) -> DeploymentCapabilitiesResponse:
-    """PATCH /api/v1/admin/capabilities — sparse Level-0 toggle writes (ADR-F062).
+    """PATCH /api/v1/admin/capabilities — a compatibility SHIM over the Org Library (ADR-F065).
 
-    Each toggle's ``kind`` is bounded by the schema (skill|tool|playbook — the DB CHECK
-    set) and its ``key`` is validated against the matching registry/DB (a tool group in the
-    code registry, a skill in the skill registry, a non-deleted playbook id). An unknown key
-    is rejected (422 — reject, don't sanitize) so no dead row lands. Validate ALL before
-    writing any. Audited with kinds/keys/enabled only.
+    The old disable-only page now drives the Library: each item's ``key`` is validated against
+    the matching catalog (unknown ⇒ 422; validate ALL before writing any), then
+    ``enabled=true`` ADOPTS (upsert ``org_library_entries``, on-conflict refreshing
+    adopted_by/adopted_at) and ``enabled=false`` REMOVES the entry. Audited honestly as a
+    ``library.update`` (adopted/removed kinds+keys + counts only). Echoes the fresh inventory.
     """
-    registry = _admin_registry_or_none(request)
-    live_playbook_ids: set[str] | None = None  # lazily loaded only if a playbook toggle appears
-
     for toggle in payload.toggles:
-        if toggle.kind == KIND_TOOL:
-            if toggle.key not in TOOL_GROUP_REGISTRY:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Tool group {toggle.key!r} is not in the registry.",
-                )
-        elif toggle.kind == KIND_SKILL:
-            if registry is None or registry.get(toggle.key) is None:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Skill {toggle.key!r} is not in the registry.",
-                )
-        else:  # KIND_PLAYBOOK
-            if live_playbook_ids is None:
-                live_playbook_ids = {str(pb.id) for pb in await _live_playbooks(db)}
-            if toggle.key not in live_playbook_ids:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Playbook {toggle.key!r} is not an available playbook.",
-                )
+        await _validate_catalog_key(db, request, toggle.kind, toggle.key)
 
     now = datetime.now(UTC)
+    adopted: list[dict[str, str]] = []
+    removed: list[dict[str, str]] = []
     for toggle in payload.toggles:
-        stmt = (
-            pg_insert(DeploymentCapabilityToggle)
-            .values(
-                capability_kind=toggle.kind,
-                capability_key=toggle.key,
-                enabled=toggle.enabled,
-                set_by=admin.id,
-                updated_at=now,
+        if toggle.enabled:
+            stmt = (
+                pg_insert(OrgLibraryEntry)
+                .values(
+                    capability_kind=toggle.kind,
+                    capability_key=toggle.key,
+                    adopted_by=admin.id,
+                    adopted_at=now,
+                )
+                .on_conflict_do_update(
+                    constraint="pk_org_library_entries",
+                    set_={"adopted_by": admin.id, "adopted_at": now},
+                )
             )
-            .on_conflict_do_update(
-                constraint="pk_deployment_capability_toggles",
-                set_={"enabled": toggle.enabled, "set_by": admin.id, "updated_at": now},
+            await db.execute(stmt)
+            adopted.append({"kind": toggle.kind, "key": toggle.key})
+        else:
+            await db.execute(
+                delete(OrgLibraryEntry).where(
+                    OrgLibraryEntry.capability_kind == toggle.kind,
+                    OrgLibraryEntry.capability_key == toggle.key,
+                )
             )
-        )
-        await db.execute(stmt)
+            removed.append({"kind": toggle.kind, "key": toggle.key})
 
-    # Kinds/keys/enabled only — keys are identifiers (group keys, skill names, playbook ids).
+    # kinds/keys/counts only — keys are identifiers (group keys, skill names, playbook ids).
     await audit_action(
         db,
         user_id=admin.id,
-        action="deployment.capability_toggle",
-        resource_type="deployment",
+        action="library.update",
+        resource_type="org_library",
         resource_id="capabilities",
         request=request,
         details={
-            "toggle_count": len(payload.toggles),
-            "toggles": [
-                {"kind": t.kind, "key": t.key, "enabled": t.enabled} for t in payload.toggles
-            ],
+            "adopted": adopted,
+            "removed": removed,
+            "adopted_count": len(adopted),
+            "removed_count": len(removed),
         },
     )
     await db.commit()

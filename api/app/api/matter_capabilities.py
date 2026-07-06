@@ -37,7 +37,7 @@ from app.audit import audit_action
 from app.db.session import get_db
 from app.models.playbook import Playbook
 from app.models.practice_area import (
-    DeploymentCapabilityToggle,
+    OrgLibraryEntry,
     PracticeArea,
     PracticeAreaPlaybook,
     PracticeAreaSkill,
@@ -108,9 +108,9 @@ async def _resolve_inventory(
         .scalars()
         .all()
     )
-    # SETUP-4a (ADR-F062): tool availability is DATA (practice_area_tool_groups rows) and
-    # the deployment-wide (Level 0) toggles narrow the whole panel — feed both to the one
-    # inventory chokepoint so the panel shows exactly what the agent gets.
+    # SETUP-4a (ADR-F062): tool availability is DATA (practice_area_tool_groups rows); the
+    # Org Library (ADR-F065) narrows the whole panel to what the org adopted — feed both to
+    # the one inventory chokepoint so the panel shows exactly what the agent gets.
     tool_group_keys = (
         (
             await db.execute(
@@ -122,13 +122,13 @@ async def _resolve_inventory(
         .scalars()
         .all()
     )
-    deployment_toggles = (await db.execute(select(DeploymentCapabilityToggle))).scalars().all()
+    library_entries = (await db.execute(select(OrgLibraryEntry))).scalars().all()
     inventory = build_area_inventory(
         bound_skill_names=bound_skill_names,
         registry=_registry_or_none(request),
         area_playbooks=area_playbooks,
         tool_group_keys=tool_group_keys,
-        deployment_toggles=deployment_toggles,
+        library_entries=library_entries,
     )
     return inventory, area.key, area.unit_label
 

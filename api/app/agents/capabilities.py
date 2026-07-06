@@ -291,6 +291,16 @@ class _CapabilityToggle(Protocol):
     enabled: bool
 
 
+class _LibraryEntry(Protocol):
+    """Structural type for an ``org_library_entries`` row (ADR-F065).
+
+    A capability the org adopted. Deliberately has no ``enabled`` field — membership IS
+    the state (adopt-in), unlike the disable-only toggle it replaced."""
+
+    capability_kind: str
+    capability_key: str
+
+
 @dataclass(frozen=True)
 class CapabilityEntry:
     """One capability the panel can show — available/default/toggleable flags."""
@@ -405,39 +415,40 @@ def build_area_inventory(
     registry: SkillRegistry | None,
     area_playbooks: Sequence[Playbook],
     tool_group_keys: Sequence[str],
-    deployment_toggles: Iterable[_CapabilityToggle],
+    library_entries: Iterable[_LibraryEntry],
 ) -> CapabilityInventory:
-    """Compute the area's available capabilities (pure — no I/O). ADR-F054 + ADR-F062.
+    """Compute the area's available capabilities (pure — no I/O). ADR-F054 + ADR-F065.
 
     ``bound_skill_names`` are the area's ``practice_area_skills`` rows; a name the
     registry no longer knows is dropped (registry is source of truth — the same drift
     posture as ``render_area_agent``). ``area_playbooks`` are the playbooks bound via
     ``practice_area_playbooks`` (non-deleted). ``tool_group_keys`` are the area's
-    ``practice_area_tool_groups`` rows (SETUP-4a): tool availability is now DATA, resolved
+    ``practice_area_tool_groups`` rows (SETUP-4a): tool availability is DATA, resolved
     against :data:`TOOL_GROUP_REGISTRY` in canonical registry order. A row naming a group
     absent from the registry is dropped HERE, at the availability chokepoint, with a
     structured warning (counts/keys only) — fail-closed to absence, so no dead row mints a
-    grant (D3(c); the grant-seam loop keeps a defense-in-depth check of its own).
+    grant (D3(c); the grant-seam loop keeps a defense-in-depth check of its own). This
+    registry-drift drop is independent of adoption and fires regardless.
 
-    ``deployment_toggles`` are the deployment-wide (Level 0) capability rows (ADR-F062) —
-    REQUIRED, no default: a call site that forgot the kwarg would silently fail OPEN
-    (Level-0 disables ignored), so the seam refuses to compile instead. Pass ``()`` only
-    where Level 0 genuinely doesn't exist (there is no such production site). Level 0 only
-    NARROWS: an ``enabled=false`` row REMOVES that capability (skill/tool-group/playbook)
-    from the AVAILABLE set entirely — it never becomes an entry, so the panel never shows
-    it, composition never builds it, skills never wire, and the playbook tier never renders
-    (one chokepoint for all four). ``enabled=true`` rows are inert (absence already means
-    available).
+    ``library_entries`` are the org's ``org_library_entries`` rows — the adopt-in Org
+    Library (ADR-F065 D3), REQUIRED, no default. A binding (skill / tool group / playbook)
+    becomes AVAILABLE only if its ``(kind, key)`` is ADOPTED into the Library — absence is
+    the single off-state ("not in your Library"): the capability never becomes an entry, so
+    the panel never shows it, composition never builds it, skills never wire, and the
+    playbook tier never renders (one chokepoint for all four). Under this adopt-in polarity
+    a call site that forgot the kwarg would fail CLOSED (nothing adopted ⇒ nothing
+    available), but the kwarg is kept REQUIRED anyway so every call site is explicit —
+    there is no production site that legitimately passes ``()``.
     """
-    # Level 0: the set of (kind, key) the deployment has disabled — only the disabled rows
-    # matter (an enabled row is a no-op against the default-available posture).
-    disabled = {(t.capability_kind, t.capability_key) for t in deployment_toggles if not t.enabled}
+    # ADR-F065: the set of (kind, key) the org ADOPTED into its Library. A binding resolves
+    # only if it is a member — adopt-in, the inverse of the old disable-out toggle.
+    adopted = {(e.capability_kind, e.capability_key) for e in library_entries}
 
     entries: list[CapabilityEntry] = []
 
-    # Playbooks — the firm's preferred positions bound to this area.
+    # Playbooks — the firm's preferred positions bound to this area (adopted ones only).
     for pb in area_playbooks:
-        if (KIND_PLAYBOOK, str(pb.id)) in disabled:
+        if (KIND_PLAYBOOK, str(pb.id)) not in adopted:
             continue
         label = f"{pb.name} ({pb.contract_type})" if pb.contract_type else pb.name
         entries.append(
@@ -452,9 +463,10 @@ def build_area_inventory(
             )
         )
 
-    # Skills — area-bound, filtered to the registry's current set (drift drop).
+    # Skills — area-bound, adopted-into-Library, filtered to the registry's current set
+    # (adoption narrows first; registry drift still drops an adopted-but-gone name).
     for name in bound_skill_names:
-        if (KIND_SKILL, name) in disabled:
+        if (KIND_SKILL, name) not in adopted:
             continue
         record = registry.get(name) if registry is not None else None
         if record is None:
@@ -491,7 +503,7 @@ def build_area_inventory(
     for group_key, tdef in TOOL_GROUP_REGISTRY.items():
         if group_key not in group_key_set:
             continue
-        if (KIND_TOOL, group_key) in disabled:
+        if (KIND_TOOL, group_key) not in adopted:
             continue
         entries.append(
             CapabilityEntry(

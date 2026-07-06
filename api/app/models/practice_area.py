@@ -224,54 +224,48 @@ class PracticeAreaToolGroup(Base):
         )
 
 
-class DeploymentCapabilityToggle(Base):
-    """Deployment-wide (Level 0) capability on/off — org-admin owned (ADR-F062, SETUP-4a).
+class OrgLibraryEntry(Base):
+    """One capability the organisation has ADOPTED — the Org Library (ADR-F065, STORE-1).
 
-    The top of the config hierarchy: the org-admin narrows what the whole deployment
-    offers. Mirrors :class:`~app.models.project.MatterCapabilityToggle` MINUS
-    ``project_id`` (this is not per-matter). SPARSE — a row exists ONLY where the admin
-    disabled a capability; ``enabled=true`` rows are inert (absence already means
-    available), so there is NO seed.
+    Replaces the Level-0 disable-only ``DeploymentCapabilityToggle`` (ADR-F062, superseded).
+    Adopt-in polarity: a capability (``skill`` name / ``tool`` group key /
+    ``playbook_id::text``) is AVAILABLE to any area's runs ONLY if a row here adopts it —
+    absence is the single off-state ("not in your Library"). ``build_area_inventory``
+    intersects an area's bindings with Library membership at the one fail-closed chokepoint
+    (D3); bind-time validation rejects binding a non-adopted capability (D4). Grants stay
+    CODE — the ADR-F062 invariant is untouched; the Library only NARROWS availability,
+    adopt-in instead of disable-out (D1).
 
-    Level 0 only ever **narrows**: an ``enabled=false`` row removes that capability
-    (``skill`` / ``tool`` group / ``playbook``) from EVERY area's AVAILABLE set at the one
-    ``build_area_inventory`` chokepoint — the panel never shows it, composition never
-    builds it, skills never wire, the playbook tier never renders. ``capability_key`` is
-    TEXT (skill name / tool-group key / ``playbook_id::text``), validated against the
-    registry/DB at the PATCH boundary so no dead row lands. ``set_by`` records the human
-    who last set it (SET NULL on user delete — it is the deployment's state, not the
-    individual's).
+    ``enabled`` is intentionally ABSENT (unlike the toggle it replaces): membership IS the
+    state, so ``GET /admin/capabilities`` reports ``enabled`` as a deprecated alias for
+    ``in_library`` during the transition. ``adopted_by`` records the admin who adopted it
+    (SET NULL on user delete — it is the org's state, not the individual's). ``capability_key``
+    is TEXT, validated against the registry/DB at the adopt boundary so no dead row lands.
     """
 
-    __tablename__ = "deployment_capability_toggles"
+    __tablename__ = "org_library_entries"
     __table_args__ = (
-        PrimaryKeyConstraint(
-            "capability_kind", "capability_key", name="pk_deployment_capability_toggles"
-        ),
+        PrimaryKeyConstraint("capability_kind", "capability_key", name="pk_org_library_entries"),
         CheckConstraint(
             "capability_kind IN ('skill', 'tool', 'playbook')",
-            name="chk_deployment_capability_toggles_kind",
+            name="chk_org_library_entries_kind",
         ),
         CheckConstraint(
             "char_length(capability_key) BETWEEN 1 AND 200",
-            name="chk_deployment_capability_toggles_key_len",
+            name="chk_org_library_entries_key_len",
         ),
     )
 
     capability_kind: Mapped[str] = mapped_column(Text, nullable=False)
     capability_key: Mapped[str] = mapped_column(Text, nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    set_by: Mapped[uuid.UUID | None] = mapped_column(
+    adopted_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL", name="fk_deployment_capability_toggles_set_by"),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_org_library_entries_adopted_by"),
         nullable=True,
     )
-    updated_at: Mapped[datetime] = mapped_column(
+    adopted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<DeploymentCapabilityToggle kind={self.capability_kind!r} "
-            f"key={self.capability_key!r} enabled={self.enabled}>"
-        )
+        return f"<OrgLibraryEntry kind={self.capability_kind!r} key={self.capability_key!r}>"

@@ -171,6 +171,9 @@ the Matter File onto the Store — that is its own future ADR'd slice).
   PyMuPDF AGPL server-side-only boundary is an obligation, not a suggestion. The OpenWebUI §4
   branding obligation ended in F0-S6 (husk removed, ADR-F006); builds from pre-S6 commits remain
   bound — see NOTICES.md § Web client provenance.
+- The checkout carries an `upstream` remote, so a bare `gh pr create` can target the FROZEN
+  upstream (nearly happened once). `gh repo set-default sarturko-maker/lq-ai-fork` is set; still
+  pass `--repo sarturko-maker/lq-ai-fork` explicitly on every `gh pr`/`gh issue` call.
 
 ## Commands
 - Stack: `docker compose up -d` (8 services; api auto-migrates on boot)

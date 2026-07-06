@@ -133,19 +133,21 @@ def test_every_mutating_route_is_role_gated_or_allowlisted() -> None:
 @pytest.mark.unit
 def test_mutating_route_entry_count_pinned() -> None:
     """Pins the mutating-route surface so an added mutating route trips the
-    guard review (companion to the 171-path pin below)."""
-    assert len(_mutating_routes()) == 124
+    guard review (companion to the 173-path pin below). STORE-1 (ADR-F065) adds
+    2 mutating admin routes (POST /admin/library + DELETE /admin/library/{kind}/{key}),
+    both AdminUser-gated — they pass the drift guard automatically (no allowlist entry)."""
+    assert len(_mutating_routes()) == 126
 
 
 @pytest.mark.unit
 def test_api_v1_path_count_pinned() -> None:
-    """SETUP-5b adds NO routes: the /api/v1 path surface stays 171."""
+    """STORE-1 (ADR-F065) adds 2 routes (the Org Library adopt/remove pair): 171 → 173."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 171
+    assert len(paths) == 173
 
 
 @pytest.mark.unit
