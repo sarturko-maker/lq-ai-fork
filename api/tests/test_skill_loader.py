@@ -203,6 +203,68 @@ def test_derive_summary_author_none_when_absent() -> None:
 
 
 @pytest.mark.unit
+def test_derive_summary_falls_back_to_top_level_author_version() -> None:
+    """STORE-2 D5: top-level `author:`/`version:` promote when `lq_ai:` lacks them.
+
+    The community skill corpus declares these at the top level of the
+    frontmatter rather than nested under `lq_ai:` (35+/37+ community
+    skills respectively). `SkillFrontmatter`'s `extra="allow"` keeps them
+    on `model_extra`; `derive_summary` must promote them the same way it
+    already promotes `lq_ai.author`.
+    """
+
+    fm = SkillFrontmatter.model_validate(
+        {
+            "name": "community-skill",
+            "description": "X.",
+            "author": "Community Author",
+            "version": "9.9.9",
+        }
+    )
+    summary = derive_summary("community-skill", fm)
+    assert summary.author == "Community Author"
+    assert summary.version == "9.9.9"
+
+
+@pytest.mark.unit
+def test_derive_summary_lq_ai_author_version_win_on_conflict() -> None:
+    """`lq_ai:`-block author/version take precedence over top-level keys."""
+
+    fm = SkillFrontmatter.model_validate(
+        {
+            "name": "community-skill",
+            "description": "X.",
+            "author": "Top Level Author",
+            "version": "1.0.0",
+            "lq_ai": {"author": "LQ AI Author", "version": "2.0.0"},
+        }
+    )
+    summary = derive_summary("community-skill", fm)
+    assert summary.author == "LQ AI Author"
+    assert summary.version == "2.0.0"
+
+
+@pytest.mark.unit
+def test_derive_summary_non_str_top_level_version_ignored() -> None:
+    """A non-string top-level `version:` (e.g. a YAML float) is not coerced.
+
+    `version: 1.0` parses as a Python float via YAML; the fallback only
+    accepts `str` values, so a non-str value falls through to
+    `"unversioned"` — honest, not silently coerced.
+    """
+
+    fm = SkillFrontmatter.model_validate(
+        {
+            "name": "community-skill",
+            "description": "X.",
+            "version": 1.0,
+        }
+    )
+    summary = derive_summary("community-skill", fm)
+    assert summary.version == "unversioned"
+
+
+@pytest.mark.unit
 def test_filter_summary_drops_none_and_empty() -> None:
     """`None` values and empty tag lists are dropped from the wire shape."""
 

@@ -392,7 +392,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   a binding non-technical-admin UX constraint (Recommended-for-{area} rail + one-click add-all);
 >   existing deployments upgrade via seed-from-effective-state). **ADR-F065 proposed.**
 >   STORE-1 spec executed — see the next bullet. Memory: [[onboard-milestone-plan]].
-> - **STORE-1 ✓ (branch `fork/store-1-org-library`, PR #225) — ▶▶ PICK UP EXACTLY HERE = STORE-2.**
+> - **STORE-1 ✓ (branch `fork/store-1-org-library`, PR #225).**
 >   The Library substrate is LIVE. Opus implemented in a worktree (working model); lead verified,
 >   ran the 4-lens adversarial review (security deep pass on the new admin mutation endpoints:
 >   ZERO findings; 1 nit fixed — the composition.py grant-seam comment) + live-verified. Landed:
@@ -426,22 +426,48 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   (parents[2] repo-root resolution). (3) run the full suite ALONE on this box (CPU-contention
 >   flakes ~10 timing-sensitive agents tests; identical tests pass solo). (4) container alembic
 >   runs need `/skills` mounted (mig 0032 seeds built-in playbooks from it).
->   **STORE-2 spec (web slice — Sonnet-line implementer, lead verifies):** the two admin pages from
->   `plans/STORE-org-library.md` §UX — **Store** (`/lq-ai/admin/store`: browse the shipped catalog
->   grouped by kind, provenance badges, click-through to the skill source viewer = G5, ONE verb per
->   card: Add to Library / In Library ✓) + **Library** (`/lq-ai/admin/library`: the adopted set,
->   where-used "bound in: Commercial, …", Remove with the D6 confirm listing affected areas) + the
->   old Capabilities page → route redirect; area-detail pickers become Library-scoped with a Store
->   empty-state link; skill names link to the source viewer everywhere; read-only Library view for
->   non-admin users (transparency rule). The **non-technical-admin UX constraint is BINDING**:
->   plain language, a "Recommended for {area}" rail with one-click add-all (source = the shipped
->   default binding map), teaching empty states. STORE-2 also carries the **D5 provenance-parser
->   fallback** (derive_summary reads only the `lq_ai:` block — fall back to top-level
->   `author:`/`version:` in `SkillFrontmatter.model_extra`; template = extract_inputs' dual-location
->   pattern, api/app/skills/schema.py:324-341; 10+ community skills carry top-level keys). Backend
->   enablers allowed but THIN: a where-used read model + the recommended-set source. THEN STORE-3
->   (maintainer live re-rehearsal on a FRESH org = the milestone's acceptance test). Memory:
->   [[onboard-milestone-plan]].
+>   STORE-2 spec executed — see the next bullet.
+> - **STORE-2 ✓ (branch `fork/store-2-store-library-pages`, PR #226) — ▶▶ PICK UP EXACTLY HERE =
+>   STORE-3 (maintainer live re-rehearsal on a FRESH org = the milestone's acceptance test).**
+>   The Store/Library UX is LIVE. Sonnet implemented in a worktree (working model); lead ran the
+>   full gate + applied the 4 review fixes. Plan `docs/fork/plans/STORE-2-store-library-pages.md`
+>   (decisions D-A…D-G); ADR-F065 STORE-2 addendum; NO migration. Landed: **Store**
+>   (`/lq-ai/admin/store`) — "Recommended for {area}" rails w/ one-click Add-all (source = NEW
+>   drift-guarded `RECOMMENDED_LIBRARY_SETS` in `app/agents/capabilities.py`, transcribed from the
+>   six seed migrations; guard test pins every key against the real registries), kind sections w/
+>   provenance badges + search + MCP placeholder, ONE verb per card; **Library**
+>   (`/lq-ai/admin/library`) — where-used ("Attached to: …" computed client-side from
+>   GET /practice-areas), D6 always-confirm remove modal listing area names, teaching empty state;
+>   **member read-only `/lq-ai/library`** on the NEW `GET /api/v1/library` (ActiveUser — the
+>   tier-config dual-exposure transparency precedent; `adopted_by` deliberately NOT on the wire;
+>   dangling entries honest via label=None); old Capabilities page → onMount-goto redirect stub
+>   (dead helpers deleted; MCP placeholder moved to the Store; the read-only Models section
+>   DROPPED on record — it re-projected member-visible GET /models); area-detail pickers
+>   Library-scoped w/ honest empty states (library-empty vs all-attached) + G5 skill links
+>   (Store/Library cards, area bind rows, matter CapabilitiesPanel — link-only there); **D5
+>   provenance fallback** in `derive_summary` (top-level `author:`/`version:` via model_extra,
+>   str-only, `lq_ai:` wins — 35 community skills for author, 37 for version). Capability entries
+>   grew `source/author/version/tags/recommended_for` (additive). Pins 173→174 paths (mutating 126
+>   UNCHANGED — the only new route is a GET). Gate: CI green; pristine full suite **3369/42**
+>   (+22 = the slice's tests); web vitest 1169/106 files, svelte-check 0 errors; 4-lens review
+>   (security deep pass on the ActiveUser surface: ZERO findings) → 1 should-fix + 3 nits ALL
+>   FIXED (`610ae79d` — "vunversioned" badge sentinel, bound-row labels must use the FULL catalog
+>   while pickers stay Library-scoped, search-miss copy, dead patch client); isolated fresh-org
+>   live pass **5/5 + 7/7 curl probes** (D5 live on the real community corpus; member fence;
+>   adopted_by absent) + **Cypress 3/3** (teaching states / the committed net-zero
+>   Store→Library loop on an upgraded-org emulation = 17 adopted entries byte-matching the 0088
+>   seed / member read-only) — evidence `docs/fork/evidence/store-2/live-smoke.md` + 3 screenshots.
+>   **TRAPS:** (1) Store-page testids use `kind:key`, Library-page `kind-key` — translate when a
+>   spec crosses pages (caught live). (2) `cypress run` TRASHES screenshots/ per run — copy out
+>   immediately (re-confirmed). (3) the vite dev server's first cold hit can fail a spec in <15s
+>   pre-mutation — re-run warm. (4) a fresh-org stack has seeded BINDINGS but an empty Library —
+>   a spec assuming "first unadopted entry is unattached" needs the upgraded-org emulation first.
+>   **STORE-3 spec:** maintainer walks the admin journey on a FRESH org (Store → adopt via the
+>   rail → bind → member run); needs either a maintainer-sanctioned dev-stack reset onto main
+>   (ONBOARD-0 precedent — the current dev stack is an UPGRADED org with walkthrough data) or an
+>   isolated stack; the dev `web` container serves a prebuilt bundle — REBUILD it from main first
+>   or the new pages 404. Observed gaps append to `plans/ONBOARD-admin-experience.md`; milestone
+>   closes. Memory: [[onboard-milestone-plan]].
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 PARKED (task #456; resumes after the

@@ -17,6 +17,7 @@ export * as knowledgeBasesApi from './knowledgeBases';
 export * as projectKnowledgeBasesApi from './projectKnowledgeBases';
 export * as modelsApi from './models';
 export * as adminApi from './admin';
+export * as libraryApi from './library';
 export * as auditLogApi from './auditLog';
 export * as intakeBridgesApi from './intakeBridges';
 export * as savedPromptsApi from './savedPrompts';

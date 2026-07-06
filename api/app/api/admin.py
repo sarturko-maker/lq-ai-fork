@@ -48,6 +48,7 @@ from app.agents.capabilities import (
     KIND_PLAYBOOK,
     KIND_SKILL,
     KIND_TOOL,
+    RECOMMENDED_LIBRARY_SETS,
     TOOL_GROUP_REGISTRY,
 )
 from app.api.dependencies import AdminUser, OperatorUser
@@ -1421,7 +1422,15 @@ class DeploymentCapabilityRead(BaseModel):
 
     ``in_library`` is the STORE-1 truth (adopt-in). ``enabled`` is a DEPRECATED alias kept for
     the old Capabilities page during the STORE-2 transition — it always equals ``in_library``
-    (single off-state: *not in your Library*)."""
+    (single off-state: *not in your Library*).
+
+    STORE-2 (D-A) additive fields for the Store/Library pages' provenance badges: ``source``
+    (skills: ``"built-in"``/``"community"`` from ``SkillRecord.summary()``; tools:
+    ``"built-in"``; playbooks: ``None`` — DB rows carry no provenance today, so the web shows
+    a badge only when ``source`` is present), ``author``/``version`` (skills only — D5 makes
+    community-skill author/version real; ``None`` for tools/playbooks), ``tags`` (skills only,
+    default empty), and ``recommended_for`` (the shipped-default area keys this capability
+    belongs to per :data:`RECOMMENDED_LIBRARY_SETS`, default empty)."""
 
     capability_kind: str
     capability_key: str
@@ -1429,6 +1438,11 @@ class DeploymentCapabilityRead(BaseModel):
     description: str | None
     in_library: bool
     enabled: bool
+    source: str | None = None
+    author: str | None = None
+    version: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    recommended_for: list[str] = Field(default_factory=list)
 
 
 class DeploymentCapabilitySection(BaseModel):
@@ -1490,6 +1504,15 @@ async def _library_keys(db: AsyncSession) -> set[tuple[str, str]]:
     return {(r.capability_kind, r.capability_key) for r in rows}
 
 
+def playbook_display_label(pb: PlaybookORM) -> str:
+    """``"{name} ({contract_type})"`` when ``contract_type`` is set, else ``name``.
+
+    The playbook catalog label format shared by :func:`_deployment_inventory` and the
+    member-readable Library read (``app.api.library``, STORE-2 D-B) — factored so the
+    format cannot drift between the two surfaces."""
+    return f"{pb.name} ({pb.contract_type})" if pb.contract_type else pb.name
+
+
 async def _live_playbooks(db: AsyncSession) -> list[PlaybookORM]:
     return list(
         (
@@ -1529,13 +1552,38 @@ async def _validate_catalog_key(db: AsyncSession, request: Request, kind: str, k
             )
 
 
+def _recommended_for_map() -> dict[tuple[str, str], list[str]]:
+    """(kind, key) -> the area keys recommending it, built once from the constant.
+
+    Iterates :data:`RECOMMENDED_LIBRARY_SETS` in its canonical area order so each
+    capability's ``recommended_for`` list is itself deterministically ordered.
+    """
+    out: dict[tuple[str, str], list[str]] = {}
+    for area, kinds in RECOMMENDED_LIBRARY_SETS.items():
+        for kind, keys in kinds.items():
+            for key in keys:
+                out.setdefault((kind, key), []).append(area)
+    return out
+
+
 async def _deployment_inventory(
     db: AsyncSession, request: Request
 ) -> DeploymentCapabilitiesResponse:
     in_library = await _library_keys(db)
     registry = _admin_registry_or_none(request)
+    recommended_for = _recommended_for_map()
 
-    def _read(kind: str, key: str, label: str, description: str | None) -> DeploymentCapabilityRead:
+    def _read(
+        kind: str,
+        key: str,
+        label: str,
+        description: str | None,
+        *,
+        source: str | None = None,
+        author: str | None = None,
+        version: str | None = None,
+        tags: list[str] | None = None,
+    ) -> DeploymentCapabilityRead:
         adopted = (kind, key) in in_library
         # enabled is the deprecated alias for in_library (single off-state, STORE-1).
         return DeploymentCapabilityRead(
@@ -1545,10 +1593,21 @@ async def _deployment_inventory(
             description=description,
             in_library=adopted,
             enabled=adopted,
+            source=source,
+            author=author,
+            version=version,
+            tags=tags or [],
+            recommended_for=recommended_for.get((kind, key), []),
         )
 
     tool_entries = [
-        _read(KIND_TOOL, group_key, tdef.spec.label, tdef.spec.description)
+        _read(
+            KIND_TOOL,
+            group_key,
+            tdef.spec.label,
+            tdef.spec.description,
+            source="built-in",
+        )
         for group_key, tdef in TOOL_GROUP_REGISTRY.items()
     ]
 
@@ -1560,15 +1619,26 @@ async def _deployment_inventory(
                 continue
             summary = record.summary()
             skill_entries.append(
-                _read(KIND_SKILL, name, summary.title or name, summary.description)
+                _read(
+                    KIND_SKILL,
+                    name,
+                    summary.title or name,
+                    summary.description,
+                    source=summary.source,
+                    author=summary.author,
+                    version=summary.version,
+                    tags=summary.tags,
+                )
             )
 
     playbook_entries = [
         _read(
             KIND_PLAYBOOK,
             str(pb.id),
-            f"{pb.name} ({pb.contract_type})" if pb.contract_type else pb.name,
+            playbook_display_label(pb),
             pb.description or None,
+            # source=None: playbooks are DB rows with no provenance field today — the
+            # web shows a provenance badge only when `source` is present (D-A).
         )
         for pb in await _live_playbooks(db)
     ]

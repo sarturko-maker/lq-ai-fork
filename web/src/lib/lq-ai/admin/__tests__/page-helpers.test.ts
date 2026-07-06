@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type { DeploymentCapabilitiesResponse } from '$lib/lq-ai/api/admin';
-import { catalogEntriesForKind, describeMutationError } from '../page-helpers';
+import { catalogEntriesForKind, describeMutationError, libraryOnly } from '../page-helpers';
 
 describe('describeMutationError', () => {
 	it('surfaces an LQAIApiError message verbatim', () => {
@@ -50,6 +50,7 @@ describe('catalogEntriesForKind', () => {
 						capability_key: 'redlining',
 						label: 'Redlining',
 						description: 'd1',
+						in_library: true,
 						enabled: true
 					},
 					{
@@ -57,6 +58,7 @@ describe('catalogEntriesForKind', () => {
 						capability_key: 'tabular',
 						label: 'Grids',
 						description: null,
+						in_library: false,
 						enabled: false
 					}
 				]
@@ -70,10 +72,10 @@ describe('catalogEntriesForKind', () => {
 		expect(catalogEntriesForKind(null, 'tool')).toEqual([]);
 	});
 
-	it('projects a section to {key, label, description} regardless of enabled state', () => {
+	it('projects a section to {key, label, description, in_library} regardless of enabled state', () => {
 		expect(catalogEntriesForKind(catalog, 'tool')).toEqual([
-			{ key: 'redlining', label: 'Redlining', description: 'd1' },
-			{ key: 'tabular', label: 'Grids', description: null }
+			{ key: 'redlining', label: 'Redlining', description: 'd1', in_library: true },
+			{ key: 'tabular', label: 'Grids', description: null, in_library: false }
 		]);
 	});
 
@@ -86,5 +88,26 @@ describe('catalogEntriesForKind', () => {
 			sections: catalog.sections.filter((s) => s.kind !== 'playbook')
 		};
 		expect(catalogEntriesForKind(noPlaybooks, 'playbook')).toEqual([]);
+	});
+});
+
+describe('libraryOnly', () => {
+	const options = [
+		{ key: 'redlining', label: 'Redlining', description: 'd1', in_library: true },
+		{ key: 'tabular', label: 'Grids', description: null, in_library: false }
+	];
+
+	it('keeps only in_library entries', () => {
+		expect(libraryOnly(options)).toEqual([
+			{ key: 'redlining', label: 'Redlining', description: 'd1', in_library: true }
+		]);
+	});
+
+	it('returns [] when nothing is in the library', () => {
+		expect(libraryOnly(options.map((o) => ({ ...o, in_library: false })))).toEqual([]);
+	});
+
+	it('returns [] for an empty input', () => {
+		expect(libraryOnly([])).toEqual([]);
 	});
 });

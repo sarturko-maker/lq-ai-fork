@@ -14,6 +14,7 @@ import {
 	formatDeleteConflict,
 	hasMultipleLedgerBearingGroups,
 	parseRosterDraft,
+	pickerEmptyState,
 	unboundOptions
 } from '../page-helpers';
 
@@ -212,8 +213,8 @@ describe('parseRosterDraft (D6)', () => {
 
 describe('bindingLabel', () => {
 	const options = [
-		{ key: 'nda-review', label: 'NDA review', description: null },
-		{ key: 'contract-qa', label: 'Contract Q&A', description: null }
+		{ key: 'nda-review', label: 'NDA review', description: null, in_library: true },
+		{ key: 'contract-qa', label: 'Contract Q&A', description: null, in_library: true }
 	];
 
 	it('resolves a known key to its catalog label', () => {
@@ -227,15 +228,15 @@ describe('bindingLabel', () => {
 
 describe('unboundOptions', () => {
 	const options = [
-		{ key: 'redlining', label: 'Redlining', description: null },
-		{ key: 'tabular', label: 'Grids', description: null },
-		{ key: 'ropa', label: 'ROPA register', description: null }
+		{ key: 'redlining', label: 'Redlining', description: null, in_library: true },
+		{ key: 'tabular', label: 'Grids', description: null, in_library: true },
+		{ key: 'ropa', label: 'ROPA register', description: null, in_library: true }
 	];
 
 	it('excludes already-bound entries', () => {
 		expect(unboundOptions(options, ['redlining'])).toEqual([
-			{ key: 'tabular', label: 'Grids', description: null },
-			{ key: 'ropa', label: 'ROPA register', description: null }
+			{ key: 'tabular', label: 'Grids', description: null, in_library: true },
+			{ key: 'ropa', label: 'ROPA register', description: null, in_library: true }
 		]);
 	});
 
@@ -245,6 +246,22 @@ describe('unboundOptions', () => {
 
 	it('returns [] when everything is bound', () => {
 		expect(unboundOptions(options, ['redlining', 'tabular', 'ropa'])).toEqual([]);
+	});
+});
+
+describe('pickerEmptyState (STORE-2)', () => {
+	const nonEmptyCatalog = [{ key: 'redlining', label: 'Redlining', description: null, in_library: true }];
+
+	it('returns null when the picker has options', () => {
+		expect(pickerEmptyState(nonEmptyCatalog, nonEmptyCatalog)).toBeNull();
+	});
+
+	it("returns 'library-empty' when the Library has no entries of this kind", () => {
+		expect(pickerEmptyState([], [])).toBe('library-empty');
+	});
+
+	it("returns 'all-attached' when the Library has entries but none are unbound", () => {
+		expect(pickerEmptyState(nonEmptyCatalog, [])).toBe('all-attached');
 	});
 });
 

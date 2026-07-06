@@ -201,13 +201,30 @@ export async function enableUser(userId: string): Promise<UserDisableResponse> {
 
 /** One deployment capability + its effective Level-0 enabled state. Deliberately a
  *  narrower shape than the matter-panel `CapabilityEntry` (types.ts) — there is no
- *  `available`/`default_enabled`/`toggleable` at this level, only `enabled`. */
+ *  `available`/`default_enabled`/`toggleable` at this level, only `enabled`.
+ *
+ *  STORE-2 (ADR-F065 D-A) additive fields for the Store/Library pages' provenance
+ *  badges: `in_library` is the STORE-1 truth (`enabled` is its deprecated alias) —
+ *  required, since it already governs Library-scoped picker filtering. The
+ *  remaining fields are always present on the wire (the backend defaults
+ *  `tags`/`recommended_for` to `[]` and `source`/`author`/`version` to `null`) but
+ *  are typed OPTIONAL here — display-only provenance metadata that pre-STORE-2
+ *  fixtures across the admin pages don't construct, so treating them as optional
+ *  avoids churning every unrelated test's literal. Skill entries carry real
+ *  `source`/`author`/`version`/`tags`; tool entries get `source: "built-in"` only;
+ *  playbook entries get `source: null` (no provenance field exists for them yet). */
 export interface DeploymentCapabilityRead {
 	capability_kind: 'skill' | 'tool' | 'playbook';
 	capability_key: string;
 	label: string;
 	description: string | null;
+	in_library: boolean;
 	enabled: boolean;
+	source?: string | null;
+	author?: string | null;
+	version?: string | null;
+	tags?: string[];
+	recommended_for?: string[];
 }
 
 /** A kind-grouped section (Tools / Skills / Playbooks) of the deployment inventory. */
@@ -222,33 +239,49 @@ export interface DeploymentCapabilitiesResponse {
 	sections: DeploymentCapabilitySection[];
 }
 
-/** One Level-0 on/off toggle in a `PATCH /admin/capabilities` body. */
-export interface DeploymentToggleInput {
-	kind: 'skill' | 'tool' | 'playbook';
-	key: string;
-	enabled: boolean;
-}
-
 /** GET /api/v1/admin/capabilities — the whole-deployment inventory (admin). */
 export async function getDeploymentCapabilities(): Promise<DeploymentCapabilitiesResponse> {
 	return apiRequest<DeploymentCapabilitiesResponse>('/admin/capabilities');
 }
 
-/**
- * PATCH /api/v1/admin/capabilities — sparse Level-0 toggle writes (admin). The
- * server validates ALL toggles before writing ANY; an unknown (kind, key) is 422
- * (deliberate divergence from the per-area attach endpoints' 404 posture).
- */
-export async function patchDeploymentCapabilities(
-	toggles: DeploymentToggleInput[]
-): Promise<DeploymentCapabilitiesResponse> {
-	return apiRequest<DeploymentCapabilitiesResponse>('/admin/capabilities', {
-		method: 'PATCH',
-		body: { toggles }
-	});
-}
+// NOTE (STORE-2 review fix): the `patchDeploymentCapabilities` client (PATCH
+// /admin/capabilities Level-0 toggles) lost its only caller when the old
+// Capabilities page became a redirect stub, and was deleted with it. The
+// SERVER keeps the PATCH endpoint as the STORE-1 compat shim over the Library
+// (enabled=true ⇒ adopt / false ⇒ remove); the web writes through
+// `adoptLibraryEntry`/`removeLibraryEntry` below instead.
 
 // NOTE (SETUP-4b review fix 3): a `getModelMenu` client for GET /admin/model-menu
 // briefly lived here and was DELETED along with the endpoint — the alias+tier pair
 // is already member-visible via `modelsApi.listModels()` (GET /api/v1/models); the
 // capabilities page derives it client-side.
+
+// ----- Org Library — adopt/remove (STORE-1/2, ADR-F065) -----
+
+/** POST /admin/library body — adopt one catalog capability. */
+export interface LibraryEntryInput {
+	kind: 'skill' | 'tool' | 'playbook';
+	key: string;
+}
+
+/**
+ * POST /api/v1/admin/library — adopt a catalog capability into the org's
+ * Library (Store page's "Add to Library"). 422 for an unknown (kind, key);
+ * 409 if already adopted (callers treat 409 as a benign no-op — the desired
+ * end state already holds).
+ */
+export async function adoptLibraryEntry(body: LibraryEntryInput): Promise<void> {
+	await apiRequest<void>('/admin/library', { method: 'POST', body });
+}
+
+/**
+ * DELETE /api/v1/admin/library/{kind}/{key} — remove a capability from the
+ * Library (Library page's Remove, after the D-F confirm). Idempotent (204
+ * even if not adopted).
+ */
+export async function removeLibraryEntry(kind: 'skill' | 'tool' | 'playbook', key: string): Promise<void> {
+	await apiRequest<void>(
+		`/admin/library/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`,
+		{ method: 'DELETE' }
+	);
+}

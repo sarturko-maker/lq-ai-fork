@@ -135,6 +135,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # STORE-1 (ADR-F065) — Org Library adopt/remove
         "/api/v1/admin/library",
         "/api/v1/admin/library/{kind}/{key}",
+        # STORE-2 (ADR-F065 D-B) — member-readable Org Library read model
+        "/api/v1/library",
         # SETUP-3a (ADR-F061) — unauthenticated lifecycle endpoints
         "/api/v1/auth/accept-invite",
         "/api/v1/auth/password-reset-request",
@@ -397,7 +399,9 @@ async def test_openapi_paths_match_sketch() -> None:
     #   client-side.)
     # +2: STORE-1 (ADR-F065) — Org Library adopt/remove (POST /admin/library +
     #   DELETE /admin/library/{kind}/{key} = 2 new paths).
-    assert len(actual) == 173  # +3: ADR-F054 capability panel (GET/PUT
+    # +1: STORE-2 (ADR-F065 D-B) — GET /api/v1/library, the member-readable
+    #   read model over the same org_library_entries table (173 -> 174).
+    assert len(actual) == 174  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

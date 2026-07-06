@@ -374,6 +374,65 @@ def test_tool_group_registry_order_is_canonical() -> None:
     assert list(cap.TOOL_GROUP_REGISTRY) == ["redlining", "tabular", "ropa", "assessment"]
 
 
+# --- RECOMMENDED_LIBRARY_SETS drift guard (STORE-2 D-C) ----------------------
+
+
+def test_recommended_library_sets_area_keys_are_standard() -> None:
+    """Every area key in the recommended-sets constant is a real standard area."""
+    assert set(cap.RECOMMENDED_LIBRARY_SETS) == {
+        "commercial",
+        "privacy",
+        "m-and-a",
+        "disputes",
+        "employment",
+    }
+
+
+def test_recommended_library_sets_tool_keys_resolve_against_registry() -> None:
+    """Every recommended tool key must be a real, currently-registered tool group.
+
+    A renamed/removed tool group must break CI, not silently drop the Store page's
+    'Recommended for {area}' rail entry.
+    """
+    for area, kinds in cap.RECOMMENDED_LIBRARY_SETS.items():
+        for key in kinds.get(cap.KIND_TOOL, ()):
+            assert key in cap.TOOL_GROUP_REGISTRY, (
+                f"recommended tool '{key}' for area '{area}' is not in TOOL_GROUP_REGISTRY"
+            )
+
+
+def test_recommended_library_sets_skill_names_load_from_real_corpus() -> None:
+    """Every recommended skill name must load from the real `skills/` corpus.
+
+    Mirrors the corpus-health guard in ``test_skill_loader.py`` — a renamed or
+    deleted skill directory must fail CI rather than silently vanish from the
+    Store page's recommendation rail.
+    """
+    from pathlib import Path
+
+    from app.skills.loader import load_registry
+
+    real_skills_dir = Path(__file__).resolve().parents[3] / "skills"
+    if not real_skills_dir.is_dir():
+        import pytest
+
+        pytest.skip(f"real skills directory not present: {real_skills_dir}")
+
+    loaded = set(load_registry(real_skills_dir).names())
+    for area, kinds in cap.RECOMMENDED_LIBRARY_SETS.items():
+        for name in kinds.get(cap.KIND_SKILL, ()):
+            assert name in loaded, (
+                f"recommended skill '{name}' for area '{area}' does not load "
+                "from the real skills/ corpus"
+            )
+
+
+def test_recommended_library_sets_no_playbooks() -> None:
+    """No seed migration binds a playbook to any area — verified empty by design."""
+    for kinds in cap.RECOMMENDED_LIBRARY_SETS.values():
+        assert cap.KIND_PLAYBOOK not in kinds
+
+
 # --- playbook renderer -------------------------------------------------------
 def _position(
     issue: str, standard: str, *, fallbacks: list[dict] | None = None, severity: str = "high"

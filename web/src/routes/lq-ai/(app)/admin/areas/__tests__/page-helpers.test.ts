@@ -102,6 +102,7 @@ describe('availableGroupOptions (D7)', () => {
 						capability_key: 'redlining',
 						label: 'Redlining',
 						description: 'd1',
+						in_library: true,
 						enabled: true
 					},
 					{
@@ -109,6 +110,7 @@ describe('availableGroupOptions (D7)', () => {
 						capability_key: 'tabular',
 						label: 'Grids',
 						description: null,
+						in_library: true,
 						enabled: true
 					}
 				]
@@ -124,8 +126,8 @@ describe('availableGroupOptions (D7)', () => {
 
 	it('offers every registry tool group for a brand-new area', () => {
 		expect(availableGroupOptions(catalog)).toEqual([
-			{ key: 'redlining', label: 'Redlining', description: 'd1' },
-			{ key: 'tabular', label: 'Grids', description: null }
+			{ key: 'redlining', label: 'Redlining', description: 'd1', in_library: true },
+			{ key: 'tabular', label: 'Grids', description: null, in_library: true }
 		]);
 	});
 });
