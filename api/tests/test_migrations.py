@@ -12,6 +12,9 @@ Verifies:
 
 from __future__ import annotations
 
+import asyncio
+import os
+import secrets
 import uuid
 
 import pytest
@@ -1084,49 +1087,164 @@ async def test_practice_area_tool_groups_cascade_on_area_delete(db_session: Asyn
 
 
 @pytest.mark.integration
-async def test_deployment_capability_toggles_table_exists(db_session: AsyncSession) -> None:
-    """The 0086 deployment_capability_toggles table exists with the expected columns and is
-    NOT seeded (sparse — absence means available)."""
+async def test_org_library_entries_table_exists(db_session: AsyncSession) -> None:
+    """0088 (ADR-F065): the org_library_entries table exists with the expected columns."""
     cols = (
         (
             await db_session.execute(
                 text(
                     "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_name = 'deployment_capability_toggles'"
+                    "WHERE table_name = 'org_library_entries'"
                 )
             )
         )
         .scalars()
         .all()
     )
-    assert {"capability_kind", "capability_key", "enabled", "set_by", "updated_at"}.issubset(
-        set(cols)
+    assert {"capability_kind", "capability_key", "adopted_by", "adopted_at"}.issubset(set(cols))
+    # PK is (capability_kind, capability_key).
+    pk = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT a.attname FROM pg_index i "
+                    "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+                    "WHERE i.indrelid = 'org_library_entries'::regclass AND i.indisprimary "
+                    "ORDER BY a.attname"
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    count = (
-        await db_session.execute(text("SELECT count(*) FROM deployment_capability_toggles"))
-    ).scalar_one()
-    assert count == 0  # no seed
+    assert set(pk) == {"capability_kind", "capability_key"}
 
 
 @pytest.mark.integration
-async def test_deployment_capability_toggles_kind_check(db_session: AsyncSession) -> None:
-    """capability_kind is constrained to skill|tool|playbook."""
+async def test_org_library_entries_kind_check(db_session: AsyncSession) -> None:
+    """capability_kind is constrained to skill|tool|playbook (0088 CHECK)."""
     await db_session.execute(
         text(
-            "INSERT INTO deployment_capability_toggles (capability_kind, capability_key, enabled) "
-            "VALUES ('tool', 'redlining', false)"
+            "INSERT INTO org_library_entries (capability_kind, capability_key) "
+            "VALUES ('tool', 'chk-probe-redlining')"
         )
     )
     await db_session.flush()  # a valid kind must NOT raise
     with pytest.raises(Exception):
         await db_session.execute(
             text(
-                "INSERT INTO deployment_capability_toggles "
-                "(capability_kind, capability_key, enabled) VALUES ('bogus', 'x', false)"
+                "INSERT INTO org_library_entries (capability_kind, capability_key) "
+                "VALUES ('bogus', 'x')"
             )
         )
         await db_session.flush()
     await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_org_library_entries_adopted_by_set_null_on_user_delete(
+    db_session: AsyncSession,
+) -> None:
+    """adopted_by FK is ON DELETE SET NULL — deleting the adopting user keeps the org's
+    Library entry (it is the org's state, not the individual's)."""
+    admin = User(
+        email=f"lib-fk-{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Lib FK User",
+        hashed_password="x",
+        is_admin=True,
+    )
+    db_session.add(admin)
+    await db_session.flush()
+    await db_session.execute(
+        text(
+            "INSERT INTO org_library_entries (capability_kind, capability_key, adopted_by) "
+            "VALUES ('tool', 'fk-probe-tabular', :uid)"
+        ),
+        {"uid": admin.id},
+    )
+    await db_session.flush()
+    await db_session.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": admin.id})
+    await db_session.flush()
+    adopted_by = (
+        await db_session.execute(
+            text(
+                "SELECT adopted_by FROM org_library_entries WHERE capability_key = 'fk-probe-tabular'"
+            )
+        )
+    ).scalar_one()
+    assert adopted_by is None
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_deployment_capability_toggles_table_dropped(db_session: AsyncSession) -> None:
+    """0088 supersedes ADR-F062: the deployment_capability_toggles table is DROPPED."""
+    reg = (
+        await db_session.execute(text("SELECT to_regclass('deployment_capability_toggles')"))
+    ).scalar()
+    assert reg is None
+
+
+@pytest.mark.integration
+async def test_org_library_fresh_org_starts_empty() -> None:
+    """0088 (ADR-F065 decisions 3 & 4): on a FRESH (user-less) deployment the users-empty gate
+    SKIPS the seed, so org_library_entries is EMPTY even though the binding tables ARE seeded
+    (the 0086 tool-group seed is present). Migrated on a throwaway DB so the shared test DB's
+    conftest seed (which emulates an EXISTING deployment) does not mask the fresh-org path."""
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine
+
+    from tests.conftest import API_DIR
+
+    runtime_url = os.environ.get("DATABASE_URL")
+    if not runtime_url:
+        pytest.skip("DATABASE_URL not set")
+
+    base, _orig = runtime_url.rsplit("/", 1)
+    fresh_db = f"lq_ai_test_store1_{secrets.token_hex(4)}"
+    admin_sync = f"{base.replace('postgresql+asyncpg://', 'postgresql://', 1)}/postgres"
+    fresh_sync = f"{base.replace('postgresql+asyncpg://', 'postgresql://', 1)}/{fresh_db}"
+
+    def _run() -> tuple[int, int]:
+        admin_engine = create_engine(admin_sync, isolation_level="AUTOCOMMIT")
+        with admin_engine.connect() as conn:
+            conn.execute(text(f'CREATE DATABASE "{fresh_db}"'))
+        admin_engine.dispose()
+        saved = os.environ.get("DATABASE_URL")
+        os.environ["DATABASE_URL"] = fresh_sync
+        try:
+            cfg = Config(str(API_DIR / "alembic.ini"))
+            cfg.set_main_option("script_location", str(API_DIR / "alembic"))
+            command.upgrade(cfg, "head")
+            engine = create_engine(fresh_sync)
+            with engine.connect() as conn:
+                lib = conn.execute(text("SELECT count(*) FROM org_library_entries")).scalar_one()
+                groups = conn.execute(
+                    text("SELECT count(*) FROM practice_area_tool_groups")
+                ).scalar_one()
+            engine.dispose()
+            return int(lib), int(groups)
+        finally:
+            if saved is None:
+                os.environ.pop("DATABASE_URL", None)
+            else:
+                os.environ["DATABASE_URL"] = saved
+            admin_engine = create_engine(admin_sync, isolation_level="AUTOCOMMIT")
+            with admin_engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                        "WHERE datname = :db AND pid <> pg_backend_pid()"
+                    ),
+                    {"db": fresh_db},
+                )
+                conn.execute(text(f'DROP DATABASE IF EXISTS "{fresh_db}"'))
+            admin_engine.dispose()
+
+    lib_count, group_count = await asyncio.to_thread(_run)
+    assert lib_count == 0  # users-empty gate skipped the seed → fresh org starts empty
+    assert group_count > 0  # binding tables WERE seeded — emptiness is the gate, not empty sources
 
 
 @pytest.mark.integration

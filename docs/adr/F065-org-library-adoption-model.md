@@ -90,3 +90,53 @@ Recorded sub-decisions (D-numbers per the plan):
   operator fence, viewer read-only enforcement (F064).
 - Slices and verification: `docs/fork/plans/STORE-org-library.md` (STORE-0…3; STORE-3 is a live
   maintainer dress rehearsal as the acceptance test).
+
+## STORE-1 implementation record (2026-07-06)
+
+Backend-only slice implementing D1–D4 (D5–D8 are STORE-2/UX). The D1–D8 outcomes above are
+unchanged; this records the implementer's calls the ADR left open.
+
+- **Toggle supersession — DROP, not repurpose** (D2 left this to STORE-1). Migration `0088`
+  reads `deployment_capability_toggles`' disabled set once (for the seed), then DROPs the table.
+  Rationale: repurposing carries no data — the polarity inverts (a toggle row meant "disabled";
+  a Library row means "adopted") and the shape changes (no `enabled` column), so a rename would
+  leave every `enabled=false` row meaning the OPPOSITE. `downgrade()` recreates the toggle table
+  EMPTY (byte-matching 0086's DDL) and drops `org_library_entries` — lossy by design (the seeded
+  Library does not round-trip; there is no downgrade round-trip test). The
+  `DeploymentCapabilityToggle` ORM model and all its usages are deleted; `OrgLibraryEntry`
+  replaces it (PK `(capability_kind, capability_key)`, `adopted_by` FK SET NULL, no `enabled`).
+
+- **Fresh-vs-existing discriminator = users-table emptiness at migration time.** A brand-new org
+  runs migrations BEFORE the app lifespan mints the first operator/admin, so `users` is empty at
+  0088's execution — the gate `EXISTS (SELECT 1 FROM users)` skips the seed and the Library starts
+  EMPTY (decision 3). An existing deployment always has users, so it seeds from effective state:
+  "bound anywhere ∧ not explicitly disabled" (`practice_area_skills` ∪ `practice_area_tool_groups`
+  ∪ non-deleted `practice_area_playbooks`, minus `deployment_capability_toggles` rows with
+  `enabled=false`), so upgrade day changes nothing (decision 4). The seed reads binding tables
+  ONLY — a pure-SQL seed cannot consult the in-memory skill registry / code tool-group registry,
+  so a bound name the registry no longer knows becomes a harmless ORPHAN Library row under the
+  established drift-drop posture (`build_area_inventory` drops it at resolve time). The seed is a
+  pure module-level `_seed(conn)` (idempotent NOT-EXISTS inserts, resilient to the toggle table
+  being absent via `to_regclass`) so the test conftest can call it to emulate an upgraded
+  deployment and the fresh-empty path is pinned independently on a throwaway DB.
+
+- **D3 chokepoint predicate** — `build_area_inventory`'s required kwarg `deployment_toggles`
+  became `library_entries` (still keyword-only + required); a binding resolves iff its
+  `(kind, key)` is in the adopted set. Under adopt-in polarity a forgotten kwarg fails CLOSED
+  (nothing adopted ⇒ nothing available); kept required anyway so call sites stay explicit.
+
+- **PATCH-shim mapping** (D-compat, old Capabilities page kept working): `GET /admin/capabilities`
+  grows `in_library` and reports `enabled` as its deprecated alias (single off-state). `PATCH
+  /admin/capabilities` maps `enabled=true ⇒ adopt` (upsert `org_library_entries`) and
+  `enabled=false ⇒ remove` the entry — a compatibility shim over the Library, audited as one
+  `library.update` row (`adopted`/`removed` kind+key lists + counts).
+
+- **Audit action names.** New endpoints: `library.adopt` / `library.remove` (`resource_type`
+  `org_library`, `resource_id` = key, `details` = `{kind, key}`). The shim: `library.update`.
+  All carry kinds/keys/counts only — never document content.
+
+- **Authz.** All three surfaces are `AdminUser` (the operator passes it; F061 D3 / F064 D2 keep
+  content-config operator-accessible). The F061 operator-fence route list is untouched. The adopt
+  endpoint 409s a duplicate (house attach pattern); remove is idempotent 204 (house detach). D4
+  adds a literal `HTTPException(422)` at all four bind surfaces AFTER the existing 404-unknown and
+  BEFORE insert (distinct layers; existing 404/409 tests unchanged).

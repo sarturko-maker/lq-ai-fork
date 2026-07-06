@@ -29,7 +29,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.audit import AuditLog
 from app.models.playbook import Playbook
-from app.models.practice_area import PracticeArea, PracticeAreaPlaybook
+from app.models.practice_area import OrgLibraryEntry, PracticeArea, PracticeAreaPlaybook
 from app.models.project import MatterCapabilityToggle, Project
 from app.models.user import User
 from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_db
@@ -81,6 +81,9 @@ async def _bind_playbook(db: AsyncSession, area_id: uuid.UUID, *, name: str) -> 
     db.add(pb)
     await db.flush()
     db.add(PracticeAreaPlaybook(practice_area_id=area_id, playbook_id=pb.id))
+    # STORE-1 (ADR-F065): the panel resolves through the adopt-in Library, so a bound
+    # playbook only shows once adopted — adopt it here (the conftest seed adopts 0 playbooks).
+    db.add(OrgLibraryEntry(capability_kind="playbook", capability_key=str(pb.id)))
     await db.flush()
     return pb
 
@@ -326,26 +329,28 @@ async def test_put_isolated_per_matter(
     assert _entry(body_b, "tool", "redlining")["enabled"] is True
 
 
-# --- SETUP-4a: Level-0 (deployment-wide) narrowing reflected in the panel (ADR-F062) ---
-async def test_level0_disabled_tool_group_absent_from_panel(
+# --- STORE-1: capability absent from the Org Library ⇒ absent from the panel (ADR-F065) ---
+async def test_capability_absent_from_library_is_absent_from_panel(
     client: AsyncClient, db_session: AsyncSession, user: User
 ) -> None:
-    """A deployment-disabled tool group vanishes from the matter panel entirely (one
-    chokepoint: build_area_inventory) — the panel shows exactly what the agent gets."""
-    from app.models.practice_area import DeploymentCapabilityToggle
+    """A capability the org has NOT adopted vanishes from the matter panel entirely (one
+    chokepoint: build_area_inventory) — the panel shows exactly what the agent gets. The
+    conftest seed adopts redlining + tabular; removing redlining from the Library narrows it."""
+    from sqlalchemy import delete
 
     area_id = await _commercial_area_id(db_session)
     matter = await _make_matter(db_session, user, area_id=area_id)
 
-    # Baseline: redlining is present.
+    # Baseline: redlining is present (adopted by the conftest upgraded-deployment seed).
     before = await client.get(_url(matter.id), headers=_bearer(user))
     tool_keys_before = [e["capability_key"] for e in _section(before.json(), "tool")["entries"]]
     assert "redlining" in tool_keys_before
 
-    # Disable redlining deployment-wide → it disappears from the panel.
-    db_session.add(
-        DeploymentCapabilityToggle(
-            capability_kind="tool", capability_key="redlining", enabled=False
+    # Remove redlining from the Library → it disappears from the panel.
+    await db_session.execute(
+        delete(OrgLibraryEntry).where(
+            OrgLibraryEntry.capability_kind == "tool",
+            OrgLibraryEntry.capability_key == "redlining",
         )
     )
     await db_session.flush()

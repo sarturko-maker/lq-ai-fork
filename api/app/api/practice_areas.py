@@ -27,13 +27,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.area_agent import build_area_subagents
-from app.agents.capabilities import TOOL_GROUP_REGISTRY
+from app.agents.capabilities import (
+    KIND_PLAYBOOK,
+    KIND_SKILL,
+    KIND_TOOL,
+    TOOL_GROUP_REGISTRY,
+)
 from app.api.dependencies import ActiveUser, AdminUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, NotFound, ValidationError
 from app.models.playbook import Playbook
 from app.models.practice_area import (
+    OrgLibraryEntry,
     PracticeArea,
     PracticeAreaPlaybook,
     PracticeAreaSkill,
@@ -267,6 +273,38 @@ def _require_registered_group(group_key: str) -> None:
         )
 
 
+async def _adopted_keys_of_kind(db: AsyncSession, kind: str) -> set[str]:
+    """The org's ADOPTED Library keys of one kind (ADR-F065 D4)."""
+    rows = (
+        (
+            await db.execute(
+                select(OrgLibraryEntry.capability_key).where(
+                    OrgLibraryEntry.capability_kind == kind
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return set(rows)
+
+
+async def _require_in_library(db: AsyncSession, kind: str, key: str) -> None:
+    """422 when a capability is not adopted into the Org Library (ADR-F065 D4).
+
+    A DISTINCT layer from the 404-unknown-registry-key check (which runs first): a
+    registry-KNOWN but not-adopted capability is 422 pointing at the Store. Closes the
+    silent bind-while-unavailable trap — bindings pick from the Library only.
+    """
+    if key not in await _adopted_keys_of_kind(db, kind):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"'{key}' is not in your organisation's library — add it from the Store first."
+            ),
+        )
+
+
 @router.get(
     "",
     response_model=PracticeAreaListResponse,
@@ -395,6 +433,21 @@ async def create_practice_area(
     # dead row). 404 mirrors the skill-not-in-registry posture.
     for group_key in payload.tool_groups:
         _require_registered_group(group_key)
+
+    # ADR-F065 D4: bindings pick from the Org Library only — a registry-known but not-adopted
+    # group is a 422 pointing at the Store (a DISTINCT layer from the 404 above). List every
+    # non-adopted key so the admin can adopt them all in one trip.
+    if payload.tool_groups:
+        adopted_tools = await _adopted_keys_of_kind(db, KIND_TOOL)
+        not_in_library = [g for g in payload.tool_groups if g not in adopted_tools]
+        if not_in_library:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"These tool groups are not in your organisation's library — add them "
+                    f"from the Store first: {sorted(set(not_in_library))}"
+                ),
+            )
 
     # position auto-appends (reorder is SETUP-4b). max(position) over the curated set.
     next_position = (
@@ -600,6 +653,8 @@ async def attach_practice_area_tool_group(
     """
     area = await _load_area_or_404(db, key)
     _require_registered_group(payload.group_key)
+    # ADR-F065 D4: the group must be adopted into the Org Library (422, distinct from the 404).
+    await _require_in_library(db, KIND_TOOL, payload.group_key)
     area_id = area.id
     db.add(PracticeAreaToolGroup(practice_area_id=area_id, group_key=payload.group_key))
     try:
@@ -695,6 +750,8 @@ async def attach_practice_area_skill(
             f"Skill {payload.skill_name!r} is not in the registry.",
             details={"skill_name": payload.skill_name},
         )
+    # ADR-F065 D4: the skill must be adopted into the Org Library (422, distinct from the 404).
+    await _require_in_library(db, KIND_SKILL, payload.skill_name)
     area_id = area.id
     db.add(PracticeAreaSkill(practice_area_id=area_id, skill_name=payload.skill_name))
     try:
@@ -791,6 +848,8 @@ async def attach_practice_area_playbook(
             f"Playbook {payload.playbook_id} is not available.",
             details={"playbook_id": str(payload.playbook_id)},
         )
+    # ADR-F065 D4: the playbook must be adopted into the Org Library (422, distinct from 404).
+    await _require_in_library(db, KIND_PLAYBOOK, str(payload.playbook_id))
     area_id = area.id
     db.add(PracticeAreaPlaybook(practice_area_id=area_id, playbook_id=payload.playbook_id))
     try:

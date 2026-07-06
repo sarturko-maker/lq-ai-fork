@@ -16,16 +16,20 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.main import app
 from app.models.audit import AuditLog
 from app.models.playbook import Playbook
-from app.models.practice_area import PracticeArea, PracticeAreaSkill
+from app.models.practice_area import OrgLibraryEntry, PracticeArea, PracticeAreaSkill
 from app.models.user import User
+from app.skills import load_registry
+from app.skills.registry import MutableSkillRegistry
 from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_db
+
+_SKILL_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "skills"
 
 pytestmark = pytest.mark.integration
 
@@ -1192,6 +1196,10 @@ async def test_read_model_bound_tool_groups_is_registry_canonical_order(
     pb = Playbook(name="Order playbook", contract_type="NDA", description="d")
     db_session.add(pb)
     await db_session.flush()
+    # STORE-1 (ADR-F065 D4): bindings pick from the Library only — adopt the playbook so the
+    # attach passes (the 4 tool groups are already adopted by the conftest seed).
+    db_session.add(OrgLibraryEntry(capability_kind="playbook", capability_key=str(pb.id)))
+    await db_session.flush()
 
     for group_key in ("assessment", "ropa", "tabular", "redlining"):
         resp = await client.post(
@@ -1384,3 +1392,130 @@ async def test_reorder_writes_audit_row_with_keys_and_count(
     assert row is not None
     assert row.details["keys"] == new_order
     assert row.details["count"] == len(new_order)
+
+
+# --- STORE-1 (ADR-F065): Org Library seed + bind-time D4 checks ----------------------------
+
+
+async def test_org_library_seed_adopts_bound_anywhere_and_is_idempotent(
+    db_session: AsyncSession,
+) -> None:
+    """0088 ``_seed`` adopts exactly bound-anywhere: the seeded skills
+    (0056/0067/0069/0072/0073/0083), the 4 seeded tool-group keys, and 0 playbooks — and a
+    re-run inserts nothing (idempotent). The conftest already ran ``_seed`` on the session
+    engine (emulating an upgraded deployment); this pins the content + the re-run no-op via
+    the established importlib pattern."""
+    from app.models.practice_area import PracticeAreaSkill as _PAS
+
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0088", versions / "0088_org_library_entries.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0088"] = module
+    try:
+        spec.loader.exec_module(module)
+
+        async def _lib_keys(kind: str) -> set[str]:
+            rows = (
+                await db_session.execute(
+                    select(OrgLibraryEntry.capability_key).where(
+                        OrgLibraryEntry.capability_kind == kind
+                    )
+                )
+            ).scalars()
+            return set(rows)
+
+        async def _lib_total() -> int:
+            return (
+                await db_session.execute(select(func.count()).select_from(OrgLibraryEntry))
+            ).scalar_one()
+
+        before = await _lib_total()
+
+        # Re-run the pure seed on the migrated DB — must be a no-op (idempotent).
+        conn = await db_session.connection()
+        await conn.run_sync(module._seed)
+        assert await _lib_total() == before  # no duplicate inserts
+
+        # Tool groups = exactly the 4 seeded keys.
+        assert await _lib_keys("tool") == {"redlining", "tabular", "ropa", "assessment"}
+
+        # Skills = exactly DISTINCT practice_area_skills.skill_name (bound-anywhere), non-empty.
+        bound_skills = set(
+            (await db_session.execute(select(_PAS.skill_name).distinct())).scalars().all()
+        )
+        assert bound_skills, "expected the seed migrations to bind skills"
+        assert await _lib_keys("skill") == bound_skills
+
+        # 0 playbooks are bound by any seed migration → 0 adopted playbooks.
+        assert await _lib_keys("playbook") == set()
+    finally:
+        sys.modules.pop("migration_0088", None)
+
+
+async def test_attach_tool_group_not_in_library_is_422(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    """ADR-F065 D4: a registry-KNOWN but NOT-adopted tool group is a 422 pointing at the
+    Store — DISTINCT from the 404-unknown-registry check. Remove redlining from the Library
+    first (the conftest seed adopted it), then attaching it 422s."""
+    await db_session.execute(
+        delete(OrgLibraryEntry).where(
+            OrgLibraryEntry.capability_kind == "tool",
+            OrgLibraryEntry.capability_key == "redlining",
+        )
+    )
+    await db_session.flush()
+    resp = await client.post(
+        "/api/v1/practice-areas/disputes/tool-groups",
+        headers=_bearer(admin),
+        json={"group_key": "redlining"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_attach_skill_not_in_library_is_422(client: AsyncClient, admin: User) -> None:
+    """ADR-F065 D4: a registry-KNOWN but NOT-adopted skill is a 422 (distinct from the 404
+    unknown-registry check). Install a fixture registry so a real skill passes the 404 check,
+    then attach it — it is not in the Library, so 422."""
+    prior = getattr(app.state, "skill_registry", None)
+    app.state.skill_registry = MutableSkillRegistry(load_registry(_SKILL_FIXTURES_DIR))
+    try:
+        resp = await client.post(
+            "/api/v1/practice-areas/commercial/skills",
+            headers=_bearer(admin),
+            json={"skill_name": "alpha-test-skill"},
+        )
+        assert resp.status_code == 422
+    finally:
+        if prior is None:
+            delattr(app.state, "skill_registry")
+        else:
+            app.state.skill_registry = prior
+
+
+async def test_create_practice_area_with_non_adopted_group_is_422(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    """ADR-F065 D4: creating an area binding a registry-KNOWN but NOT-adopted tool group is a
+    422 listing the non-adopted keys — distinct from the 404-unknown-registry check."""
+    await db_session.execute(
+        delete(OrgLibraryEntry).where(
+            OrgLibraryEntry.capability_kind == "tool",
+            OrgLibraryEntry.capability_key == "redlining",
+        )
+    )
+    await db_session.flush()
+    resp = await client.post(
+        "/api/v1/practice-areas",
+        headers=_bearer(admin),
+        json={
+            "key": "d4newarea",
+            "name": "D4 Area",
+            "unit_label": "Matter",
+            "tool_groups": ["redlining"],
+        },
+    )
+    assert resp.status_code == 422

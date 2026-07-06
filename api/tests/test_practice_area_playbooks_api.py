@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.main import app
 from app.models.playbook import Playbook
-from app.models.practice_area import PracticeArea, PracticeAreaPlaybook
+from app.models.practice_area import OrgLibraryEntry, PracticeArea, PracticeAreaPlaybook
 from app.models.user import User
 from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_db
 
@@ -48,10 +48,15 @@ async def user(db_session: AsyncSession) -> User:
     return await _make_user(db_session, suffix="pa-pb-user")
 
 
-async def _make_playbook(db: AsyncSession) -> Playbook:
+async def _make_playbook(db: AsyncSession, *, adopt: bool = True) -> Playbook:
+    """A live playbook. ``adopt`` (default) also adds it to the Org Library so the attach
+    passes the ADR-F065 D4 Library check — the not-adopted path is tested with adopt=False."""
     pb = Playbook(name="NDA playbook", contract_type="NDA", description="Preferred positions.")
     db.add(pb)
     await db.flush()
+    if adopt:
+        db.add(OrgLibraryEntry(capability_kind="playbook", capability_key=str(pb.id)))
+        await db.flush()
     return pb
 
 
@@ -87,6 +92,18 @@ async def test_attach_unknown_playbook_is_404(client: AsyncClient, admin: User) 
         _url("commercial"), headers=_bearer(admin), json={"playbook_id": str(uuid.uuid4())}
     )
     assert resp.status_code == 404
+
+
+async def test_attach_not_in_library_is_422(
+    client: AsyncClient, db_session: AsyncSession, admin: User
+) -> None:
+    """ADR-F065 D4: a live but NOT-adopted playbook is a 422 pointing at the Store — a
+    DISTINCT layer from the 404-unknown check above."""
+    pb = await _make_playbook(db_session, adopt=False)
+    resp = await client.post(
+        _url("commercial"), headers=_bearer(admin), json={"playbook_id": str(pb.id)}
+    )
+    assert resp.status_code == 422
 
 
 async def test_attach_unknown_area_is_404(

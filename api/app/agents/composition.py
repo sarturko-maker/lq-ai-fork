@@ -79,7 +79,7 @@ from app.models.agent_run import AgentRun
 from app.models.organization_profile import OrganizationProfile
 from app.models.playbook import Playbook
 from app.models.practice_area import (
-    DeploymentCapabilityToggle,
+    OrgLibraryEntry,
     PracticeArea,
     PracticeAreaPlaybook,
     PracticeAreaSkill,
@@ -636,10 +636,10 @@ async def compose_and_execute_run(
                                 .all()
                             )
                             # SETUP-4a (ADR-F062): the area's tool-group availability is
-                            # now DATA (practice_area_tool_groups rows), resolved against
-                            # the code registry; the deployment-wide (Level 0) toggles
-                            # narrow the AVAILABLE set for the whole deployment. Both feed
-                            # the one inventory chokepoint below.
+                            # DATA (practice_area_tool_groups rows), resolved against the
+                            # code registry; the Org Library (ADR-F065) then narrows the
+                            # AVAILABLE set to what the org adopted. Both feed the one
+                            # inventory chokepoint below.
                             area_tool_group_keys = (
                                 (
                                     await db.execute(
@@ -651,17 +651,15 @@ async def compose_and_execute_run(
                                 .scalars()
                                 .all()
                             )
-                            deployment_toggles = (
-                                (await db.execute(select(DeploymentCapabilityToggle)))
-                                .scalars()
-                                .all()
+                            library_entries = (
+                                (await db.execute(select(OrgLibraryEntry))).scalars().all()
                             )
                             inventory = build_area_inventory(
                                 bound_skill_names=bound_skill_names,
                                 registry=registry,
                                 area_playbooks=area_playbooks,
                                 tool_group_keys=area_tool_group_keys,
-                                deployment_toggles=deployment_toggles,
+                                library_entries=library_entries,
                             )
                             enabled_skills = inventory.enabled_keys("skill", toggles)
                             enabled_tool_groups = set(inventory.enabled_keys("tool", toggles))

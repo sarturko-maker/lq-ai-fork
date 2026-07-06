@@ -1,15 +1,16 @@
-"""Deployment-wide (Level 0) capability toggle endpoints — SETUP-4a (ADR-F062).
+"""The old Capabilities page as a compatibility shim over the Org Library — STORE-1 (ADR-F065).
 
-GET /admin/capabilities returns the whole-deployment inventory (every registry tool
-group + registry skill + live playbook) with each one's effective Level-0 enabled state;
-PATCH writes the org-admin's sparse toggles. These prove:
+GET /admin/capabilities returns the catalog inventory (every registry tool group + registry
+skill + live playbook) with each one's Library membership (``in_library``; ``enabled`` is the
+deprecated alias); PATCH maps the old on/off writes onto the Library (enabled=true ⇒ adopt,
+enabled=false ⇒ remove). These prove:
 
 * AdminUser only (a non-admin is 403),
-* the inventory lists every code-registry tool group (skills empty here — no registry
-  installed in the ASGI test, the graceful-None posture),
-* a PATCH toggle is persisted and reflected on the echoed GET (Level 0 narrows),
+* the inventory lists every code-registry tool group with ``in_library`` (all adopted here,
+  from the conftest seed that emulates an upgraded deployment),
+* a PATCH enabled=false REMOVES the org_library_entries row; enabled=true ADOPTS it (upsert),
 * the boundary rejects an unknown (kind, key) against the registry/DB (422),
-* the audit row (``deployment.capability_toggle``) carries kinds/keys/enabled only.
+* the audit row (``library.update``) carries kinds/keys/counts only.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.audit import AuditLog
 from app.models.playbook import Playbook
-from app.models.practice_area import DeploymentCapabilityToggle
+from app.models.practice_area import OrgLibraryEntry
 from app.models.user import User
 from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_db
 
@@ -65,14 +66,20 @@ def _keys(body: dict, kind: str) -> list[str]:
     return [e["capability_key"] for e in _section(body, kind)["entries"]]
 
 
-async def test_get_lists_registry_tool_groups(client: AsyncClient, admin: User) -> None:
+async def test_get_lists_registry_tool_groups_with_library_membership(
+    client: AsyncClient, admin: User
+) -> None:
     resp = await client.get(_URL, headers=_bearer(admin))
     assert resp.status_code == 200
     body = resp.json()
     assert [s["kind"] for s in body["sections"]] == ["tool", "skill", "playbook"]
-    # Every code-registry tool group is listed, in registry order, all enabled by default.
+    # Every code-registry tool group is listed, in registry order.
     assert _keys(body, "tool") == ["redlining", "tabular", "ropa", "assessment"]
-    assert all(e["enabled"] for e in _section(body, "tool")["entries"])
+    # The conftest seed (upgraded-deployment emulation) adopted all four → in_library True,
+    # and enabled is the deprecated alias for it.
+    for e in _section(body, "tool")["entries"]:
+        assert e["in_library"] is True
+        assert e["enabled"] == e["in_library"]
 
 
 async def test_get_requires_admin(client: AsyncClient, user: User) -> None:
@@ -80,7 +87,7 @@ async def test_get_requires_admin(client: AsyncClient, user: User) -> None:
     assert resp.status_code == 403
 
 
-async def test_patch_disables_a_tool_group_and_persists(
+async def test_patch_disable_removes_from_library(
     client: AsyncClient, admin: User, db_session: AsyncSession
 ) -> None:
     resp = await client.patch(
@@ -89,26 +96,27 @@ async def test_patch_disables_a_tool_group_and_persists(
         json={"toggles": [{"kind": "tool", "key": "ropa", "enabled": False}]},
     )
     assert resp.status_code == 200
-    # The echoed inventory reflects the disable.
+    # The echoed inventory reflects the removal.
     ropa = next(
         e for e in _section(resp.json(), "tool")["entries"] if e["capability_key"] == "ropa"
     )
-    assert ropa["enabled"] is False
-    # Persisted with set_by from the session.
+    assert ropa["in_library"] is False and ropa["enabled"] is False
+    # The Library row is gone (removed, not disable-flagged).
     row = (
         await db_session.execute(
-            select(DeploymentCapabilityToggle).where(
-                DeploymentCapabilityToggle.capability_kind == "tool",
-                DeploymentCapabilityToggle.capability_key == "ropa",
+            select(OrgLibraryEntry).where(
+                OrgLibraryEntry.capability_kind == "tool",
+                OrgLibraryEntry.capability_key == "ropa",
             )
         )
-    ).scalar_one()
-    assert row.enabled is False and row.set_by == admin.id
+    ).scalar_one_or_none()
+    assert row is None
 
 
-async def test_patch_re_enable_is_upsert(
+async def test_patch_adopt_then_remove_is_single_row(
     client: AsyncClient, admin: User, db_session: AsyncSession
 ) -> None:
+    # Remove tabular, then re-adopt it: exactly one Library row, present.
     await client.patch(
         _URL,
         headers=_bearer(admin),
@@ -122,15 +130,16 @@ async def test_patch_re_enable_is_upsert(
     rows = (
         (
             await db_session.execute(
-                select(DeploymentCapabilityToggle).where(
-                    DeploymentCapabilityToggle.capability_key == "tabular"
+                select(OrgLibraryEntry).where(
+                    OrgLibraryEntry.capability_kind == "tool",
+                    OrgLibraryEntry.capability_key == "tabular",
                 )
             )
         )
         .scalars()
         .all()
     )
-    assert len(rows) == 1 and rows[0].enabled is True  # upsert, not a second row
+    assert len(rows) == 1 and rows[0].adopted_by == admin.id  # upsert, records the admin
 
 
 async def test_patch_rejects_unknown_tool_group(client: AsyncClient, admin: User) -> None:
@@ -162,7 +171,7 @@ async def test_patch_rejects_bad_kind_at_schema(client: AsyncClient, admin: User
     assert resp.status_code == 422  # Literal[skill|tool|playbook] rejects 'mcp'
 
 
-async def test_patch_accepts_live_playbook(
+async def test_patch_adopts_live_playbook(
     client: AsyncClient, admin: User, db_session: AsyncSession
 ) -> None:
     pb = Playbook(name="Dep Test Book", contract_type="NDA", description="")
@@ -171,9 +180,18 @@ async def test_patch_accepts_live_playbook(
     resp = await client.patch(
         _URL,
         headers=_bearer(admin),
-        json={"toggles": [{"kind": "playbook", "key": str(pb.id), "enabled": False}]},
+        json={"toggles": [{"kind": "playbook", "key": str(pb.id), "enabled": True}]},
     )
     assert resp.status_code == 200
+    row = (
+        await db_session.execute(
+            select(OrgLibraryEntry).where(
+                OrgLibraryEntry.capability_kind == "playbook",
+                OrgLibraryEntry.capability_key == str(pb.id),
+            )
+        )
+    ).scalar_one_or_none()
+    assert row is not None
 
 
 async def test_patch_requires_admin(client: AsyncClient, user: User) -> None:
@@ -194,10 +212,9 @@ async def test_patch_audit_is_body_free(
         json={"toggles": [{"kind": "tool", "key": "ropa", "enabled": False}]},
     )
     row = (
-        await db_session.execute(
-            select(AuditLog).where(AuditLog.action == "deployment.capability_toggle")
-        )
+        await db_session.execute(select(AuditLog).where(AuditLog.action == "library.update"))
     ).scalar_one()
-    # kinds/keys/enabled only — no values/content.
-    assert row.details["toggle_count"] == 1
-    assert row.details["toggles"] == [{"kind": "tool", "key": "ropa", "enabled": False}]
+    # kinds/keys/counts only — no values/content.
+    assert row.details["removed_count"] == 1
+    assert row.details["adopted_count"] == 0
+    assert row.details["removed"] == [{"kind": "tool", "key": "ropa"}]
