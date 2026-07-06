@@ -140,3 +140,79 @@ unchanged; this records the implementer's calls the ADR left open.
   endpoint 409s a duplicate (house attach pattern); remove is idempotent 204 (house detach). D4
   adds a literal `HTTPException(422)` at all four bind surfaces AFTER the existing 404-unknown and
   BEFORE insert (distinct layers; existing 404/409 tests unchanged).
+
+## STORE-2 implementation record (2026-07-06)
+
+Web slice implementing D5–D8 (the Store + Library pages) over the STORE-1 substrate, plus a few
+thin backend enablers. Plan: `docs/fork/plans/STORE-2-store-library-pages.md`.
+
+- **D-A — provenance surfaced via additive fields on `DeploymentCapabilityRead`.** `source`,
+  `author`, `version`, `tags`, `recommended_for` are populated in `_deployment_inventory`: skills
+  from `SkillRecord.summary()` (real source/author/version/tags now that D5 closes the parser gap
+  for community skills); tool groups get `source="built-in"` only; playbooks get `source=None` —
+  DB rows carry no provenance field today, so the web shows a badge only when `source` is present.
+  `recommended_for` is built once per call from a small `(kind, key) -> [area keys]` reverse map
+  over `RECOMMENDED_LIBRARY_SETS`. The PATCH echo (the old Capabilities page's compatibility shim)
+  reuses `_deployment_inventory`, so it carries the same fields for free — no separate wiring.
+
+- **D-B — member-readable Library via a NEW `GET /api/v1/library` (`ActiveUser`).** Mirrors the
+  `GET /api/v1/inference/tier-config` dual-exposure precedent: the admin write surface
+  (`POST`/`DELETE /admin/library`) stays `AdminUser`-fenced; this GET is a separate, narrower read
+  model over the same `org_library_entries` table, joined to catalog display metadata via the same
+  derivations `_deployment_inventory` uses (a shared `playbook_display_label()` helper prevents the
+  two surfaces' playbook label format from drifting apart). Returns ONLY adopted entries;
+  `adopted_by` is deliberately never serialized (no cross-user identifiers on a member-visible
+  surface). A dangling entry (adopted, then the catalog entry vanished) returns `label=None` so the
+  web renders it honestly instead of guessing. Where-used is computed **client-side** from the
+  already-`ActiveUser` `GET /practice-areas` response — recon confirmed it already returns
+  `bound_skills`/`bound_tool_groups`/`bound_playbooks` per area, so no second backend read model
+  was needed.
+
+- **D-C — `RECOMMENDED_LIBRARY_SETS` is a new, drift-guarded code constant**
+  (`app.agents.capabilities`), not a runtime derivation. No live source of "what ships bound to
+  each area by default" existed before this slice — the shipped defaults were spread across six
+  migration literals (`0056`'s initial seed plus five later one-off skill bindings, `0086`'s tool-
+  group seed). The constant is a verbatim transcription of that union, area key -> `{tool: (...),
+  skill: (...)}` in canonical area order (commercial, privacy, m-and-a, disputes, employment); no
+  area recommends a playbook (verified — no seed migration binds one). It feeds ONLY the Store
+  page's display rail; it does not touch `build_area_inventory` or any resolution chokepoint. Guard
+  tests pin every referenced tool key against `TOOL_GROUP_REGISTRY` and every skill name against
+  the real `skills/` corpus, so a rename breaks CI instead of silently dropping a recommendation.
+
+- **D-D — the old Capabilities page becomes a client-side redirect stub.** This SPA has `ssr =
+  false` and no `+page.ts` anywhere, so `onMount` -> `goto(..., { replaceState: true })` is the only
+  available redirect idiom (there is no SvelteKit `redirect()` to reuse). Old bookmarks land on
+  `/lq-ai/admin/library`. Of the old page's two non-Library sections: the MCP "coming soon"
+  placeholder relocated to the Store page (catalog-shaped); the read-only Models section was
+  DROPPED — it only re-projected the already member-visible `GET /api/v1/models` (the SETUP-4b
+  review's "check who can ALREADY see the data" lesson), and `/lq-ai/admin/models` is the
+  authoritative surface. The dead `capabilities/page-helpers.ts` + its `__tests__/` were deleted
+  (confirmed no other module imported from them).
+
+- **D-E — the D5 provenance-parser fallback lands in `derive_summary`.** `version = lq.version or
+  _top_level_str(frontmatter, "version") or "unversioned"`; `author = lq.author or
+  _top_level_str(frontmatter, "author")` — `lq_ai:` wins on conflict, and the new
+  `_top_level_str` helper accepts `str` values only (a YAML `version: 1.0` float is left honestly
+  absent rather than coerced). Mirrors `extract_inputs`'s existing dual-location read of
+  `frontmatter.model_extra`. Zero built-in skills are affected (all nest under `lq_ai:`); the
+  community submodule (35+/37+ skills with top-level `author:`/`version:`) is the corpus this
+  closes the gap for.
+
+- **D-F — the remove-confirm is ALWAYS a modal**, never a bare click-to-delete. Where-used (an
+  entry's bound area names, from the same client-side `GET /practice-areas` computation as D-B)
+  decides the copy: bound in ≥1 area lists the area names plus a plain-language warning ("The
+  {area} agent will lose this — it stays attached but stops resolving until you add it back.");
+  bound nowhere shows "Not attached to any practice area." and no warning line. Confirm calls
+  `DELETE /admin/library/{kind}/{key}` (already idempotent from STORE-1) then refreshes.
+
+- **D-G — member route `/lq-ai/library`, guarded only on being authenticated.** No admin gate,
+  same card rendering as the admin Library page minus the Remove action, sharing every non-trivial
+  derivation (grouping/where-used/provenance badge) via a new `$lib/lq-ai/library/page-helpers.ts`
+  module so the two surfaces cannot disagree about the same adopted capability. No nav link was
+  added: no natural member-nav slot exists without extending the shared `TABS`/`tabs.ts`
+  vocabulary, a materially bigger change with its own blast radius and no icon/placement guidance
+  in the plan — the brief explicitly allows the route to stand alone in v1.
+
+- **Web client gap closed in passing.** STORE-1 shipped `POST`/`DELETE /admin/library` with no web
+  client at all (nothing in the UI called them). This slice adds `adoptLibraryEntry` /
+  `removeLibraryEntry` to `admin.ts` — the Store/Library pages are their first callers.
