@@ -234,7 +234,16 @@
 							>
 								<div class="min-w-0">
 									<p class="truncate text-sm font-medium text-foreground">
-										{entry.label}
+										{#if entry.capability_kind === 'skill'}
+											<a
+												href="/lq-ai/skills/{encodeURIComponent(entry.capability_key)}"
+												class="hover:underline"
+											>
+												{entry.label}
+											</a>
+										{:else}
+											{entry.label}
+										{/if}
 										{#if locked && entry.capability_kind === 'mcp'}
 											<span class="ml-1 text-xs font-normal text-muted-foreground">(coming soon)</span>
 										{/if}
