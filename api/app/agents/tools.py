@@ -41,6 +41,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from pydantic import ValidationError
@@ -565,6 +566,18 @@ def _matter_files_query(binding: MatterBinding, *columns: Any) -> Select[Any]:
 # cap is larger; a deal contract or policy is well under this.
 _MAX_DOCX_BYTES = 25 * 1024 * 1024
 
+# Shared projection for the .docx read/write tools (ADR-F066): fetch_matter_docx
+# and resolve_working_docx must return interchangeable rows — _render_redline
+# consumes either — so the row shape is defined exactly once.
+_DOCX_COLUMNS = (
+    File.id.label("file_id"),
+    File.filename,
+    File.mime_type,
+    File.storage_path,
+    Document.id.label("document_id"),
+    Document.normalized_content,
+)
+
 
 async def fetch_matter_docx(
     db: AsyncSession, binding: MatterBinding, document_name: str
@@ -580,15 +593,7 @@ async def fetch_matter_docx(
     """
     wanted = document_name.strip()
     stmt = (
-        _matter_files_query(
-            binding,
-            File.id.label("file_id"),
-            File.filename,
-            File.mime_type,
-            File.storage_path,
-            Document.id.label("document_id"),
-            Document.normalized_content,
-        )
+        _matter_files_query(binding, *_DOCX_COLUMNS)
         .where(func.lower(File.filename) == wanted.lower())
         .order_by(
             Document.id.is_(None),
@@ -597,6 +602,76 @@ async def fetch_matter_docx(
     )
     rows = (await db.execute(stmt)).all()
     return rows[0] if rows else None
+
+
+# Depth cap on the lineage walk — a real chain is a handful of rounds; this only
+# stops a bad-data parent cycle from spinning the resolver forever (ADR-F066).
+_LINEAGE_MAX_DEPTH = 20
+
+
+async def resolve_working_docx(
+    db: AsyncSession, binding: MatterBinding, document_name: str
+) -> Row[Any] | None:
+    """Resolve a named document to its newest WORKING version (R-1, ADR-F066).
+
+    Starts from the exact-name row (:func:`fetch_matter_docx`, unchanged) and
+    collects its ``files.parent_file_id`` descendant tree — skipping editor
+    snapshots, which are immutable prior versions — then returns the newest
+    non-snapshot LEAF: the agent's latest output, or the human-edited live row.
+    Newest is by ``coalesce(updated_at, created_at)`` compared across the WHOLE
+    tree, not per-hop among siblings, so a lineage that diverged (``start_fresh``
+    or an explicitly named branch) still resolves to wherever the latest work
+    actually happened. Every generation is fetched under the full matter scope
+    (:func:`_matter_files_query`), so a lineage row can never pull in a document
+    from outside the binding's matter. Returns the named row itself when nothing
+    derives from it; ``None`` when the name doesn't resolve (the same
+    404-conflated absence as :func:`fetch_matter_docx`).
+    """
+    root = await fetch_matter_docx(db, binding, document_name)
+    if root is None:
+        return None
+    # Breadth-first over the non-snapshot descendants: one matter-scoped query
+    # per generation, depth-capped against bad-data parent cycles.
+    touched: dict[uuid.UUID, datetime] = {}  # descendant id → last activity
+    inner: set[uuid.UUID] = set()  # ids with a non-snapshot child (not leaves)
+    seen: set[uuid.UUID] = {root.file_id}
+    frontier: list[uuid.UUID] = [root.file_id]
+    for _ in range(_LINEAGE_MAX_DEPTH):
+        stmt = _matter_files_query(
+            binding,
+            File.id,
+            File.parent_file_id,
+            func.coalesce(File.updated_at, File.created_at).label("touched_at"),
+        ).where(
+            File.parent_file_id.in_(frontier),
+            File.is_snapshot.is_(False),
+        )
+        rows = (await db.execute(stmt)).all()
+        frontier = []
+        for row in rows:
+            inner.add(row.parent_file_id)
+            if row.id in seen:  # Document-outerjoin duplicate or cycle
+                continue
+            seen.add(row.id)
+            touched[row.id] = row.touched_at
+            frontier.append(row.id)
+        if not frontier:
+            break
+    if not touched:
+        return root  # nothing non-snapshot derives from the named row
+    # Leaves = descendants nothing derives from. A bad-data cycle can leave no
+    # leaf at all — degrade to the newest descendant. Equal timestamps (same
+    # transaction) tie-break on id hex, arbitrary but deterministic.
+    leaves = set(touched) - inner
+    winner = max(leaves or set(touched), key=lambda fid: (touched[fid], fid.hex))
+    stmt = (
+        _matter_files_query(binding, *_DOCX_COLUMNS)
+        .where(File.id == winner)
+        .order_by(Document.id.is_(None))  # same file twice (re-ingested) → readable copy
+        .limit(1)
+    )
+    final = (await db.execute(stmt)).first()
+    return final if final is not None else root
 
 
 async def download_matter_docx(storage_path: str) -> bytes | None:
@@ -669,6 +744,9 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
         binding,
         File.filename,
         File.ingestion_status,
+        File.parent_file_id,
+        File.is_snapshot,
+        File.created_by_run_id,
         Document.id,
         Document.page_count,
         Document.character_count,
@@ -677,10 +755,24 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
     if not rows:
         return f"{header}\n(no documents attached — answer from the prompt alone, honestly)"
 
+    # Provenance labels for non-ingested work products (ADR-F066): resolve the
+    # parent filenames in ONE batched matter-scoped query (never per row). A
+    # parent that is gone (hard delete → SET NULL; soft delete → out of matter
+    # scope) drops out of the map and the label degrades gracefully.
+    parent_ids = {r.parent_file_id for r in rows if r.id is None and r.parent_file_id is not None}
+    parent_names: dict[uuid.UUID, str] = {}
+    if parent_ids:
+        parent_rows = (
+            await db.execute(
+                _matter_files_query(binding, File.id, File.filename).where(File.id.in_(parent_ids))
+            )
+        ).all()
+        parent_names = {r.id: r.filename for r in parent_rows}
+
     lines: list[str] = []
     for row in rows:
         if row.id is None:
-            lines.append(f"- {row.filename} (not ingested yet — status: {row.ingestion_status})")
+            lines.append(f"- {row.filename} {_provenance(row, parent_names)}")
             continue
         bits: list[str] = []
         if row.page_count:
@@ -690,6 +782,23 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
         suffix = f" ({'; '.join(bits)})" if bits else ""
         lines.append(f"- {row.filename}{suffix}")
     return f"{header}\n" + "\n".join(lines)
+
+
+def _provenance(row: Row[Any], parent_names: dict[uuid.UUID, str]) -> str:
+    """Honest one-phrase provenance for a non-ingested inventory row (ADR-F066).
+
+    Agent outputs and editor snapshots are deliberately never ingested (work
+    product, not a search source) — rendering them as pending uploads misled the
+    model into treating its own latest draft as an unprocessed original.
+    """
+    parent = parent_names.get(row.parent_file_id) if row.parent_file_id is not None else None
+    if row.is_snapshot:
+        return f"(editor snapshot of {parent})" if parent else "(editor snapshot)"
+    if parent is not None:
+        return f"(agent work product — derived from {parent})"
+    if row.created_by_run_id is not None:
+        return "(agent work product)"
+    return f"(not ingested yet — status: {row.ingestion_status})"
 
 
 def _page_range(start: int | None, end: int | None) -> str:

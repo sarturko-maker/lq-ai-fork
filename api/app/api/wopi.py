@@ -518,6 +518,11 @@ async def put_file_contents(
                     storage_path=str(snapshot_id),
                     ingestion_status=file_row.ingestion_status,
                     created_by_run_id=file_row.created_by_run_id,
+                    # Document lineage (ADR-F066): the snapshot preserves the live
+                    # row's prior bytes; marked so the resolver never treats an
+                    # immutable prior version as the working version.
+                    parent_file_id=file_row.id,
+                    is_snapshot=True,
                 )
             )
             file_row.created_by_run_id = None  # now human-authored; a retry won't re-snapshot

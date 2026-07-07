@@ -26,8 +26,10 @@ from app.agents.commercial_tools import (
     _extract_counterparty_position,
     _preview_redline,
     _reconcile_positions,
+    _redlined_filename,
     _render_state_of_play,
     _respond_to_counterparty,
+    _response_filename,
     build_commercial_tools,
 )
 from app.agents.deal_changes import DealChangeLedger
@@ -382,6 +384,11 @@ async def test_apply_redline_happy_path_persists_redlined_file(
         assert redlined.ingestion_status == "ready"
         # work-product provenance (ADR-F046): the output is tied to the run
         assert redlined.created_by_run_id == run_id
+        # document lineage (ADR-F066): the output points at its source; a working
+        # version, never a snapshot
+        source = next(f for f in files if f.filename == "contract.docx")
+        assert redlined.parent_file_id == source.id
+        assert redlined.is_snapshot is False
 
         # audit receipt: counts/types/IDs only, never clause text
         audit = (
@@ -399,6 +406,161 @@ async def test_apply_redline_happy_path_persists_redlined_file(
         assert len(audit) == 1
         details = str(audit[0].details)
         assert "twelve" not in details and "three" not in details
+
+
+# --------------------------------------------------------------------------- #
+# R-1 (ADR-F066) — redline continuity: working-version default + start_fresh
+# --------------------------------------------------------------------------- #
+
+
+def test_redlined_filename_version_bumps() -> None:
+    """Base case unchanged; a chained output bumps to v2, v3, … (ADR-F066)."""
+    assert _redlined_filename("contract.docx") == "contract (redlined).docx"
+    assert _redlined_filename("contract (redlined).docx") == "contract (redlined v2).docx"
+    assert _redlined_filename("contract (redlined v2).docx") == "contract (redlined v3).docx"
+
+
+def test_response_filename_version_bumps() -> None:
+    assert _response_filename("contract.docx") == "contract (response).docx"
+    assert _response_filename("contract (response).docx") == "contract (response v2).docx"
+    assert _response_filename("contract (response v7).docx") == "contract (response v8).docx"
+
+
+def test_versioned_filename_survives_pathological_version_digits() -> None:
+    """An adversarial upload named with a huge version digit run must not crash
+    the run at persist time (Python's ~4300-digit int() conversion limit): past
+    the bound it degrades to a plain "(label)" suffix instead of bumping."""
+    hostile = "x (redlined v" + "9" * 5000 + ").docx"
+    assert _redlined_filename(hostile) == hostile[: -len(".docx")] + " (redlined).docx"
+    # The bound itself still bumps (8 digits is far beyond any real chain).
+    assert _redlined_filename("x (redlined v99999999).docx") == "x (redlined v100000000).docx"
+
+
+async def _seed_redlined_child(
+    factory: async_sessionmaker[AsyncSession],
+    *,
+    user_id: uuid.UUID,
+    project_id: uuid.UUID,
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Seed a prior redline output as a lineage child of the matter's contract.docx.
+
+    Returns (source_file_id, child_file_id)."""
+    async with factory() as db:
+        source = (await db.execute(select(File).where(File.owner_id == user_id))).scalar_one()
+        child = File(
+            owner_id=user_id,
+            project_id=project_id,
+            filename="contract (redlined).docx",
+            mime_type=OOXML_DOCX_MIME,
+            size_bytes=1234,
+            hash_sha256="1" * 64,
+            storage_path=str(uuid.uuid4()),
+            ingestion_status="ready",
+            parent_file_id=source.id,
+        )
+        db.add(child)
+        await db.commit()
+        return source.id, child.id
+
+
+async def test_apply_redline_default_continues_from_working_version(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """By default a follow-up apply_redline resolves the named document to the
+    agent's latest working version (the lineage leaf), says so in the result,
+    chains the new output onto that leaf, and version-bumps the name (ADR-F066)."""
+    user_id, project_id = matter
+    _patch_storage(monkeypatch, source=_docx_bytes(CAP))
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    _, child_id = await _seed_redlined_child(commit_factory, user_id=user_id, project_id=project_id)
+
+    async with commit_factory() as db:
+        out = await _apply_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[
+                {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
+            ],
+            service=RedlineService(),
+            run_id=run_id,
+        )
+        await db.commit()
+
+    # transparency: the result names the resolved working version + the escape hatch
+    assert 'Continued from your latest working version "contract (redlined).docx"' in out
+    assert "start_fresh=true" in out
+
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        new = next(f for f in files if f.created_by_run_id == run_id)
+        assert new.filename == "contract (redlined v2).docx"  # version-aware naming
+        assert new.parent_file_id == child_id  # chained onto the working version
+
+
+async def test_apply_redline_start_fresh_hits_the_named_row(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """start_fresh=True pins the literally-named original even when a redlined
+    child exists on the lineage chain (the explicit restart, ADR-F066)."""
+    user_id, project_id = matter
+    _patch_storage(monkeypatch, source=_docx_bytes(CAP))
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    source_id, _ = await _seed_redlined_child(
+        commit_factory, user_id=user_id, project_id=project_id
+    )
+
+    async with commit_factory() as db:
+        out = await _apply_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[
+                {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
+            ],
+            service=RedlineService(),
+            run_id=run_id,
+            start_fresh=True,
+        )
+        await db.commit()
+
+    assert "Continued from" not in out
+
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        new = next(f for f in files if f.created_by_run_id == run_id)
+        assert new.filename == "contract (redlined).docx"  # named from the original
+        assert new.parent_file_id == source_id  # chained onto the original
+
+
+async def test_preview_redline_default_notes_working_version(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """The preview carries the same continuity note (and still saves nothing)."""
+    user_id, project_id = matter
+    captured = _patch_storage(monkeypatch, source=_docx_bytes(CAP))
+    await _seed_redlined_child(commit_factory, user_id=user_id, project_id=project_id)
+
+    async with commit_factory() as db:
+        out = await _preview_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[
+                {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
+            ],
+            service=RedlineService(),
+        )
+
+    assert 'Continued from your latest working version "contract (redlined).docx"' in out
+    assert "NOTHING has been saved" in out
+    assert "body" not in captured  # still a pure dry run
 
 
 # --------------------------------------------------------------------------- #
@@ -690,6 +852,10 @@ async def test_respond_full_coverage_persists_and_audits(
         assert response.project_id == project_id
         assert response.mime_type == OOXML_DOCX_MIME
         assert response.created_by_run_id == run_id  # work-product provenance (ADR-F046)
+        # document lineage (ADR-F066): the response derives from the counterparty doc
+        source = next(f for f in files if f.filename == "contract.docx")
+        assert response.parent_file_id == source.id
+        assert response.is_snapshot is False
 
         # domain audit receipt — counts/types/IDs only, never clause text
         audit = (

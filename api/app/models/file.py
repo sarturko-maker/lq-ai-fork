@@ -23,7 +23,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -75,6 +75,23 @@ class File(Base):
         UUID(as_uuid=True),
         ForeignKey("agent_runs.id", ondelete="SET NULL", name="fk_files_created_by_run_id"),
         nullable=True,
+    )
+    # Document lineage (R-1, ADR-F066): the row this one was derived from — a
+    # redline/response output points at its source document; the editor's
+    # first-save snapshot points at the live row whose prior bytes it preserves.
+    # NULL for original uploads. ``SET NULL`` on parent delete keeps the
+    # derivative. The working-version resolver walks this chain.
+    parent_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("files.id", ondelete="SET NULL", name="fk_files_parent_file_id"),
+        nullable=True,
+    )
+    # ADR-F066: True marks an immutable prior-version copy (the WOPI first-save
+    # snapshot) — never a working version; the resolver skips these leaves.
+    is_snapshot: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
     )
 
     created_at: Mapped[datetime] = mapped_column(

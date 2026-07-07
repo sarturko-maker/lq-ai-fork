@@ -836,6 +836,11 @@ async def test_putfile_snapshots_agent_redline_on_first_save(
     assert "(agent draft)" in snap.filename
     assert fake_s3.objects[snap.storage_path] == original
     assert snap.storage_path == str(snap.id)  # key == row id (ADR 0005)
+    # document lineage (ADR-F066): the snapshot points at the live row it
+    # preserves and is marked immutable; the live row stays the working version.
+    assert snap.parent_file_id == f.id
+    assert snap.is_snapshot is True
+    assert f.is_snapshot is False
 
 
 @pytest.mark.integration

@@ -3,7 +3,7 @@ name: surgical-redline
 description: Use when redlining the other side's contract draft with tracked changes (the apply_redline / preview_redline tools) — for any clause you amend. Teaches how to return each amendment so the tool renders surgical, structure-preserving tracked changes — quote the existing clause and return it with only the necessary words changed (the tool computes the word-level diff and keeps the rest bare), balance one-sided clauses through the right legal mechanism, and preview before you apply.
 lq_ai:
   title: Surgical Redline Craft
-  version: 2.0.0
+  version: 2.1.0
   author: LegalQuants
   tags: [commercial, redline, tracked-changes, contracts, drafting]
   jurisdiction: US-default
@@ -16,7 +16,7 @@ lq_ai:
     required:
       - name: document
         type: document
-        description: The matter .docx to redline (the counterparty's draft). The tools read it from the matter; you quote the exact existing text as each edit's anchor.
+        description: The matter .docx to redline (the counterparty's draft). The tools read it from the matter (follow-ups automatically continue from the latest working version); you quote the exact existing text as each edit's anchor.
     optional:
       - name: positions
         type: text
@@ -142,8 +142,10 @@ Mark up only what matters — price, liability, indemnity, IP, term, data; let p
    - is recognisable boilerplate (verb phrases, defined terms, structure) still **bare**?
    - does accepting every change yield the balanced clause you intend?
 4. Revise any edit that reads as rip-and-replace, then preview again if you changed much. When the
-   redline reads surgically, call **`apply_redline`** **once** with the whole batch. (Each call redlines
-   the original afresh — batch everything; don't apply in pieces.)
+   redline reads surgically, call **`apply_redline`** **once** with the whole batch — batch everything;
+   don't apply in pieces. A follow-up call automatically continues from your latest working version of
+   the document, so a later instruction builds on the redline you already made; pass `start_fresh=true`
+   only when the lawyer explicitly asks to restart from the original.
 
 ## Rationale, scope, and when to stop
 

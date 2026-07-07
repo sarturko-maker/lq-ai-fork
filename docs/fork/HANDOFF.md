@@ -4,6 +4,105 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 then CLAUDE.md, then the ADRs/plans named below.
 
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+> ▶▶▶ **PIVOT (2026-07-07): MODULAR AGENT-BUILDER + AZURE FOUNDRY + REDLINE CONTINUITY — the CURRENT
+> direction. Maintainer approved ALL of it verbatim ("Approved and go on all").** Governing docs (read in
+> order): **`docs/fork/plans/PIVOT-modular-azure.md`** (the breakdown: Workstreams R / AZ / B, incl. the
+> R-1 fix spec and the B-0…B-7 wizard ladder) → **`docs/fork/plans/AZURE-FOUNDRY-phase1.md`** (Azure
+> Phase-1 research report, **Phase 2 APPROVED 2026-07-07**; verdicts + confirmed endpoints/auth/regions +
+> repo coupling flags) → `docs/fork/plans/CAPABILITY-SOURCES-birdseye.md` (two-universe map behind B).
+> Memory: [[pivot-modular-azure]]. This supersedes the "PICK UP = STORE-3" pointer below (STORE done).
+>
+> **THE SLICE LADDER (execute top-down; one PR each; full ADR-F005 gate every time):**
+> - **PR #227 (docs, OPEN)** — the pivot record (5 plan docs, doc-only, branch
+>   `pivot-docs-modular-azure`). Merge when CI is green; no containerized suites needed (no service
+>   touched); squash with `--repo sarturko-maker/lq-ai-fork`.
+> - **R-1 ✓ SHIPPED (branch `r1-redline-continuity`, ADR-F066 accepted, mig 0089) — redline
+>   continuity.** Follow-up redlines now continue from the agent's own latest working version:
+>   `files.parent_file_id` + `files.is_snapshot` (mig 0089, up/down/up verified on throwaway
+>   pgvector); write-side lineage on redline/response outputs + WOPI snapshots;
+>   `resolve_working_docx` (breadth-first newest NON-SNAPSHOT LEAF — a greedy per-hop walk was a
+>   review catch; matter-scoped every hop via the shared `_DOCX_COLUMNS` projection; depth-capped);
+>   `apply_redline`/`preview_redline` grow `start_fresh=false` + a continuity note naming the
+>   resolved version; version-aware naming `(redlined)→(redlined v2)→…` with the version-digit run
+>   BOUNDED to 8 digits (hostile-filename review catch); inventory renders honest provenance
+>   ("agent work product — derived from X" / "editor snapshot of X") instead of "not ingested yet";
+>   SKILL/doctrine/docstrings corrected. `extract_counterparty_position`/`respond_to_counterparty`
+>   deliberately KEEP exact-name semantics. Orchestrated as a 3-implementer + 3-reviewer + fixer
+>   workflow; 3 should-fixes all applied, nothing deferred. Gate: full containerized api suite
+>   **3387 passed / 47 skipped** (baseline 3369 + the slice's tests); ruff (root config) + mypy
+>   clean; live in-container probe (real Adeu + real S3 + live DB, no LLM): apply×2 → v1 parent =
+>   original, v2 parent = v1, continuity note names v1, resolver leaf = v2, start_fresh bypasses —
+>   throwaway matter cleaned. **TRAPS:** (1) workflow verify runners MUST return structured output —
+>   the suite runner died reporting nothing (agents_empty_result); lead re-ran. (2) ruff inside a
+>   container with ONLY api/ mounted falls back to line-length 88 and mass-rewraps — ALWAYS mount
+>   the repo root. (3) targeted in-container tests need /skills mounted (mig 0032 seeds from it).
+> - **AZ-CONFIG — one PR bundling AZ-1 + AZ-2a + AZ-3 + AZ-4a (all CONFIG-ONLY, each independently
+>   enableable via its own env vars; nothing changes when unset).** Content: `gateway.yaml.example`
+>   gains (1) the azure-openai entry updated to a GA api-version with deployment-name `models:` comments,
+>   (2) NEW `azure-claude` entry — `type: anthropic`, `base_url:
+>   https://${AZURE_ANTHROPIC_RESOURCE:-disabled}.services.ai.azure.com/anthropic`, `api_key_env:
+>   AZURE_ANTHROPIC_API_KEY`, tier 3, note "text-only until AZ-2b", (3) NEW `azure-mistral` entry —
+>   `type: azure_openai` on the `services.ai.azure.com` host (classic deployments route works for
+>   non-OpenAI Foundry models), models = e.g. a `Mistral-Large-3` deployment (ONLY Large-3 gets an
+>   agent-facing alias — medium-3-5/Codestral have NO tool-calling on Azure), (4) `azure-` model_aliases
+>   (non-colliding) + `cost_tracking.rates` placeholder entries, (5) `embedding` alias variant comment for
+>   an azure text-embedding-3 deployment (Door B). Plus: `.env.example` + docker-compose gateway env
+>   passthrough (`${VAR:-}`) for the new vars; gateway config-parse tests if the pattern fits
+>   (`test_build_adapter.py` style); README note re the `gateway-config` NAMED-VOLUME seed trap (example
+>   edits do NOT propagate to an already-seeded volume). **Tier trap: never `type: openai_compatible`
+>   for a cloud provider (defaults tier 1) — explicit cloud type/tier.** NO real resource names/keys —
+>   repo is public. **RE-PRIORITISED (maintainer, 2026-07-07): budget-constrained — ship inference-on-
+>   Foundry readiness FIRST. AZ-CONFIG + AZ-2b are the critical path; AZ-4 embeddings PARKED** (local
+>   Door-A embedder is $0/private/proven and stays the answer; item (5) shrinks to a comment-only
+>   alias example; Voyage — maintainer sighted voyage-4/-lite/rerank-2.5 live in the Foundry catalog,
+>   updating the "rerank unconfirmed" finding — revisits ONLY if real-matter tabular/retrieval quality
+>   shows the embedder is the bottleneck; the CUAD eval harness is ready for that head-to-head).
+>   Note for AZ-CONFIG's live story: once merged, an operator points `smart`/`fast`/`budget` at Foundry
+>   deployments via the operator Models page (hot-apply proven in ONBOARD-0) — GPT + Mistral-Large-3
+>   become agent-capable with ZERO code; Claude joins after AZ-2b.
+> - **AZ-2b — Anthropic adapter tool-calling (the one real gateway slice; retires fork blocker #2).**
+>   `gateway/app/providers/anthropic.py`: request side — forward `tools`/`tool_choice`, translate
+>   assistant `tool_calls`→`tool_use` blocks + `role:"tool"`→`tool_result` (exists), stop collapsing
+>   block content to `""`; response side — `tool_use` blocks → OpenAI-shape `tool_calls` +
+>   `finish_reason:"tool_calls"`; streaming — named-event deltas → OpenAI-style tool-call deltas
+>   (mirror `_ensure_stream_tool_call_ids` conformance). mypy --strict; respx tests mirroring
+>   `test_anthropic_adapter.py`. Live verify vs a real key (direct Anthropic or the Foundry sandbox once
+>   it exists — if neither, respx-only and defer live proof to the AZ-5 smoke, ON RECORD).
+> - **AZ-5 — Azure VM sandbox runbook** (compose on an Azure VM; secrets via env; per-provider
+>   synthetic smoke commands from the maintainer's brief; region: **Sweden Central or East US2** —
+>   Claude's restriction binds; builds on `docs/fork/runbooks/staging-bringup.md` patterns). AZ-4b
+>   (Voyage) stays DEFERRED until this resource exists; AZ-6 (AKS/Entra) unplanned.
+> - **BRAND-1 — tenant white-labeling (maintainer, 2026-07-07: clients brand the product — palette,
+>   logo, product name — WITHOUT coding; task #480).** The substrate makes this cheap BY DESIGN:
+>   (a) the ADR-F013 token layer means palette = overriding a handful of `--lq-*` CSS custom
+>   properties at runtime (light+dark variants); (b) the Oscar-Edition rebrand slice ALREADY MAPPED
+>   every product-name surface (12: app.html shell title, CockpitHeader wordmark, DualBrandingFooter,
+>   8 per-page title suffixes) — see the rebrand addendum's KEEP boundary. Shape: one small
+>   deployment-level branding row (product_name, logo file ref, palette overrides as a validated
+>   token subset) + `GET /api/v1/branding` (unauth, cacheable — the shell fetches at boot, injects
+>   CSS vars, swaps wordmark/titles/favicon) + an admin Branding page (name field, colour pickers
+>   w/ contrast validation, logo upload — RASTER ONLY at first: SVG can carry scripts) + wizard
+>   passthrough (setup-tenant.sh seeds BRAND_* from the manifest). Emails: invite/reset templates
+>   must read the configured name too. HARD LINES: NOTICES.md + footer attribution stay intact
+>   (Apache-2.0 provenance is not brandable); `lq-ai-*`/`--lq-*`/`LQ_AI_*` code identifiers NEVER
+>   rename (the rebrand KEEP boundary); Word add-in manifest stays deferred. Option-A
+>   stack-per-tenant means deployment-level branding IS tenant-level — no per-org rows needed.
+>   Org-admin edits it (their brand); operator pre-seeds via wizard. Slot: after AZ-2b (or parallel
+>   to AZ-5 — disjoint files).
+> - **B-0 — module-model ADR + milestone re-plan (starts Workstream B).** One vocabulary: module =
+>   skill | knowledge | playbook | tool group | sub-agent profile; how org-AUTHORED content enters the
+>   Library (reopens ADR-F065 D7 WITH the injection harness it demanded — org-authored skills are a
+>   prompt-injection surface); what an "agent profile" is. Then re-plan B-1…B-7 (House Brief page →
+>   org skills → knowledge → playbooks → sub-agent config → HITL policy (needs a langgraph-interrupts
+>   research spike) → the wizard, absorbing ONBOARD-1/2 + G13/#473) as its own milestone doc.
+> - **GOTCHAS:** background Workflow runs are SESSION-scoped — after a compaction, resume from the
+>   branch diff + this banner, not the run id. Strays stay uncommitted (`sample-documents/`,
+>   `api/tests/agents/scenarios/test_*_live.py`). Ruff CI-parity trap (run CI's exact version +
+>   commands). SKILL.md colon-space guard applies to the surgical-redline edit. Dev box: run full
+>   suites ALONE (6.3 GiB, no swap — [[devbox-oom-shield]]).
+> ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+> ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 > ▶▶▶ **PIVOT (2026-07-02): SAAS — HOSTED PRODUCT. Maintainer-directed; the CURRENT direction.**
 > Make the fork hostable: companies register an org (tenant) → admin → users, on operator-hosted,
 > EU-resident, **dedicated stacks (one per tenant)** — while **self-hosting from GitHub stays supported**
