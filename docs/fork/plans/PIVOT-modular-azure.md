@@ -77,10 +77,13 @@ Status: **R-0 diagnosis DONE (2026-07-07, code trace).** Root cause, exactly:
   unlocks Claude as an AGENT model, Foundry and direct; respx tests, mypy --strict. One PR.
 - AZ-3: Mistral-Large-3 — config-only via the azure_openai-type route on the services.ai host (only
   Large-3 gets an agent alias; medium-3-5/Codestral lack tool-calling on Azure). One PR.
-- AZ-4a: Azure-managed embeddings Door B — `embedding` alias → azure text-embedding-3 (config-only).
-  AZ-4b: Voyage — DEFERRED until the sandbox Foundry resource exists (verify catalog endpoint shape
-  live; then adapter + additive vector(1024) column decision; law-2 vs voyage-4 vs stay-local).
-  Ties into F056 (admin-selectable embedding provider).
+- AZ-4 — **PARKED (maintainer, 2026-07-07: budget-constrained — ship what works; inference-on-Foundry
+  readiness outranks embeddings).** The local Door-A embedder is $0, private, and proven — it IS the
+  shipping answer. AZ-4a shrinks to a comment-only `embedding`-alias example inside the AZ-CONFIG PR;
+  AZ-4b (Voyage — maintainer sighted voyage-4 / voyage-4-lite / rerank-2.5 LIVE in the Foundry catalog
+  2026-07-07, which confirms the previously-UNCONFIRMED reranker) revisits ONLY if real-matter
+  tabular/retrieval quality shows the embedder is the bottleneck — the CUAD eval harness is ready for
+  that head-to-head. Ties into F056.
 - AZ-5: VM sandbox deploy runbook (compose on an Azure VM; secrets via env; gateway-config named-
   volume seeding; per-provider synthetic smoke tests). Builds on ADR-F058 delivery modes.
 - AZ-6 (later): enterprise posture — AKS, Entra ID keyless (configurable audience — scope strings per
