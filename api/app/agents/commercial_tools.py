@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -52,6 +53,7 @@ from app.agents.tools import (
     download_matter_docx,
     fetch_matter_docx,
     load_matter_docx_bytes,
+    resolve_working_docx,
 )
 from app.audit import audit_action
 from app.models.file import File
@@ -137,7 +139,9 @@ def build_commercial_tools(
         practice_area_id=binding.practice_area_id,
     )
 
-    async def apply_redline(document_name: str, edits: list[dict[str, Any]]) -> str:
+    async def apply_redline(
+        document_name: str, edits: list[dict[str, Any]], start_fresh: bool = False
+    ) -> str:
         """Redline one of this matter's ``.docx`` documents with tracked changes.
 
         Propose a batch of NARROW edits; each becomes native Word tracked changes
@@ -145,10 +149,13 @@ def build_commercial_tools(
         back into this matter for download.
 
         IMPORTANT — batch your edits: pass ALL the edits for a document in a
-        SINGLE call. Each call redlines the *named* document afresh and saves a new
-        redlined copy; calling again does NOT stack on your previous output (it
-        re-redlines the original). So review the whole document first, then make one
-        apply_redline call covering every change.
+        SINGLE call. A follow-up call CONTINUES from your latest working version
+        of the named document automatically (ADR-F066): name the document as the
+        lawyer does and the tool resolves the current version, so a later batch
+        builds on the redline you already made. Still review the whole document
+        first and cover every change for it in one call. Set ``start_fresh=true``
+        ONLY when the lawyer explicitly asks to restart from the original
+        document, setting aside your earlier redlines.
 
         Redline like a lawyer (this is enforced — over-broad edits are rejected):
         - **Quote the clause; change only the necessary words.** Set
@@ -190,17 +197,23 @@ def build_commercial_tools(
                 edits=edits,
                 service=redline_service,
                 run_id=run_id,
+                start_fresh=start_fresh,
             ),
             ctx,
         )
 
-    async def preview_redline(document_name: str, edits: list[dict[str, Any]]) -> str:
+    async def preview_redline(
+        document_name: str, edits: list[dict[str, Any]], start_fresh: bool = False
+    ) -> str:
         """Dry-run a redline and SEE the tracked changes — saves NOTHING.
 
         Use this BEFORE apply_redline to check your own work. It runs the exact
         same surgical gate and Adeu rendering as apply_redline and returns the
         rendered ``[-struck-]``/``[+inserted+]`` view of the changed paragraphs,
-        but writes no file. Read the preview as the supervising lawyer will, then:
+        but writes no file. Like apply_redline, it previews against your latest
+        working version of the named document by default (ADR-F066); pass
+        ``start_fresh=true`` only to preview against the original instead. Read
+        the preview as the supervising lawyer will, then:
         - if a clause shows a large struck-and-retyped block, you re-worded more
           than necessary — revise ``new_text`` to keep the unchanged wording
           identical (the tool only strikes words that actually differ);
@@ -217,6 +230,7 @@ def build_commercial_tools(
                 document_name=document_name,
                 edits=edits,
                 service=redline_service,
+                start_fresh=start_fresh,
             ),
             ctx,
         )
@@ -338,6 +352,9 @@ class _RenderedRedline:
     proposal: ApplyRedlineInput
     redlined: bytes
     result: RedlineApplyResult
+    # ADR-F066 transparency: set when the resolved working version differs from
+    # the literally-named document — the tool's result must say what it did.
+    continuity_note: str | None = None
 
 
 async def _render_redline(
@@ -347,6 +364,7 @@ async def _render_redline(
     document_name: str,
     edits: list[dict[str, Any]],
     service: RedlineService,
+    start_fresh: bool = False,
 ) -> _RenderedRedline | str:
     """Validate → fetch (matter-scoped) → gate → dry-run → render in memory.
 
@@ -362,12 +380,24 @@ async def _render_redline(
         return _rejection_text(exc)
 
     # 2. Fetch the source .docx under matter scope (404-conflated cross-user).
-    row = await fetch_matter_docx(db, binding, proposal.document_name)
+    #    Default: continue from the matter's newest working version of the named
+    #    document (lineage walk, ADR-F066); start_fresh pins the named row itself.
+    if start_fresh:
+        row = await fetch_matter_docx(db, binding, proposal.document_name)
+    else:
+        row = await resolve_working_docx(db, binding, proposal.document_name)
     if row is None:
         return (
             f'No document named "{proposal.document_name}" in this matter. Use '
             "search_documents (empty query) to list the matter's documents."
         )
+    continuity_note = (
+        f'Continued from your latest working version "{row.filename}" (derived '
+        f'from "{proposal.document_name}"); pass start_fresh=true to redline the '
+        "original instead."
+        if not start_fresh and row.filename.lower() != proposal.document_name.lower()
+        else None
+    )
     if row.mime_type != OOXML_DOCX_MIME:
         return (
             f'"{row.filename}" is not a Word .docx (it is {row.mime_type}). '
@@ -443,7 +473,13 @@ async def _render_redline(
             extra={"event": "redline_apply_error"},
         )
         return _EDITOR_ERROR_MSG
-    return _RenderedRedline(row=row, proposal=proposal, redlined=result.docx_bytes, result=result)
+    return _RenderedRedline(
+        row=row,
+        proposal=proposal,
+        redlined=result.docx_bytes,
+        result=result,
+        continuity_note=continuity_note,
+    )
 
 
 async def _preview_redline(
@@ -453,10 +489,16 @@ async def _preview_redline(
     document_name: str,
     edits: list[dict[str, Any]],
     service: RedlineService,
+    start_fresh: bool = False,
 ) -> str:
     """Render the redline and return the changed-paragraph view — saves nothing."""
     rendered = await _render_redline(
-        db, binding, document_name=document_name, edits=edits, service=service
+        db,
+        binding,
+        document_name=document_name,
+        edits=edits,
+        service=service,
+        start_fresh=start_fresh,
     )
     if isinstance(rendered, str):
         return rendered
@@ -468,8 +510,9 @@ async def _preview_redline(
     if len(view) > _MAX_PREVIEW_CHARS:
         view = view[:_MAX_PREVIEW_CHARS] + "\n… (preview truncated — narrow the batch)"
 
+    note = f"{rendered.continuity_note}\n\n" if rendered.continuity_note else ""
     return (
-        f"Preview of {len(rendered.proposal.edits)} edit(s) on "
+        f"{note}Preview of {len(rendered.proposal.edits)} edit(s) on "
         f'"{rendered.row.filename}" ({rendered.result.edits_applied} tracked change '
         "region(s)). NOTHING has been saved — this is a dry run.\n\n"
         "Rendered tracked changes ([-struck-] / [+inserted+]):\n"
@@ -490,10 +533,16 @@ async def _apply_redline(
     edits: list[dict[str, Any]],
     service: RedlineService,
     run_id: uuid.UUID,
+    start_fresh: bool = False,
 ) -> str:
     """Render (validate → gate → dry-run → apply) then persist + audit (or reject)."""
     rendered = await _render_redline(
-        db, binding, document_name=document_name, edits=edits, service=service
+        db,
+        binding,
+        document_name=document_name,
+        edits=edits,
+        service=service,
+        start_fresh=start_fresh,
     )
     if isinstance(rendered, str):
         return rendered
@@ -521,6 +570,9 @@ async def _apply_redline(
         # Work-product provenance (ADR-F046): ties this output to the run that
         # produced it, so the cockpit can surface the download inline under the run.
         created_by_run_id=run_id,
+        # Document lineage (ADR-F066): the redline derives from the source row, so
+        # the working-version resolver can continue from the agent's latest output.
+        parent_file_id=row.file_id,
     )
     db.add(file_row)
     await db.flush()
@@ -545,8 +597,9 @@ async def _apply_redline(
         },
     )
 
+    note = f"{rendered.continuity_note} " if rendered.continuity_note else ""
     return (
-        f"Applied {len(proposal.edits)} edit(s) ({result.edits_applied} tracked "
+        f"{note}Applied {len(proposal.edits)} edit(s) ({result.edits_applied} tracked "
         f'change region(s)) to "{row.filename}". Saved the redlined document as '
         f'"{redlined_name}" in this matter — download it to review and accept or '
         f"reject each change. Every change is tracked; substantive ones carry a "
@@ -849,6 +902,7 @@ async def _respond_to_counterparty(
         storage_path=str(new_file_id),
         ingestion_status="ready",
         created_by_run_id=run_id,
+        parent_file_id=row.file_id,  # document lineage (ADR-F066)
     )
     db.add(file_row)
     await db.flush()
@@ -1056,12 +1110,27 @@ async def _record_reconciliation_receipt(
         )
 
 
-def _response_filename(original: str) -> str:
-    """``contract.docx`` → ``contract (response).docx`` (keeps the extension)."""
+def _versioned_filename(original: str, label: str) -> str:
+    """Version-aware output naming (ADR-F066): ``X.docx`` → ``X (label).docx`` →
+    ``X (label v2).docx`` → v3 …, so a lineage chain of outputs keeps readable,
+    distinct names. Keeps the ``.docx`` extension; any other name gets ``.docx``
+    appended (the output is a new Word document whatever the source was called).
+    """
     stem, dot, ext = original.rpartition(".")
-    if dot and ext.lower() == "docx":
-        return f"{stem} (response).{ext}"
-    return f"{original} (response).docx"
+    if not (dot and ext.lower() == "docx"):
+        stem, ext = original, "docx"
+    # Digit run bounded: filenames are untrusted (upload boundary only checks
+    # non-empty), and int() on an unbounded run raises past Python's ~4300-digit
+    # conversion limit — a hostile suffix degrades to a plain "(label)" instead.
+    bumped = re.fullmatch(rf"(.*) \({re.escape(label)}(?: v(\d{{1,8}}))?\)", stem)
+    if bumped:
+        return f"{bumped.group(1)} ({label} v{int(bumped.group(2) or 1) + 1}).{ext}"
+    return f"{stem} ({label}).{ext}"
+
+
+def _response_filename(original: str) -> str:
+    """``contract.docx`` → ``contract (response).docx`` → ``… (response v2).docx``."""
+    return _versioned_filename(original, "response")
 
 
 def _extract_docx_text(data: bytes) -> str:
@@ -1076,11 +1145,8 @@ def _extract_docx_text(data: bytes) -> str:
 
 
 def _redlined_filename(original: str) -> str:
-    """``contract.docx`` → ``contract (redlined).docx`` (keeps the extension)."""
-    stem, dot, ext = original.rpartition(".")
-    if dot and ext.lower() == "docx":
-        return f"{stem} (redlined).{ext}"
-    return f"{original} (redlined).docx"
+    """``contract.docx`` → ``contract (redlined).docx`` → ``… (redlined v2).docx``."""
+    return _versioned_filename(original, "redlined")
 
 
 def _rejection_text(exc: ValidationError, *, tool: str = "apply_redline") -> str:

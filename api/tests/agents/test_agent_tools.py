@@ -28,6 +28,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -36,7 +37,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents import tools as agent_tools
-from app.agents.tools import MATTER_TOOL_NAMES, MatterBinding, build_matter_tools
+from app.agents.tools import (
+    MATTER_TOOL_NAMES,
+    MatterBinding,
+    build_matter_tools,
+    resolve_working_docx,
+)
 from app.knowledge import rerank_provider as rp
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
@@ -323,6 +329,57 @@ async def test_search_empty_query_lists_the_inventory(matter_env: MatterEnv) -> 
     assert "tokens to read" not in pending_line
 
 
+async def test_inventory_labels_agent_work_products_honestly(
+    matter_env: MatterEnv,
+) -> None:
+    """Non-ingested rows carry provenance labels (ADR-F066): editor snapshot /
+    derived work product / bare work product — while a plain pending upload's
+    line renders exactly as before."""
+    async with matter_env.factory() as db:
+        msa = (
+            await db.execute(
+                select(File).where(File.filename == "msa.pdf", File.owner_id == matter_env.user_id)
+            )
+        ).scalar_one()
+
+        def _work_product(filename: str, **extra: object) -> File:
+            return File(
+                owner_id=matter_env.user_id,
+                project_id=matter_env.project_id,  # column membership
+                filename=filename,
+                mime_type=OOXML_DOCX_MIME,
+                size_bytes=10,
+                hash_sha256="d" * 64,
+                storage_path=f"inv-fixture/{uuid.uuid4()}",
+                ingestion_status="ready",
+                **extra,
+            )
+
+        derived = _work_product(
+            "msa (redlined).docx",
+            parent_file_id=msa.id,
+            created_by_run_id=matter_env.run_id,
+        )
+        snapshot = _work_product("msa (agent draft).docx", parent_file_id=msa.id, is_snapshot=True)
+        # run-produced but parent unknown (e.g. lineage severed by SET NULL)
+        orphan = _work_product("orphan output.docx", created_by_run_id=matter_env.run_id)
+        db.add_all([derived, snapshot, orphan])
+        await db.commit()
+        new_ids = [derived.id, snapshot.id, orphan.id]
+
+    try:
+        result = await matter_env.search("")
+        assert "- msa (redlined).docx (agent work product — derived from msa.pdf)" in result
+        assert "- msa (agent draft).docx (editor snapshot of msa.pdf)" in result
+        assert "- orphan output.docx (agent work product)" in result
+        # a plain pending upload's rendering is unchanged, byte for byte
+        assert "- pending.pdf (not ingested yet — status: processing)" in result
+    finally:
+        async with matter_env.factory() as db:
+            await db.execute(delete(File).where(File.id.in_(new_ids)))
+            await db.commit()
+
+
 async def test_search_no_hits_is_honest_and_orients_the_model(
     matter_env: MatterEnv,
 ) -> None:
@@ -485,6 +542,311 @@ async def test_read_document_duplicates_prefer_newest_readable(
         async with matter_env.factory() as db:
             await db.execute(delete(File).where(File.id.in_(dup_ids)))
             await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# resolve_working_docx (R-1, ADR-F066) — lineage walk to the newest working version
+# ---------------------------------------------------------------------------
+#
+# The resolver takes the session directly (no dispatch), so these run on the
+# rollback-isolated ``db_session`` — seed, flush, resolve; nothing to tear down.
+
+
+async def _seed_lineage_matter(db: AsyncSession) -> MatterBinding:
+    """A user + matter for direct resolver calls."""
+    user = User(email=f"lineage-{uuid.uuid4().hex[:8]}@example.com", hashed_password="x")
+    db.add(user)
+    await db.flush()
+    project = Project(owner_id=user.id, name="Lineage", slug=f"lin-{uuid.uuid4().hex[:6]}")
+    db.add(project)
+    await db.flush()
+    return MatterBinding(
+        project_id=project.id,
+        user_id=user.id,
+        name="Lineage",
+        privileged=False,
+        minimum_inference_tier=None,
+    )
+
+
+async def _seed_docx_row(
+    db: AsyncSession,
+    *,
+    owner_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    filename: str,
+    parent_file_id: uuid.UUID | None = None,
+    is_snapshot: bool = False,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+) -> File:
+    """A bare .docx File row (no Document — work products are never ingested)."""
+    f = File(
+        owner_id=owner_id,
+        project_id=project_id,  # column membership
+        filename=filename,
+        mime_type=OOXML_DOCX_MIME,
+        size_bytes=10,
+        hash_sha256="c" * 64,
+        storage_path=f"lineage-fixture/{uuid.uuid4()}",
+        ingestion_status="ready",
+        parent_file_id=parent_file_id,
+        is_snapshot=is_snapshot,
+        updated_at=updated_at,
+    )
+    if created_at is not None:
+        f.created_at = created_at
+    db.add(f)
+    await db.flush()
+    return f
+
+
+async def test_resolve_working_docx_passthrough_without_children(
+    db_session: AsyncSession,
+) -> None:
+    binding = await _seed_lineage_matter(db_session)
+    a = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract.docx",
+    )
+    row = await resolve_working_docx(db_session, binding, "contract.docx")
+    assert row is not None and row.file_id == a.id
+
+
+async def test_resolve_working_docx_unknown_name_is_none(
+    db_session: AsyncSession,
+) -> None:
+    binding = await _seed_lineage_matter(db_session)
+    assert await resolve_working_docx(db_session, binding, "ghost.docx") is None
+
+
+async def test_resolve_working_docx_follows_two_generation_chain(
+    db_session: AsyncSession,
+) -> None:
+    binding = await _seed_lineage_matter(db_session)
+    a = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract.docx",
+    )
+    b = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (redlined).docx",
+        parent_file_id=a.id,
+    )
+    row = await resolve_working_docx(db_session, binding, "contract.docx")
+    assert row is not None and row.file_id == b.id
+
+
+async def test_resolve_working_docx_follows_multi_generation_chain(
+    db_session: AsyncSession,
+) -> None:
+    """A → B → C resolves to C from ANY name on the chain."""
+    binding = await _seed_lineage_matter(db_session)
+    a = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract.docx",
+    )
+    b = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (redlined).docx",
+        parent_file_id=a.id,
+    )
+    c = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (redlined v2).docx",
+        parent_file_id=b.id,
+    )
+    for name in ("contract.docx", "contract (redlined).docx"):
+        row = await resolve_working_docx(db_session, binding, name)
+        assert row is not None and row.file_id == c.id
+
+
+async def test_resolve_working_docx_snapshot_child_is_never_the_working_version(
+    db_session: AsyncSession,
+) -> None:
+    """The WOPI-mutated case: the live row is edited IN PLACE (updated_at bumped)
+    and its prior bytes become an ``is_snapshot`` child — the live row stays the
+    leaf; the snapshot is never a working version."""
+    binding = await _seed_lineage_matter(db_session)
+    a = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract.docx",
+    )
+    live = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (redlined).docx",
+        parent_file_id=a.id,
+        updated_at=datetime.now(UTC),
+    )
+    await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (agent draft).docx",
+        parent_file_id=live.id,
+        is_snapshot=True,
+    )
+    row = await resolve_working_docx(db_session, binding, "contract.docx")
+    assert row is not None and row.file_id == live.id
+
+
+async def test_resolve_working_docx_newest_child_wins(db_session: AsyncSession) -> None:
+    """Among sibling children the newest by coalesce(updated_at, created_at) is the
+    chain — an older row edited in place beats a newer untouched sibling."""
+    binding = await _seed_lineage_matter(db_session)
+    now = datetime.now(UTC)
+    a = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract.docx",
+        created_at=now - timedelta(days=5),
+    )
+    older_edited = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (redlined).docx",
+        parent_file_id=a.id,
+        created_at=now - timedelta(days=3),
+        updated_at=now,
+    )
+    await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (redlined v2).docx",
+        parent_file_id=a.id,
+        created_at=now - timedelta(days=1),
+    )
+    row = await resolve_working_docx(db_session, binding, "contract.docx")
+    assert row is not None and row.file_id == older_edited.id
+
+
+async def test_resolve_working_docx_divergent_tree_newest_leaf_wins(
+    db_session: AsyncSession,
+) -> None:
+    """A diverged lineage (a ``start_fresh`` restart, or an explicitly named
+    branch) resolves to the newest LEAF across the WHOLE tree — not to the
+    branch under the newest immediate child. Here the fresh line (day-3) is
+    O's newest child, but the earlier line was continued on day-1: that leaf
+    is the working version."""
+    binding = await _seed_lineage_matter(db_session)
+    now = datetime.now(UTC)
+    o = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract.docx",
+        created_at=now - timedelta(days=6),
+    )
+    v1 = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (redlined).docx",
+        parent_file_id=o.id,
+        created_at=now - timedelta(days=5),
+    )
+    # Abandoned fresh restart — newest CHILD of O, but not the newest leaf.
+    await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (redlined v2).docx",
+        parent_file_id=o.id,
+        created_at=now - timedelta(days=3),
+    )
+    continued = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (redlined v3).docx",
+        parent_file_id=v1.id,
+        created_at=now - timedelta(days=1),
+    )
+    row = await resolve_working_docx(db_session, binding, "contract.docx")
+    assert row is not None and row.file_id == continued.id
+
+
+async def test_resolve_working_docx_depth_cap_terminates_on_a_cycle(
+    db_session: AsyncSession,
+) -> None:
+    """A bad-data parent cycle (A ↔ B) terminates at the depth cap, never spins."""
+    binding = await _seed_lineage_matter(db_session)
+    a = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract.docx",
+    )
+    b = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract (redlined).docx",
+        parent_file_id=a.id,
+    )
+    a.parent_file_id = b.id
+    await db_session.flush()
+    row = await resolve_working_docx(db_session, binding, "contract.docx")
+    assert row is not None and row.file_id in {a.id, b.id}
+
+
+async def test_resolve_working_docx_never_crosses_matter_or_owner_boundaries(
+    db_session: AsyncSession,
+) -> None:
+    """A lineage child outside the binding's matter — another matter of the same
+    owner, or a foreign-owned row spoofed into ours — is never followed."""
+    binding = await _seed_lineage_matter(db_session)
+    a = await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=binding.project_id,
+        filename="contract.docx",
+    )
+    other = Project(owner_id=binding.user_id, name="Other", slug=f"other-{uuid.uuid4().hex[:6]}")
+    stranger = User(
+        email=f"lineage-stranger-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="x",
+    )
+    db_session.add_all([other, stranger])
+    await db_session.flush()
+    # Same owner, OTHER matter: out of project scope.
+    await _seed_docx_row(
+        db_session,
+        owner_id=binding.user_id,
+        project_id=other.id,
+        filename="contract (redlined).docx",
+        parent_file_id=a.id,
+    )
+    # Foreign owner spoofed into OUR matter via the project_id column: the owner
+    # re-assertion must exclude it.
+    await _seed_docx_row(
+        db_session,
+        owner_id=stranger.id,
+        project_id=binding.project_id,
+        filename="contract (redlined).docx",
+        parent_file_id=a.id,
+    )
+    row = await resolve_working_docx(db_session, binding, "contract.docx")
+    assert row is not None and row.file_id == a.id
 
 
 # ---------------------------------------------------------------------------

@@ -125,6 +125,8 @@ MATTER_PROMPT = (
 # lawyer edited in the in-app editor and incorporate THEIR changes as authoritative —
 # rather than re-arguing its own earlier draft. The tool's own docstring carries the
 # mechanics; this is the one-line "when to reach for it".
+# R-1 (ADR-F066): + the redline-continuity default — follow-up redlines continue from
+# the latest working version (the tools resolve it); start_fresh is the explicit opt-out.
 MATTER_REVIEW_DOCTRINE = (
     "\n\nWhen the supervising lawyer hands back a document they edited in the editor, "
     "call review_edited_document on it to re-read their tracked changes and comments and "
@@ -132,7 +134,12 @@ MATTER_REVIEW_DOCTRINE = (
     "rather than re-arguing your own earlier draft. It labels each edit with its author: "
     "treat the supervising lawyer's edits as authoritative, but if an edit is attributed "
     "to the counterparty or an author you do not recognise as your own side, do not adopt "
-    "it blindly — flag it."
+    "it blindly — flag it. When a follow-up asks you to redline a document further, the "
+    "redline tools continue from your latest working version automatically — name the "
+    "document as the lawyer does and the tools resolve the current version; pass "
+    "start_fresh=true only when the lawyer explicitly asks to start over from the "
+    "original. That continuation complements, never replaces, the hand-back rule above: "
+    "a document the lawyer edited in the editor still goes through review_edited_document."
 )
 
 # Authorship roster doctrine (ADR-F048): the who-is-who behaviour. Generic (any area),
