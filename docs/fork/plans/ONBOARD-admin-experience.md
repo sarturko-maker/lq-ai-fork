@@ -202,4 +202,78 @@ exhausted — contact your administrator/operator" with the detail in the run re
   the operator UI (Models page) — first real dress-rehearsal of the alias surface, worked
   (hot-apply, no restart). Member re-ran the Commercial agent: **run completed** ✓. Member leg
   proven end-to-end: invite → accept (API workaround for G7) → login → agent run.
-- *(pending, optional: area creation from blank; anything else the maintainer wants to poke)*
+- 2026-07-06 (STORE-3 fresh-org acceptance walk): dev stack surgically reset onto main `4ea5ed11`
+  (pgdata/miniodata/redisdata removed by name; gateway-config kept ⇒ deepseek routing survived),
+  fresh DB @0088, admin minted (`admin@lq.ai`), Library empty / 5 areas / 24 seeded bindings.
+  Maintainer walked the Store/Library UX and raised **four findings** (G9–G12 below). The headline:
+  the Store/Library pipeline is right for *shipped* content, but the org-*authored* half (create a
+  skill, build a playbook, upload knowledge → give it to an agent) is a whole separate, largely
+  agent-unreachable universe. Full architecture map written to
+  `docs/fork/plans/CAPABILITY-SOURCES-birdseye.md` — read it before scoping the next milestone.
+
+### G9 — House Brief still has no web UI (re-raised as priority)
+Same as **G2**, re-confirmed live on the fresh org: an admin has nowhere to state who the firm is and
+who it acts for, yet that text is a read-only tier injected into every Deep Agent (ADR-F049). Fresh
+org seeds no `organization_profile` row ⇒ every area agent runs with blank firm identity.
+**Direction:** small admin page over the existing `PUT /organization-profile` (zero backend). Cheapest
+high-value fix; strong candidate to do first. (Candidate **A** in the bird's-eye map.)
+
+### G10 — Store skills are a flat list; should be split by category
+`lq_ai.tags` already exist on every SKILL.md (categories are latent in the data — e.g. `[privacy,
+ropa, article-30, gdpr]`). Also raised: a way to pull skills from the public
+`github.com/LegalQuants/lq-skills` (Apache-2.0, 50 skills, 17+ jurisdictions, same SKILL.md format) —
+**maintainer flagged this half as NOT priority.** **Direction:** (a) group the Store page by tag —
+small, display-only, no schema; (b) remote sync = own later milestone (supply-chain/injection
+surface). (Candidates **B**/**F**.)
+
+### G11 — The Library dead-ends to the Store (by construction)
+"The Library points to the Store and nothing else can be done." Correct: `org_library_entries`
+("Library") is *defined* as the adopted subset of the shipped Store (F065). It is **not** a home for
+content an admin authors. This is the naming/mental-model collision between our "Library" and the
+maintainer's "organisation's library" (= org-authored). (Explained in the bird's-eye map; F065 D7 left
+the `org` namespace tier as the seam.)
+
+### G12 — Org-authored skills/playbooks/knowledge can't reach Deep Agents (the big one)
+The upstream authoring surfaces all still work — `/skills/new`, skill `fork` + `user_skills` CRUD;
+`/playbooks` + the `easy` builder; `/knowledge` collection upload — but what they produce is orphaned
+from the fork's Deep Agents: user skills aren't in the filesystem registry the agent reads; the
+playbook executor is frozen (only bound playbook *positions* inject as read-only text); no deep-agent
+tool searches an org/project knowledge base (matter files only). **The maintainer's target model** —
+"Deep Agents have default tools; you can add from the Store AND from your organisation's library" —
+requires merging that authored content into the *same* adopt→bind→compose pipeline. **This reopens
+F065 D7 (ratified §7 no-v1: org-authored content is a prompt-injection surface needing its own harness
++ ADR).** Full analysis + candidate slices (C/D/E) in `docs/fork/plans/CAPABILITY-SOURCES-birdseye.md`
+— **this is the input to the next milestone decision; nothing implemented yet, awaiting maintainer
+direction on scope + order.**
+
+### G13 — A bound-but-unadopted capability vanishes from the agent with zero signal (found live)
+**Observed (maintainer, 2026-07-06):** the Commercial agent, asked to redline a SaaS agreement,
+analysed the clause well, then on "implement" wrote a Markdown file and reported *"I don't have a
+redlining/preview tool in my available toolset"* — Adeu "not connected". **Root cause (verified):**
+this fresh org (from the STORE-3 reset) has an **empty Library**, and `build_area_inventory` gates a
+tool group on Library membership (`api/app/agents/capabilities.py:581` — `(KIND_TOOL, group_key) not
+in adopted → continue`). The `redlining` group is **bound** to Commercial (`practice_area_tool_groups`,
+seed mig 0086) and **in the registry**, but **not adopted** ⇒ dropped at the chokepoint ⇒ the agent
+never receives `preview_redline`/`apply_redline`. Adeu itself is healthy (SDK `1.12.1` imports;
+`RedlineService` imports; the tool group is intact). **Immediate fix applied:** restored the pre-reset
+effective state by adopting all 17 bound capabilities (13 skills + 4 tool groups) into the Library —
+the same write the Store "Add all" rail performs; verified live that Commercial now resolves
+`redlining` + `tabular` via the real `build_area_inventory`. No restart needed (Library read per run).
+**The gap this reveals (three sub-parts, worth fixing):**
+- **(a) No admin signal.** The area is "configured for redlining" (a visible binding) yet the agent
+  can't use it, and nothing warns the admin the binding is unadopted / the agent is running degraded.
+- **(b) No agent/user signal — silent degradation.** The agent didn't know its area was configured for
+  a tool it lacked; it improvised (wrote a `.md`) instead of failing honestly ("this matter's agent
+  has no redline tool — ask your admin to adopt it in the Store"). Silent-improvise is worse than a
+  clean, actionable error.
+- **(c) Fresh orgs ship broken agents until curated.** Every fresh deployment starts with EVERY agent
+  bare (empty Library, F065 D2). The intended remedy — the admin clicking "Add all (Commercial)" in the
+  Store during onboarding — is neither forced nor prompted, so between first-boot and curation the
+  agents are non-functional with no guardrail.
+**Design question for the maintainer (F065 D2 revisit / ONBOARD-2 scope):** keep "fresh org = empty
+Library" and make Library adoption an **unskippable guided onboarding step** (ONBOARD-2 wizard); *or*
+**seed a fresh org's Library from `RECOMMENDED_LIBRARY_SETS` by default** (sensible-defaults middle
+ground — not empty, not everything); *or* add a **health/transparency signal** so a bound-but-unadopted
+capability is visible to the admin and produces a clean message to the user. Not mutually exclusive.
+This is the highest-signal onboarding finding so far — a "redlining practice area that can't redline
+out of the box" is exactly the first-run cliff a non-technical admin would hit on a real deployment.
