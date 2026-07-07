@@ -16,16 +16,26 @@ then CLAUDE.md, then the ADRs/plans named below.
 > - **PR #227 (docs, OPEN)** — the pivot record (5 plan docs, doc-only, branch
 >   `pivot-docs-modular-azure`). Merge when CI is green; no containerized suites needed (no service
 >   touched); squash with `--repo sarturko-maker/lq-ai-fork`.
-> - **R-1 — redline continuity (task #474, IN FLIGHT on branch `r1-redline-continuity`).** Spec =
->   PIVOT doc § Workstream R. Implementation was orchestrated via a background workflow (schema/mig-0089
->   + write-side lineage → resolver `resolve_working_docx` + `start_fresh` tool params + version-aware
->   naming + honest inventory ∥ SKILL/doctrine/ADR-F066 → full-suite + throwaway-pgvector mig verify +
->   3-lens adversarial review → fix pass). **If picking up mid-flight:** `git status` on the branch shows
->   how far it got; the design decisions are ALL in the PIVOT doc § R-1 (i)–(v); finish the gate =
->   containerized api suite counts quoted + CI-version ruff/mypy + mig 0089 up/down/up on throwaway
->   pgvector (NEVER the live DB) + rebuild api+arq-worker+ingest-worker together (`docker image prune -f`
->   after) + LIVE verify (in-container probe: apply a redline twice on a seeded matter — the second call
->   must resolve the first call's output; ADR-F066 rides in the PR) + HANDOFF/memory + PR + merge.
+> - **R-1 ✓ SHIPPED (branch `r1-redline-continuity`, ADR-F066 accepted, mig 0089) — redline
+>   continuity.** Follow-up redlines now continue from the agent's own latest working version:
+>   `files.parent_file_id` + `files.is_snapshot` (mig 0089, up/down/up verified on throwaway
+>   pgvector); write-side lineage on redline/response outputs + WOPI snapshots;
+>   `resolve_working_docx` (breadth-first newest NON-SNAPSHOT LEAF — a greedy per-hop walk was a
+>   review catch; matter-scoped every hop via the shared `_DOCX_COLUMNS` projection; depth-capped);
+>   `apply_redline`/`preview_redline` grow `start_fresh=false` + a continuity note naming the
+>   resolved version; version-aware naming `(redlined)→(redlined v2)→…` with the version-digit run
+>   BOUNDED to 8 digits (hostile-filename review catch); inventory renders honest provenance
+>   ("agent work product — derived from X" / "editor snapshot of X") instead of "not ingested yet";
+>   SKILL/doctrine/docstrings corrected. `extract_counterparty_position`/`respond_to_counterparty`
+>   deliberately KEEP exact-name semantics. Orchestrated as a 3-implementer + 3-reviewer + fixer
+>   workflow; 3 should-fixes all applied, nothing deferred. Gate: full containerized api suite
+>   **3387 passed / 47 skipped** (baseline 3369 + the slice's tests); ruff (root config) + mypy
+>   clean; live in-container probe (real Adeu + real S3 + live DB, no LLM): apply×2 → v1 parent =
+>   original, v2 parent = v1, continuity note names v1, resolver leaf = v2, start_fresh bypasses —
+>   throwaway matter cleaned. **TRAPS:** (1) workflow verify runners MUST return structured output —
+>   the suite runner died reporting nothing (agents_empty_result); lead re-ran. (2) ruff inside a
+>   container with ONLY api/ mounted falls back to line-length 88 and mass-rewraps — ALWAYS mount
+>   the repo root. (3) targeted in-container tests need /skills mounted (mig 0032 seeds from it).
 > - **AZ-CONFIG — one PR bundling AZ-1 + AZ-2a + AZ-3 + AZ-4a (all CONFIG-ONLY, each independently
 >   enableable via its own env vars; nothing changes when unset).** Content: `gateway.yaml.example`
 >   gains (1) the azure-openai entry updated to a GA api-version with deployment-name `models:` comments,
