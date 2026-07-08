@@ -1,6 +1,6 @@
 # F067 — The module model: one vocabulary for agent capabilities + the org-authored content harness
 
-- Status: proposed
+- Status: accepted (maintainer, 2026-07-08)
 - Date: 2026-07-08
 - Deciders: maintainer (Arturs) + agent lead
 - Slice: B-0 (Workstream B, `docs/fork/plans/PIVOT-modular-azure.md`)

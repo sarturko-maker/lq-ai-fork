@@ -1,8 +1,8 @@
 # MODULES milestone — Workstream B re-plan (B-1…B-7)
 
-**Status:** proposed (B-0 deliverable, 2026-07-08 — maintainer edits this doc before anything is
-built). Governing ADR: `docs/adr/F067-module-model.md` (the module vocabulary, the org-authored
-harness D2/D3, agent profiles D4, the HITL seam D5, non-goals D6). Substrate map:
+**Status:** accepted (maintainer, 2026-07-08 — ladder in execution; B-1 started same day).
+Governing ADR: `docs/adr/F067-module-model.md` (**accepted** — the module vocabulary, the
+org-authored harness D2/D3, agent profiles D4, the HITL seam D5, non-goals D6). Substrate map:
 `docs/fork/plans/CAPABILITY-SOURCES-birdseye.md`. Intent: `docs/fork/plans/PIVOT-modular-azure.md`
 § Workstream B.
 
