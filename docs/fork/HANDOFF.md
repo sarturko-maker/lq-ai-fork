@@ -153,17 +153,42 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   `docs/fork/evidence/b1-house-brief/`. KNOWN MINORS (deferred on the PR): `updated_by` renders
 >   the raw user id; the milestone's B-1 text cited GET /library — real source is the `in_library`
 >   flag on GET /admin/capabilities (raw entries: `capability_key`).
-> - **NEXT ▶ B-2a — org-skills harness backend (F067 D2/D3; ACCEPTED, unblocked).** Spec:
->   `docs/fork/plans/MODULES-milestone.md` § B-2a — migration `org_skill_versions` (immutable
->   approved snapshots) + propose/approve/reject/revoke endpoints (422 strict frontmatter allowlist
->   DENYING `allowed-tools`/`minimum_inference_tier`/`ensemble_verification`; 409 shipped-slug
->   collision; 32 KiB cap) + composition merges approved snapshots at the SAME
->   `build_area_inventory` chokepoint + D3.5 provenance banner (in-house vocabulary: "your
->   company's own material"). Security-sensitive ⇒ the deeper ADR-F005 review. Pick up: read
->   MODULES-milestone § B-2a + F067 D2/D3 + CLAUDE.md § Authoring boundary; check `user_skills` +
->   the permissive parser `app/skills/schema.py` (strictness lands at the org PROPOSE boundary
->   ONLY); draft the migration first. Parallel candidates: B-5 roster UI (independent), B-6 HITL
->   spike→ADR (report in the 2026-07-08 session scratchpad `hitl-spike-report.md`).
+> - **B-2a ✓ SHIPPED (2026-07-08 midday, PR pending merge — branch `b2a-org-skills-harness`, mig
+>   0091):** the F067 D2/D3 harness for kind=skill. ONE new table `org_skill_versions` carries BOTH
+>   proposal state and the immutable approved snapshots (`proposed → approved|rejected`;
+>   `approved → superseded|revoked`; partial uniques = one open proposal + one live version per
+>   slug; user_skills UNTOUCHED). Propose synthesizes canonical SKILL.md from the author's row
+>   (parity with `_skill_from_user_skill`), 422s on the strict allowlist (denies `allowed-tools`
+>   etc., incl. via `frontmatter_extra`), 409s shipped-slug + duplicate-open, caps 32 KiB. Approve
+>   supersedes the prior version (TWO-STEP FLUSH — SQLAlchemy orders same-table UPDATEs by PK and
+>   would trip the one-approved partial unique); transitions row-lock FOR UPDATE. Runtime merges at
+>   the two existing chokepoints only (`build_area_inventory` org_skill_snapshots kwarg +
+>   `build_area_skill_wiring` org_skill_files; registry None ⇒ org skills fail closed WITH the
+>   feature; shipped wins on later slug collision, warned). D3.5 banner rendered at SERVE time
+>   (approver doesn't exist at propose; hash covers author bytes). OPERATOR EXCLUDED from the four
+>   /admin/org-skills routes (ADR-F064 `tenant_admin_visibility` — review-lens catch). Audit
+>   propose/approve/reject/revoke content-free. Implementation calls in the ADR-F067 B-2a addendum.
+>   Gate: 4-lens adversarial review (22 findings incl. 1 blocker — all fixed); full containerized
+>   suite 3516/1/42 where the 1 = the openapi count pin (176→182), fixed + module re-run 74/1 ⇒
+>   effective 3517/42/0; LIVE probe PASS — author→propose→approve→adopt→bind→run, agent quoted the
+>   banner verbatim from the transcript (evidence `docs/fork/evidence/b2a-org-skills/`).
+> - **KV-1 IN FLIGHT (worktree `/home/sarturko/LQ_AI_Fork-kv1`, branch `kv1-gateway-keyvault`):**
+>   optional Azure Key Vault sourcing for the three AZURE_* provider keys via the VM's managed
+>   identity (maintainer-approved plan): stdlib-only `gateway/app/keyvault.py` (IMDS+KV REST, no
+>   azure SDKs), overlay threaded through `build_adapter(env=)` (DI, wins over stale plaintext),
+>   ADR-F069 proposed, runbook §4b, four NON-secret env vars. HONEST caveat found in code: SIGHUP
+>   does NOT rebuild adapters ⇒ rotation needs gateway recreate. Remaining: lead security read
+>   (keyvault.py+main.py DONE, clean), gateway suite + mypy --strict in-container, SHOW THE
+>   MAINTAINER THE FULL DIFF before push (their explicit constraint), PR + merge; then the VM
+>   staging ladder (merge → Images sha → runbook §4b + §5 smokes; §5.4 azure-claude = AZ-2b proof).
+> - **NEXT ▶ B-2b (propose/review/provenance UI) ∥ B-3 (knowledge tool group)** — both unblocked by
+>   B-2a; spec in MODULES-milestone. Other parallel candidates: B-5 roster UI, B-6 HITL spike→ADR
+>   (report in the 2026-07-08 scratchpad `hitl-spike-report.md`). Traps for the next slice: the
+>   endpoint sweep (`test_endpoints.py` `_PARAM_VALUES` + `IMPLEMENTED_ROUTES`) and THREE count
+>   pins (`test_mutation_rbac.py` ×3, `test_openapi.py` EXPECTED_PATHS + the SECOND `len(actual)`
+>   pin at ~:419) all trip on new routes — update them in the same commit; practice-area DELETE
+>   refuses while an archived matter references it (probe teardown needs SQL sweep); matters 400
+>   on an area without `profile_md` (inert-area guard).
 > - **MAINTAINER GATES STILL OPEN:** edit/accept ADR-F068 (branding — shipped + live-verified,
 >   proposed); execute `docs/fork/runbooks/azure-vm-sandbox.md` (§5.4 azure-claude tool smoke =
 >   AZ-2b's deferred live proof).
