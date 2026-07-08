@@ -275,6 +275,24 @@ class RateLimiter:
             ]
         )
 
+    async def enforce_branding(self, request: Request) -> None:
+        """BRAND-1a (ADR-F068) — per-IP brake on the unauthenticated branding
+        reads (``GET /branding`` + ``GET /branding/logo``, one shared bucket).
+
+        The data is public-by-design (the login page renders it), so the brake
+        exists to bound scrape/bandwidth abuse, not to hide anything.
+        """
+        s = self._settings
+        await self._enforce(
+            [
+                (
+                    "branding:ip",
+                    _client_ip(request),
+                    RateLimitRule(s.rate_limit_branding_ip_per_window, self._window()),
+                ),
+            ]
+        )
+
     async def enforce_password_reset_request(self, request: Request, email: str) -> None:
         """SETUP-3a (ADR-F061 D7) — per-IP + per-submitted-email on reset-request.
 

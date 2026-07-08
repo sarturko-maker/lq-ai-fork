@@ -135,20 +135,24 @@ def test_mutating_route_entry_count_pinned() -> None:
     """Pins the mutating-route surface so an added mutating route trips the
     guard review (companion to the 173-path pin below). STORE-1 (ADR-F065) adds
     2 mutating admin routes (POST /admin/library + DELETE /admin/library/{kind}/{key}),
-    both AdminUser-gated — they pass the drift guard automatically (no allowlist entry)."""
-    assert len(_mutating_routes()) == 126
+    both AdminUser-gated — they pass the drift guard automatically (no allowlist entry).
+    BRAND-1a (ADR-F068) adds 3 mutating branding routes (PUT /branding +
+    POST/DELETE /branding/logo), all AdminUser-gated at the handler level
+    (the router itself is unauth-mounted for the public GETs): 126 → 129."""
+    assert len(_mutating_routes()) == 129
 
 
 @pytest.mark.unit
 def test_api_v1_path_count_pinned() -> None:
     """STORE-1 (ADR-F065) adds 2 routes (the Org Library adopt/remove pair): 171 → 173.
-    STORE-2 (ADR-F065 D-B) adds 1 route (GET /api/v1/library, member-readable): 173 → 174."""
+    STORE-2 (ADR-F065 D-B) adds 1 route (GET /api/v1/library, member-readable): 173 → 174.
+    BRAND-1a (ADR-F068) adds 2 paths (/branding + /branding/logo): 174 → 176."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 174
+    assert len(paths) == 176
 
 
 @pytest.mark.unit

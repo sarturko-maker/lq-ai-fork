@@ -104,7 +104,7 @@ async def test_request_issues_token_for_existing(
 ) -> None:
     captured: list[str] = []
 
-    async def _capture(*, to_addr: str, reset_url: str) -> bool:
+    async def _capture(*, to_addr: str, reset_url: str, product_name: str = "LQ.AI") -> bool:
         captured.append(to_addr)
         return True
 
@@ -133,7 +133,7 @@ async def test_request_disabled_user_issues_no_token(
     """A disabled account still gets a uniform 202 but no reset token/email."""
     sent: list[str] = []
 
-    async def _capture(*, to_addr: str, reset_url: str) -> bool:
+    async def _capture(*, to_addr: str, reset_url: str, product_name: str = "LQ.AI") -> bool:
         sent.append(to_addr)
         return True
 
@@ -317,7 +317,7 @@ async def test_reset_request_email_send_runs_after_response(
     """
     events: list[str] = []
 
-    async def _fake_send(*, to_addr: str, reset_url: str) -> bool:
+    async def _fake_send(*, to_addr: str, reset_url: str, product_name: str = "LQ.AI") -> bool:
         events.append("send")
         return True
 

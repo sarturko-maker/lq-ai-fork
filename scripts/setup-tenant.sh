@@ -106,6 +106,16 @@ root-sourced env file)
   RUN_DEFAULT_BUDGET_PROFILE   optional deployment default budget profile for
                          agent runs (economy | balanced | generous — ADR-F063);
                          blank/omitted = balanced
+  BRAND_PRODUCT_NAME    optional white-label product name shown in the UI and
+                         email subjects (BRAND-1a, ADR-F068). 1-80 chars of
+                         letters/digits/space/dot/underscore/dash — spaces are
+                         allowed via this key's OWN fence, and its .env line is
+                         written QUOTED. Blank/omitted = default brand. Seeded
+                         only while the branding table is empty; admin UI
+                         edits win afterwards. (Logo upload is an admin-page
+                         action post-boot — the manifest carries no binary.)
+  BRAND_ACCENT_LIGHT / BRAND_ACCENT_DARK   optional accent colours (#RRGGBB)
+                         seeded at first boot, same only-while-empty semantics
   AGE_RECIPIENT         age1…  backup public recipient (private key stays OFF node)
   BACKUP_DEADMAN_URL / RESTORE_DEADMAN_URL   optional healthchecks-style pings
 
@@ -158,6 +168,7 @@ SMTP_HOST="" SMTP_PORT="" SMTP_FROM="" SMTP_USERNAME=""
 IMAGE_TAG="" NODE_PROFILE="full" MODEL_PROVIDER="anthropic"
 AGE_RECIPIENT="" BACKUP_DEADMAN_URL="" RESTORE_DEADMAN_URL=""
 RUN_DEFAULT_BUDGET_PROFILE=""
+BRAND_PRODUCT_NAME="" BRAND_ACCENT_LIGHT="" BRAND_ACCENT_DARK=""
 
 # ---------------------------------------------------------------------------
 # Manifest loader — controlled parse (NOT `source`, which would execute code):
@@ -199,6 +210,9 @@ load_manifest() {
 			NODE_PROFILE) NODE_PROFILE="$val" ;;
 			MODEL_PROVIDER) MODEL_PROVIDER="$val" ;;
 			RUN_DEFAULT_BUDGET_PROFILE) RUN_DEFAULT_BUDGET_PROFILE="$val" ;;
+			BRAND_PRODUCT_NAME) BRAND_PRODUCT_NAME="$val" ;;
+			BRAND_ACCENT_LIGHT) BRAND_ACCENT_LIGHT="$val" ;;
+			BRAND_ACCENT_DARK) BRAND_ACCENT_DARK="$val" ;;
 			AGE_RECIPIENT) AGE_RECIPIENT="$val" ;;
 			BACKUP_DEADMAN_URL) BACKUP_DEADMAN_URL="$val" ;;
 			RESTORE_DEADMAN_URL) RESTORE_DEADMAN_URL="$val" ;;
@@ -246,6 +260,9 @@ interactive_collect() {
 	ask IMAGE_TAG "Image tag (^sha-[0-9a-f]{7,}$)"
 	ask NODE_PROFILE "Node profile (full|reduced)" "full"
 	ask MODEL_PROVIDER "Model provider (anthropic)" "anthropic"
+	ask BRAND_PRODUCT_NAME "White-label product name (blank = default brand; BRAND-1a)" ""
+	ask BRAND_ACCENT_LIGHT "Light-theme accent colour, #RRGGBB (blank = default blue)" ""
+	ask BRAND_ACCENT_DARK "Dark-theme accent colour, #RRGGBB (blank = default blue)" ""
 	ask AGE_RECIPIENT "Backup age recipient (age1…)"
 	ask BACKUP_DEADMAN_URL "Backup dead-man URL (optional)" ""
 	ask RESTORE_DEADMAN_URL "Restore dead-man URL (optional)" ""
@@ -282,6 +299,9 @@ SMTP_USERNAME=$SMTP_USERNAME
 IMAGE_TAG=$IMAGE_TAG
 NODE_PROFILE=$NODE_PROFILE
 MODEL_PROVIDER=$MODEL_PROVIDER
+BRAND_PRODUCT_NAME=$BRAND_PRODUCT_NAME
+BRAND_ACCENT_LIGHT=$BRAND_ACCENT_LIGHT
+BRAND_ACCENT_DARK=$BRAND_ACCENT_DARK
 AGE_RECIPIENT=$AGE_RECIPIENT
 BACKUP_DEADMAN_URL=$BACKUP_DEADMAN_URL
 RESTORE_DEADMAN_URL=$RESTORE_DEADMAN_URL
@@ -402,6 +422,22 @@ esac
 	|| printf '%s' "$RUN_DEFAULT_BUDGET_PROFILE" | grep -Eq '^(economy|balanced|generous)$' \
 	|| die "RUN_DEFAULT_BUDGET_PROFILE '$RUN_DEFAULT_BUDGET_PROFILE' must be one of: economy, balanced, generous (or omitted for balanced)"
 
+# BRAND_* fences (BRAND-1a, ADR-F068). These three deliberately BYPASS the
+# generic check_value fence above (which rejects both spaces and '#'). Do NOT
+# widen the generic safe set: BRAND_PRODUCT_NAME gets its OWN tight fence —
+# letters/digits/space/dot/underscore/dash only, NO shell metacharacters —
+# and its .env.prod line below is emitted QUOTED so the root-sourced value
+# stays inert even with spaces. The accents are anchored #RRGGBB hex.
+[ -z "$BRAND_PRODUCT_NAME" ] \
+	|| printf '%s' "$BRAND_PRODUCT_NAME" | grep -Eq '^[A-Za-z0-9 ._-]{1,80}$' \
+	|| die "BRAND_PRODUCT_NAME must be 1-80 chars of letters/digits/space/dot/underscore/dash (values land in a root-sourced env file)"
+[ -z "$BRAND_ACCENT_LIGHT" ] \
+	|| printf '%s' "$BRAND_ACCENT_LIGHT" | grep -Eq '^#[0-9a-fA-F]{6}$' \
+	|| die "BRAND_ACCENT_LIGHT '$BRAND_ACCENT_LIGHT' must be a hex colour like #0070f3"
+[ -z "$BRAND_ACCENT_DARK" ] \
+	|| printf '%s' "$BRAND_ACCENT_DARK" | grep -Eq '^#[0-9a-fA-F]{6}$' \
+	|| die "BRAND_ACCENT_DARK '$BRAND_ACCENT_DARK' must be a hex colour like #47a3ff"
+
 # Full-shape check (not prefix-only): age1 + lowercase bech32 payload.
 [ -n "$AGE_RECIPIENT" ] || die "AGE_RECIPIENT is required"
 printf '%s' "$AGE_RECIPIENT" | grep -Eq '^age1[0-9a-z]{20,}$' \
@@ -517,6 +553,23 @@ if [ -n "$RUN_DEFAULT_BUDGET_PROFILE" ]; then
 	BUDGET_PROFILE_LINE="RUN_DEFAULT_BUDGET_PROFILE=$RUN_DEFAULT_BUDGET_PROFILE"
 fi
 
+# BRAND_* (BRAND-1a, ADR-F068): white-label seed, applied by the api ONLY while
+# the branding table is empty (admin UI edits win afterwards). Lines written
+# ONLY when provided. BRAND_PRODUCT_NAME is QUOTED — its fence admits spaces,
+# and this file is sourced as root by the backup cron (see check_value above).
+BRAND_PRODUCT_NAME_LINE=""
+if [ -n "$BRAND_PRODUCT_NAME" ]; then
+	BRAND_PRODUCT_NAME_LINE="BRAND_PRODUCT_NAME=\"$BRAND_PRODUCT_NAME\""
+fi
+BRAND_ACCENT_LIGHT_LINE=""
+if [ -n "$BRAND_ACCENT_LIGHT" ]; then
+	BRAND_ACCENT_LIGHT_LINE="BRAND_ACCENT_LIGHT=$BRAND_ACCENT_LIGHT"
+fi
+BRAND_ACCENT_DARK_LINE=""
+if [ -n "$BRAND_ACCENT_DARK" ]; then
+	BRAND_ACCENT_DARK_LINE="BRAND_ACCENT_DARK=$BRAND_ACCENT_DARK"
+fi
+
 # --force overwrite: recreate rather than truncate-in-place, so an existing
 # file's OLD (possibly looser) mode never applies while the new secrets are
 # being written — the file is born 0600 under umask 077 (SETUP-2 review).
@@ -563,6 +616,12 @@ RERANK_ENABLED=true
 
 # --- Agent-run budget default (SETUP-5a, ADR-F063; line omitted = balanced) ---
 $BUDGET_PROFILE_LINE
+
+# --- White-label branding seed (BRAND-1a, ADR-F068; lines omitted = default) --
+# Applied ONCE while the branding table is empty; admin UI edits win afterwards.
+$BRAND_PRODUCT_NAME_LINE
+$BRAND_ACCENT_LIGHT_LINE
+$BRAND_ACCENT_DARK_LINE
 
 # --- Auth + notification email (FIRST_RUN_ADMIN_EMAIL + SMTP; SETUP-2 gap fix)-
 # FIRST_RUN_ADMIN_EMAIL seeds the customer admin at first boot (config.py has no

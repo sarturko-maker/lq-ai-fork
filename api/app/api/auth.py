@@ -54,7 +54,7 @@ from app.auth_tokens import (
 from app.config import get_settings
 from app.db.session import get_db
 from app.errors import Conflict
-from app.lifecycle_email import build_reset_url, send_password_reset_email
+from app.lifecycle_email import build_reset_url, get_branding_name, send_password_reset_email
 from app.models.user import User, UserSession
 from app.security import (
     create_access_token,
@@ -1330,6 +1330,10 @@ async def password_reset_request(
     now = _utcnow()
 
     email = str(payload.email)
+    # BRAND-1a (ADR-F068): resolve the subject's product name UNCONDITIONALLY —
+    # before the exists-branch — so this read adds no exists/not-exists timing
+    # skew to the uniform 202 (the background send has no db of its own).
+    product_name = await get_branding_name(db)
     user = (
         await db.execute(
             select(User).where(
@@ -1366,7 +1370,12 @@ async def password_reset_request(
     if user is not None and reset_url is not None:
         # Scheduled AFTER the commit above; Starlette runs it after the
         # response body is sent, so both branches return in comparable time.
-        background.add_task(send_password_reset_email, to_addr=user.email, reset_url=reset_url)
+        background.add_task(
+            send_password_reset_email,
+            to_addr=user.email,
+            reset_url=reset_url,
+            product_name=product_name,
+        )
 
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED, content={"status": "ok"}, background=background

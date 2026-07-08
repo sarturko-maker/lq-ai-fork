@@ -35,6 +35,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.models.deployment_branding import (
+    HEX_COLOR_RE,
+    PRODUCT_NAME_MAX,
+    DeploymentBranding,
+    contains_control_chars,
+)
 from app.models.user import User
 from app.security import hash_password
 
@@ -208,3 +214,137 @@ async def ensure_first_run_operator(db: AsyncSession) -> str | None:
     await db.commit()
     log.info("First-run operator bootstrap: created operator user %s.", operator_email)
     return plaintext
+
+
+# ---------------------------------------------------------------------------
+# First-run branding seed — BRAND-1a (ADR-F068)
+# ---------------------------------------------------------------------------
+
+# The seeder validates env-originated values against the SAME rules the PUT
+# boundary enforces — imported from app/models/deployment_branding (single
+# source, so the two boundaries cannot drift). An invalid accent/name is
+# warned about and SKIPPED, never rewritten.
+
+
+def _blend_hex(fg: str, bg: str, alpha: float) -> str:
+    """Blend ``fg`` over ``bg`` at ``alpha`` opacity — both ``#RRGGBB``.
+
+    Pure integer channel math (no image/colour dependency); used only to
+    derive a sane ``status_running_wash`` from a seeded accent (ADR-F068).
+    """
+
+    def channel(i: int) -> int:
+        f = int(fg[1 + 2 * i : 3 + 2 * i], 16)
+        b = int(bg[1 + 2 * i : 3 + 2 * i], 16)
+        return round(f * alpha + b * (1 - alpha))
+
+    return "#" + "".join(f"{channel(i):02x}" for i in range(3))
+
+
+def _accent_fan_out(accent: str, theme: str) -> dict[str, str]:
+    """Fan one accent out into the brandable token family (ADR-F068).
+
+    ``brand = ring = sidebar_ring = status_running = chart_1 = accent``;
+    ``brand_foreground`` is white on light / ink on dark (matching the
+    shipped defaults' pairing); the wash is the accent blended into the
+    theme's canvas (8% over white / 16% over #111111) — a quiet pill
+    background in the accent's hue, like the shipped #eef4ff / #14233a.
+    """
+
+    if theme == "light":
+        foreground = "#ffffff"
+        wash = _blend_hex(accent, "#ffffff", 0.08)
+    else:
+        foreground = "#111111"
+        wash = _blend_hex(accent, "#111111", 0.16)
+    return {
+        "brand": accent,
+        "brand_foreground": foreground,
+        "ring": accent,
+        "sidebar_ring": accent,
+        "status_running": accent,
+        "status_running_wash": wash,
+        "chart_1": accent,
+    }
+
+
+async def ensure_first_run_branding(db: AsyncSession) -> bool:
+    """Seed the deployment-branding singleton from BRAND_* env — BRAND-1a.
+
+    Inserts ONLY when the ``deployment_branding`` table is empty AND at
+    least one valid ``BRAND_*`` setting is configured — so an admin's
+    in-app edits (which create/keep the row) always win over the env on
+    every later restart. Returns True when THIS call inserted the row.
+
+    Env values are validated with the same rules the PUT boundary applies
+    (name ≤80 chars, no control characters; accents ``#RRGGBB``); an
+    invalid value is logged at WARNING and skipped — never sanitized,
+    never a boot crash (the lifespan's degrade-not-crash posture).
+    Race-safe via ``ON CONFLICT DO NOTHING`` against the singleton index.
+    """
+
+    settings = get_settings()
+
+    product_name = settings.brand_product_name or ""
+    if product_name and (
+        len(product_name) > PRODUCT_NAME_MAX or contains_control_chars(product_name)
+    ):
+        log.warning(
+            "First-run branding: BRAND_PRODUCT_NAME is invalid "
+            "(max %d chars, no control characters); ignoring it.",
+            PRODUCT_NAME_MAX,
+        )
+        product_name = ""
+
+    palette: dict[str, dict[str, str]] = {}
+    for theme, accent in (
+        ("light", settings.brand_accent_light),
+        ("dark", settings.brand_accent_dark),
+    ):
+        if not accent:
+            continue
+        if not HEX_COLOR_RE.fullmatch(accent):
+            log.warning(
+                "First-run branding: BRAND_ACCENT_%s is not a #RRGGBB hex colour; ignoring it.",
+                theme.upper(),
+            )
+            continue
+        palette[theme] = _accent_fan_out(accent, theme)
+
+    if not product_name and not palette:
+        # Nothing (valid) configured for this deployment — clean no-op.
+        return False
+
+    # Fast path: a row exists (admin-written or previously seeded) — the env
+    # NEVER overwrites it (idempotent on restart; admin edits win).
+    existing = await db.execute(select(DeploymentBranding.id).limit(1))
+    if existing.scalar_one_or_none() is not None:
+        log.info("First-run branding: a branding row already exists; skipping seed.")
+        return False
+
+    # Race-safe insert: the partial unique index on ((true)) (migration 0090)
+    # makes any concurrent second insert conflict; DO NOTHING without a target
+    # covers it, mirroring the admin/operator bootstraps above.
+    stmt = (
+        pg_insert(DeploymentBranding)
+        .values(product_name=product_name, palette=palette)
+        .on_conflict_do_nothing()
+        .returning(DeploymentBranding.id)
+    )
+    result = await db.execute(stmt)
+    inserted_id = result.scalar_one_or_none()
+
+    if inserted_id is None:
+        # Another worker won the race — clean no-op for this one.
+        log.info("First-run branding: lost the seed race; skipping.")
+        await db.rollback()
+        return False
+
+    await db.commit()
+    # Counts/lengths only — never the configured values themselves.
+    log.info(
+        "First-run branding: seeded singleton (name_length=%d, themes=%d).",
+        len(product_name),
+        len(palette),
+    )
+    return True

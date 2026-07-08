@@ -25,7 +25,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import __version__
-from app.admin_bootstrap import ensure_first_run_admin, ensure_first_run_operator
+from app.admin_bootstrap import (
+    ensure_first_run_admin,
+    ensure_first_run_branding,
+    ensure_first_run_operator,
+)
 from app.agents.checkpointer import close_agent_checkpointer, init_agent_checkpointer
 from app.agents.store import close_agent_store, init_agent_store
 from app.agents.stream import RedisStreamBridge, RunStreamBroker
@@ -118,6 +122,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
     except Exception as exc:
         log.warning("first-run operator bootstrap failed: %s (continuing)", exc)
+
+    # First-run branding seed (BRAND-1a, ADR-F068). No-op unless a BRAND_*
+    # setting is configured AND the branding table is still empty (admin edits
+    # always win afterwards); same degrade-not-crash posture as above.
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            seeded_branding = await ensure_first_run_branding(session)
+        if seeded_branding:
+            log.info("First-run branding: seeded from BRAND_* environment.")
+    except Exception as exc:
+        log.warning("first-run branding bootstrap failed: %s (continuing)", exc)
 
     # Durable agent state (F0-S5, ADR-F008). Init failure is degraded
     # service (no multi-turn persistence), never a crash — the function
