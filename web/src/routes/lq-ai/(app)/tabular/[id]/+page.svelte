@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import {
 		getTabularExecution,
 		cancelTabularExecution,
@@ -189,7 +190,7 @@
 </script>
 
 <svelte:head>
-	<title>Tabular result · LQ.AI Oscar Edition</title>
+	<title>{$titleFor('Tabular result', 'dot')}</title>
 </svelte:head>
 
 <section class="lq-tabres">

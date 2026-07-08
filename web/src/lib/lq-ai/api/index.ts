@@ -7,6 +7,7 @@
 export * from './client';
 export * as authApi from './auth';
 export * as bootstrapApi from './bootstrap';
+export * as brandingApi from './branding';
 export * as projectsApi from './projects';
 export * as chatsApi from './chats';
 export * as messagesApi from './messages';

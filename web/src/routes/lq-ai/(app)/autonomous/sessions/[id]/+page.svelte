@@ -22,6 +22,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { autonomousApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { AutonomousSessionRead, SessionReceipt } from '$lib/lq-ai/api/autonomous';
@@ -116,7 +117,7 @@
 </script>
 
 <svelte:head>
-	<title>Session receipt · LQ.AI Oscar Edition</title>
+	<title>{$titleFor('Session receipt', 'dot')}</title>
 </svelte:head>
 
 <div class="receipt-page">

@@ -17,7 +17,9 @@
 
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { authApi } from '$lib/lq-ai/api';
+	import { logoUrl } from '$lib/lq-ai/api/branding';
 	import { clearSession } from '$lib/lq-ai/auth/store';
+	import { branding } from '$lib/lq-ai/branding/store';
 	import AmbientTrustChrome from '$lib/lq-ai/components/AmbientTrustChrome.svelte';
 	import { applyTheme, nextTheme, normalizeTheme, type Theme } from './helpers';
 
@@ -82,15 +84,34 @@
 				<PanelLeftIcon class="size-4" aria-hidden="true" />
 			</Button>
 		{/if}
-		<a href="/lq-ai" class="text-base font-semibold tracking-tight text-foreground no-underline">
-			<!-- Real space before the suffix so the anchor's accessible name /
-			     copied text reads "LQ.AI Oscar Edition", not "LQ.AIOscar Edition";
-			     ml-1 tunes the visual gap on top of the collapsed space. -->
-			<span class="text-primary">LQ</span>.AI
-			<span class="ml-1 text-xs font-medium tracking-normal text-muted-foreground"
-				>Oscar Edition</span
+		<!-- BRAND-1b (ADR-F068): a configured custom name replaces the lockup
+		     (Svelte {} interpolation only — never {@html}); the default install
+		     keeps the LQ.AI Oscar Edition lockup verbatim in the else branch. -->
+		{#if $branding.customName}
+			<a
+				href="/lq-ai"
+				class="flex items-center gap-1.5 text-base font-semibold tracking-tight text-foreground no-underline"
 			>
-		</a>
+				{#if $branding.logoVersion !== null}
+					<img
+						src={logoUrl($branding.logoVersion)}
+						alt=""
+						class="h-5 w-auto max-w-24 object-contain"
+					/>
+				{/if}
+				{$branding.productName}
+			</a>
+		{:else}
+			<a href="/lq-ai" class="text-base font-semibold tracking-tight text-foreground no-underline">
+				<!-- Real space before the suffix so the anchor's accessible name /
+				     copied text reads "LQ.AI Oscar Edition", not "LQ.AIOscar Edition";
+				     ml-1 tunes the visual gap on top of the collapsed space. -->
+				<span class="text-primary">LQ</span>.AI
+				<span class="ml-1 text-xs font-medium tracking-normal text-muted-foreground"
+					>Oscar Edition</span
+				>
+			</a>
+		{/if}
 	</div>
 	<div class="flex items-center gap-1">
 		<AmbientTrustChrome />

@@ -18,6 +18,7 @@
 	import { auth, clearSession } from '$lib/lq-ai/auth/store';
 	import { authApi } from '$lib/lq-ai/api';
 	import { LQAIApiError, PasswordChangeRequiredError } from '$lib/lq-ai/api/client';
+	import { refreshBranding } from '$lib/lq-ai/branding/store';
 	import DualBrandingFooter from '$lib/lq-ai/components/DualBrandingFooter.svelte';
 	import SessionTimeoutWarning from '$lib/lq-ai/components/SessionTimeoutWarning.svelte';
 	import { startTracker, stopTracker, noteActivity } from '$lib/lq-ai/stores/sessionActivity';
@@ -110,6 +111,11 @@
 	let activityHandler: (() => void) | null = null;
 
 	onMount(() => {
+		// BRAND-1b (ADR-F068): reconcile the deployment branding from the
+		// unauth GET — this layout mounts on EVERY /lq-ai route including the
+		// pre-auth pages (login / accept-invite / reset-password), which are
+		// branded surfaces. Best-effort; the pre-paint cache already painted.
+		void refreshBranding();
 		gate();
 		if (!isAuthExempt($page.url.pathname)) {
 			startTracker(() => goto('/lq-ai/login?reason=idle-timeout'));

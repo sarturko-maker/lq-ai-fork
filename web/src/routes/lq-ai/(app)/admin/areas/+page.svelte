@@ -18,6 +18,7 @@
 	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
 	import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { adminApi, practiceAreasApi } from '$lib/lq-ai/api';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import type { DeploymentCapabilitiesResponse } from '$lib/lq-ai/api/admin';
@@ -171,7 +172,7 @@
 </script>
 
 <svelte:head>
-	<title>Practice areas — LQ.AI Oscar Edition admin</title>
+	<title>{$titleFor('Practice areas', 'admin')}</title>
 </svelte:head>
 
 <PageShell size="wide" data-testid="lq-admin-areas-page">

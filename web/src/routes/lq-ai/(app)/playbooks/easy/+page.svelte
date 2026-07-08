@@ -33,6 +33,7 @@
 	import { goto } from '$app/navigation';
 	import { onDestroy } from 'svelte';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import {
 		getEasyPlaybookGeneration,
 		startEasyPlaybookGeneration,
@@ -309,7 +310,7 @@
 </script>
 
 <svelte:head>
-	<title>Generate playbook · LQ.AI Oscar Edition</title>
+	<title>{$titleFor('Generate playbook', 'dot')}</title>
 </svelte:head>
 
 <section class="lq-easy-wizard" data-testid="lq-easy-wizard">

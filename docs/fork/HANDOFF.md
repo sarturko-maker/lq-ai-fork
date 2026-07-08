@@ -117,16 +117,30 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   round-trip, non-admin rejected, palette/CR-LF 422s, spoofed-SVG 422, real PNG sniffed + served
 >   nosniff/immutable, delete, defaults restored). NOTE: the workflow's fix agent died without
 >   reporting (StructuredOutput trap AGAIN) — lead verified its applied edits + suite exit 0 by hand.
-> - **NEXT ▶ BRAND-1b — the web half.** Scout plan = session scratchpad `brand-1-plan.md` §§1,2,4,7
->   (also summarized in ADR-F068): branding store + unauth fetch (bootstrap `skipAuth` precedent);
->   pre-paint localStorage cache in app.html mirroring the theme anti-flash pattern — RE-VALIDATE
->   hex/allowlist at EVERY injection site (localStorage is poisonable); dual-scope
->   `<style id="lq-branding">` tag `:root{}+.dark{}` (inline setProperty on `<html>` BREAKS dark
->   mode); wordmark/footer("NAME — powered by LQ.AI Oscar Edition", attribution HARD LINE)/login
->   hero/~19 title strings via a title helper; favicon swap to the logo endpoint when set; admin
->   Branding page (areas-page template; contrast math in page-helpers.ts — NO @testing-library/svelte);
->   update `saas-rebrand-branding.cy.ts` pins; live verify needs the PREBUILT web container REBUILT +
->   screenshots (login page unauth branding, header, dark-mode accent, admin page).
+> - **BRAND-1b ✓ SHIPPED — the web half; BRAND-1 milestone COMPLETE (clients brand name/accent/logo
+>   with zero code).** Branding store + unauth fetch; app.html PRE-PAINT localStorage path
+>   (re-validated at every injection site — poisonable cache) building a dual-scope
+>   `<style id="lq-branding">` tag with **DOUBLED specificity `:root:root{}` + `:root.dark{}` —
+>   review BLOCKER catch: the pre-paint tag precedes app.css in head order, so single (0,1,0)
+>   specificity LOSES the cascade and a cached custom palette silently reverted to default blue on
+>   every warm load** (confirmed against the built artifact; fix is order-independent, drift-guard
+>   tests pin the inline-script constants against the store's); CockpitHeader/footer/login-hero/17
+>   titles via $titleFor (defaults BYTE-IDENTICAL — cypress pins still hold); footer hard line kept
+>   ("NAME — powered by LQ.AI Oscar Edition" + Apache-2.0); favicon swaps to the raster logo; admin
+>   Branding page (WCAG contrast warnings, seeder-parity accent fan-out, 512 KB logo pre-check).
+>   Gate: svelte-check 0 errors; vitest 108 files / 1207 tests (baseline 106/1169); LIVE cypress vs
+>   the REBUILT web container — default pins 3/3 + custom-brand probe 3/3 incl. the warm-cache
+>   reload with computed `--brand` resolving to the custom accent; evidence + screenshots in
+>   `docs/fork/evidence/brand-1/`. TRAPS: `npm run test:frontend` = bare vitest which WATCHES unless
+>   CI=true (scripts must use `CI=true` or `vitest run`); the cypress smoke specs need
+>   `CYPRESS_LQAI_ADMIN_*` env (seeded `admin@lq.ai` password ≠ the spec default — API 401 proved it
+>   environmental); legacy `--lq-*` surfaces (teal buttons) deliberately non-brandable.
+> - **NEXT ▶ MAINTAINER MORNING REVIEW.** Everything the overnight run shipped is merged; what needs
+>   YOU: (1) edit/accept ADR-F067 + MODULES-milestone.md (Workstream B is gated on it — then B-1);
+>   (2) edit/accept ADR-F068 (branding, shipped as proposed); (3) execute
+>   `docs/fork/runbooks/azure-vm-sandbox.md` on a real Azure resource — its §5.4 azure-claude tool
+>   smoke is AZ-2b's deferred live proof; (4) optionally try the Branding admin page on the dev
+>   stack (it's live). Then the B ladder starts at B-1 (House Brief page + G13 chip).
 > - **BRAND-1 — tenant white-labeling (maintainer, 2026-07-07: clients brand the product — palette,
 >   logo, product name — WITHOUT coding; task #480).** The substrate makes this cheap BY DESIGN:
 >   (a) the ADR-F013 token layer means palette = overriding a handful of `--lq-*` CSS custom

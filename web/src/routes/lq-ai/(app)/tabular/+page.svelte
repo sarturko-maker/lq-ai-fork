@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { listTabularExecutions } from '$lib/lq-ai/api/tabular';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
@@ -63,7 +64,7 @@
 </script>
 
 <svelte:head>
-	<title>Tabular Review · LQ.AI Oscar Edition</title>
+	<title>{$titleFor('Tabular Review', 'dot')}</title>
 </svelte:head>
 
 <PageShell size="wide" pad="compact">
