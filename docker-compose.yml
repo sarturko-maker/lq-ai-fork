@@ -112,6 +112,13 @@ services:
       AZURE_ANTHROPIC_RESOURCE: ${AZURE_ANTHROPIC_RESOURCE:-}
       AZURE_FOUNDRY_API_KEY: ${AZURE_FOUNDRY_API_KEY:-}
       AZURE_FOUNDRY_RESOURCE: ${AZURE_FOUNDRY_RESOURCE:-}
+      # KV-1 (ADR-F069) — OPTIONAL Azure Key Vault sourcing of the three Azure
+      # keys via the VM's managed identity. All NON-secret; unset ⇒ the plain
+      # AZURE_*_API_KEY vars above are used (default). See .env.example.
+      AZURE_KEY_VAULT_NAME: ${AZURE_KEY_VAULT_NAME:-}
+      AZURE_OPENAI_KEY_SECRET_NAME: ${AZURE_OPENAI_KEY_SECRET_NAME:-}
+      AZURE_ANTHROPIC_KEY_SECRET_NAME: ${AZURE_ANTHROPIC_KEY_SECRET_NAME:-}
+      AZURE_FOUNDRY_KEY_SECRET_NAME: ${AZURE_FOUNDRY_KEY_SECRET_NAME:-}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       # B6 partial — Ollama (Mode-2 / Tier-1). Forwarded so the
