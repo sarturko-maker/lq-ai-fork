@@ -1,0 +1,104 @@
+# LQ.AI Oscar Edition — PRIVATE-profile edge (P-1, ADR-F070).
+#
+# The restricted-egress counterpart of ./Caddyfile: same routing, same denies,
+# same headers — but NO public hostname and NO ACME. Caddy serves HTTPS on
+# :8443 with `tls internal` (its built-in local CA; zero certificate egress),
+# published loopback-only by docker-compose.private.yml, and reached through an
+# SSH tunnel (https://127.0.0.1:8443). Mounted over the image's baked-in
+# /etc/caddy/Caddyfile by the private overlay — the public image/config are
+# untouched.
+#
+# Kept IDENTICAL to ./Caddyfile stanza-for-stanza (drift between the two files
+# is a review item): access-log token scrub, security headers, request-body
+# ceiling, internal-API/WOPI/metrics denies, SSE flush, api/web routing.
+# Dropped ONLY: the global ACME email, the tls dns {…} block, and the public
+# host address. No DNS provider modules are referenced, so unlike ./Caddyfile
+# this file also validates in stock caddy:2:
+#   docker run --rm -v $PWD/deploy/caddy/Caddyfile.private:/etc/caddy/Caddyfile:ro \
+#     caddy:2 caddy validate --config /etc/caddy/Caddyfile
+{
+	# No public hostnames are served; disable the port-80 HTTP→HTTPS redirect
+	# listener (cert automation itself stays ON — `tls internal` uses it).
+	auto_https disable_redirects
+	# No-SNI/IP-literal mechanics: tunnel clients browse https://127.0.0.1:8443,
+	# and for an IP-literal origin browsers send NO SNI in the TLS handshake.
+	# Without SNI Caddy cannot pick a site certificate by name, so pin the
+	# default: no-SNI handshakes are served the 127.0.0.1 certificate (issued
+	# below; the IP rides as a SAN on the internal cert). Without this — or with
+	# a host-less site address, which has no certificate subjects at all — the
+	# handshake fails before any HTTP happens.
+	default_sni 127.0.0.1
+}
+
+# The site address names BOTH tunnel-end origins so `tls internal` issues local
+# certs for each (127.0.0.1 as an IP SAN, localhost as a DNS name). The
+# canonical documented origin is https://127.0.0.1:8443 — it feeds Collabora's
+# frame_ancestors and PUBLIC_BASE_URL via LQ_AI_PUBLIC_ORIGIN; localhost is
+# accepted at the TLS layer as a convenience only.
+# `tls internal` issues from Caddy's local CA (persisted in the caddy-data
+# volume at /data/caddy/pki/authorities/local/). Browsers show a one-time
+# self-signed warning; for clean trust export the CA root:
+#   docker compose ... cp caddy:/data/caddy/pki/authorities/local/root.crt .
+https://localhost:8443, https://127.0.0.1:8443 {
+	tls internal
+
+	# --- access logs MUST NOT retain the WOPI access_token (as public edge) ---
+	log {
+		output stdout
+		format filter {
+			wrap console
+			request>uri query {
+				replace access_token REDACTED
+			}
+		}
+	}
+
+	# --- security headers (mirrors ./Caddyfile; HSTS is inert on an IP
+	# origin — browsers ignore it for IP literals — kept for parity) ---
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		# frame-ancestors 'self': Collabora embeds the editor same-origin.
+		Content-Security-Policy "frame-ancestors 'self'"
+		Content-Security-Policy-Report-Only "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	# Request-body ceiling — uploads up to 100 MB (as public edge).
+	request_body {
+		max_size 100MB
+	}
+
+	# --- edge-deny the service-to-service internal API (uniform 404) ---
+	@internal path /api/v1/internal /api/v1/internal/*
+	handle @internal {
+		respond 404
+	}
+
+	# --- edge-deny the WOPI protocol surface (in-stack Collabora only) ---
+	@wopi path /api/v1/wopi /api/v1/wopi/*
+	handle @wopi {
+		respond 404
+	}
+
+	# --- keep /metrics off the served origin ---
+	@metrics path /metrics /metrics/*
+	handle @metrics {
+		respond 404
+	}
+
+	# --- API → api:8000 (after the denies) ---
+	handle /api/v1/* {
+		reverse_proxy api:8000 {
+			# SSE: agent + chat streams must flush immediately, not buffer.
+			flush_interval -1
+		}
+	}
+
+	# --- everything else → web:8080 (SPA + Collabora proxy, websockets) ---
+	handle {
+		reverse_proxy web:8080
+	}
+}

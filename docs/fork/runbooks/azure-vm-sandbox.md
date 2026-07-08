@@ -505,3 +505,165 @@ all three families are agent-capable.
   hardening checklist before sharing the URL with anyone.
 - **PRC-provider fence** — unchanged: keep `MINIMAX_API_KEY` /
   `DEEPSEEK_API_KEY` unset on an internet-facing stack (ADR-F060).
+
+## 8. Private profile — no public URL, no external S3 (restricted-egress)
+
+The private profile (P-1, ADR-F070) runs the SAME pinned images as everything
+above with **no public listener and no external object storage**: an additive
+compose overlay adds on-box MinIO and switches Caddy to internal TLS on a
+loopback-only port. `docker-compose.prod.yml` is not modified — the public-VPS
+path stays byte-identical.
+
+**When to use it:** locked-down / restricted-egress environments where every
+external integration is signoff-gated and the stack is reached only from inside
+(SSH tunnel, bastion, or an approved private network) — and as the stepping
+stone to the enterprise posture (AZ-6: AKS/Entra/private endpoints), because
+the egress surface below is already minimal and each remaining line is
+Private-Link-able.
+
+### 8.1 What changes vs the public path
+
+- **Skip §2.4 (DNS) entirely** — no hostname, no DNS zone, no DNS-01 token, no
+  ACME. Caddy issues from its own local CA (`tls internal`).
+- **Skip §2.5 (S3 procurement) entirely** — the overlay's `minio` service is
+  the object store; the api auto-creates the bucket on first boot
+  (`ensure_bucket()` in its startup lifespan — the same mechanism the dev
+  compose relies on; there is no init sidecar).
+- **NSG inbound: nothing but SSH.** No 80/443 rules — the only published host
+  port is `127.0.0.1:8443` (loopback), unreachable from outside by
+  construction.
+- Everything else — gateway seed (§4), optional Key Vault sourcing (§4b),
+  smokes (§5) — applies unchanged.
+
+### 8.2 Bring-up deltas
+
+1. Copy the private artifacts alongside the prod compose, **preserving the
+   `deploy/caddy/` relative layout** (the overlay mounts
+   `./deploy/caddy/Caddyfile.private` relative to itself):
+   ```sh
+   cp /opt/lq-ai-src/docker-compose.private.yml /opt/lq-ai/
+   install -d /opt/lq-ai/deploy/caddy
+   cp /opt/lq-ai-src/deploy/caddy/Caddyfile.private /opt/lq-ai/deploy/caddy/
+   ```
+2. Build `.env.private` from **`.env.private.example`** (root-owned, chmod
+   600) instead of `.env.prod.example`. Run the secrets generator with the
+   **`--private` flag** — `bash scripts/gen-secrets.sh --private` — which also
+   mints the MinIO root credentials plus the matching `S3_ACCESS_KEY`/
+   `S3_SECRET_KEY` pair, so the paste is one step (without the flag the output
+   is the public-path set only). The public-edge vars (`LQ_AI_PUBLIC_HOST`,
+   `LQ_AI_ACME_EMAIL`, `LQ_AI_DNS_API_TOKEN`) stay as the example's **inert
+   placeholders** — the prod compose interpolates them at parse time but
+   nothing reads them at runtime in this profile.
+3. Gateway seed as §4 Path A, then bring up with **both files**:
+   ```sh
+   docker compose -p lq-ai \
+     -f /opt/lq-ai/docker-compose.prod.yml \
+     -f /opt/lq-ai/docker-compose.private.yml \
+     --env-file /opt/lq-ai/.env.private up -d --wait
+   ```
+   (`deploy.sh` is written for the single-file public path; for this profile
+   drive compose directly, or wrap the two `-f` flags in a shell alias.)
+   The overlay's `ports: !override` merge tag needs **docker compose v2.24+**.
+
+### 8.3 Access — SSH tunnel (or Azure Bastion)
+
+```sh
+ssh -L 8443:127.0.0.1:8443 <your-vm>
+# then browse https://127.0.0.1:8443
+```
+
+- **The LOCAL tunnel port must stay 8443** (`-L 8443:…`, not some other free
+  port): the origin `127.0.0.1:8443` is pinned into Collabora's
+  `frame_ancestors` and the api's `PUBLIC_BASE_URL` via `LQ_AI_PUBLIC_ORIGIN`
+  — tunnelling to a different local port changes the browser origin and breaks
+  the embedded editor and generated invite/reset links.
+- **One-time certificate warning:** the cert chains to Caddy's local CA, not a
+  public one. Either accept the warning once per browser, or export the CA
+  root and trust it locally:
+  ```sh
+  docker compose -p lq-ai -f /opt/lq-ai/docker-compose.prod.yml \
+    -f /opt/lq-ai/docker-compose.private.yml --env-file /opt/lq-ai/.env.private \
+    cp caddy:/data/caddy/pki/authorities/local/root.crt ./lq-ai-local-ca.crt
+  ```
+  The CA persists in the `caddy-data` volume, so the trust decision survives
+  restarts and redeploys.
+- **Azure Bastion** works identically — it is just the tunnel transport:
+  ```sh
+  az network bastion tunnel -g <your-rg> --name <your-bastion> \
+    --target-resource-id <vm-resource-id> --resource-port 22 --port 2222
+  ssh -p 2222 -L 8443:127.0.0.1:8443 <user>@127.0.0.1
+  ```
+- **Tailscale (alternative):** the tailnet pattern in
+  `deploy/caddy-tailscale/README.md` gives a share-with-the-team private URL
+  instead of a per-user tunnel. **Caveat for restricted environments:**
+  Tailscale is an external control-plane integration (the coordination server
+  is a third-party service the host talks to) — in a signoff-gated environment
+  it needs its own express IT signoff and an egress-inventory entry before use.
+  The SSH-tunnel path above needs neither.
+
+### 8.4 Egress inventory (the IT-signoff list)
+
+Everything this profile talks to outside the box, grouped by **when** it
+happens — the whole list, suitable for a network-policy / firewall review:
+
+| Destination | When | Notes |
+|---|---|---|
+| `ghcr.io` (+ its CDN) | deploy-time | app image pulls (api / gateway / web / caddy); eliminable offline via `docker save`/`load` off-box or a private registry mirror (backlog P-2 candidate) |
+| `registry-1.docker.io` / `auth.docker.io` (+ Docker's CDN) | deploy-time | Docker Hub pulls: pgvector, redis, collabora, minio images (plus `curlimages/curl` when running the §5 smokes); eliminable the same ways |
+| `github.com` | once, initial setup | cloning the repo for the compose files + scripts (§2); eliminable via a repo tarball copied onto the box |
+| `huggingface.co` (+ its CDN) | FIRST document ingest, one-time | Docling layout/TableFormer + EasyOCR models (~700 MB) download at runtime and persist in the `ingest-hf-cache` / `ingest-easyocr-cache` named volumes — mitigations below |
+| `<resource>.openai.azure.com` / `<resource>.services.ai.azure.com` | runtime, steady-state | model inference, **gateway-only** egress (ADR-F010); Private-Link-able with zero code change |
+| `<vault>.vault.azure.net` + link-local IMDS (`169.254.169.254`) | gateway boot, only if §4b Key Vault sourcing is enabled | also Private-Link-able |
+
+**What is baked at image build vs downloaded at runtime — honestly:** the api
+image bundles ONLY the fastembed retrieval models (the `BAAI/bge-base-en-v1.5`
+embedder and the `Xenova/ms-marco-MiniLM-L-6-v2` reranker — ADR-0008,
+ADR-F049). The document-ingest models are **not** baked: on the first ingest,
+Docling downloads its layout + TableFormer models and EasyOCR its recognition
+models (~700 MB total) from `huggingface.co` — which is exactly why the prod
+compose persists the `ingest-hf-cache` and `ingest-easyocr-cache` volumes.
+Mitigations for a locked-down window, pick one:
+
+- **Pre-seed the two named volumes** from another box that has already run an
+  ingest (tar the volume contents across) before first use;
+- **Run one throwaway document ingest inside an approved egress window** —
+  the models persist in the volumes across restarts and redeploys, so the
+  window is one-time;
+- **Disable the heavy parsers**: `LQ_AI_DOCLING_ENABLED=false` (read by the
+  ingest-worker) skips the Docling pass — and with it EasyOCR — entirely, so
+  nothing downloads; the cost is structured extraction: parsing falls back to
+  PyMuPDF text-only (no layout-aware structure, no table extraction, no OCR
+  of scanned/image pages). There is no separate OCR toggle — EasyOCR runs
+  inside Docling.
+
+**Optional extras each ADD a line to this table** — take every addition
+through the same signoff: an SMTP relay, an OTLP/Langfuse observability
+endpoint, an off-box backup bucket, Tailscale (§8.3 caveat), and the
+`LQ_AI_BACKUP_DEADMAN_URL` / `LQ_AI_RESTORE_DEADMAN_URL` dead-man ping
+endpoints (`scripts/backup.sh` / `restore-drill.sh` curl them when set; leave
+unset for zero egress).
+
+Beyond the table: no ACME/CA traffic, no DNS API, no external S3 (MinIO is
+in-stack, and the overlay sets `MINIO_UPDATE=off`, disabling MinIO's periodic
+update checks — no egress from MinIO), no SMTP (unset by default here), and
+the PRC-provider fence is unchanged (MiniMax/DeepSeek keys stay unset). One
+unverified edge: Collabora's update popup is disabled
+(`--o:allow_update_popup=false` in the prod compose) but its background
+update-check behavior was not verified — check NSG flow logs on first boot.
+
+### 8.5 Smokes, backups, hardening
+
+- **The §5 smoke tests run unchanged** — they are network-internal already
+  (throwaway curl container on the stack's compose network, no public URL
+  involved). One substitution: in §5's first step, source
+  `/opt/lq-ai/.env.private` instead of `.env.prod`
+  (`set -a; . /opt/lq-ai/.env.private; set +a`). §5.4 against `azure-claude`
+  remains the load-bearing tool proof.
+- **Backups + hardening still per `staging-bringup.md`**, with one honesty
+  note: **on-box MinIO is single-node object storage on the same disk as
+  everything else** — no replication, no erasure coding, no provider
+  durability. A disk loss loses documents AND their only copy, so scheduled,
+  restore-drilled backups matter *more* under this profile, not less; prefer
+  an off-box (signoff-approved) backup destination.
+- The reduced 8-GiB profile (staging-bringup.md) composes on top and drops
+  Collabora; by default Collabora STAYS in the private profile.

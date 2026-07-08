@@ -113,6 +113,8 @@ out/
 # The hosted-deploy template — PLACEHOLDERS ONLY, enforced by the guard test
 # api/tests/test_env_prod_example.py (SAAS-3, ADR-F060 D6).
 !.env.prod.example
+# The private-profile template — PLACEHOLDERS ONLY (P-1, ADR-F070).
+!.env.private.example
 
 # Operator's actual gateway.yaml (the .example version is committed)
 gateway.yaml

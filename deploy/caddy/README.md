@@ -8,6 +8,16 @@ reverse-proxies to services by name (`api:8000`, `web:8080`).
 This is separate from `deploy/caddy-tailscale/` (the dev/Tailscale edge, which
 uses a different path prefix and no TLS). **Do not edit that one for hosting.**
 
+## Caddyfile.private — the restricted-egress sibling (ADR-F070)
+
+`Caddyfile.private` is the private-profile counterpart: same routing, denies,
+headers and log scrub, but `tls internal` on `:8443` (loopback-published by
+`docker-compose.private.yml`, reached via SSH tunnel) instead of the public
+ACME/DNS-01 edge. The two files are kept in sync **by review discipline** —
+there is no shared include; when you change a stanza here, mirror it there
+(both file headers cross-reference each other, and drift between them is a
+review item). Runbook: `docs/fork/runbooks/azure-vm-sandbox.md` §8.
+
 ## What it does (SAAS-HOSTING.md §6 security gate, ADR-F059)
 
 - **(a)** `respond 404` for `/api/v1/internal/*` — the gateway↔backend service

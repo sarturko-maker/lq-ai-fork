@@ -800,6 +800,10 @@ lead model drafts/orchestrates/verifies; smaller models implement.
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **P-2 candidate — fully offline image path for the private profile (surfaced P-1, ADR-F070):** a
+  private registry mirror or `docker save`/`load` side-load flow so `ghcr.io` drops off the
+  restricted-egress inventory entirely (runbook azure-vm-sandbox.md §8.4).
+
 - **SETUP-3c — first-login onboarding checklist** (split out of SETUP-3b, surfaced 2026-07-05): House
   Brief → invite users → review area defaults, UX polish, can ride after the 4x/5 ladder.
 - **Viewer UI affordance-hiding** (surfaced SETUP-5b, 2026-07-05): server enforcement is the boundary
