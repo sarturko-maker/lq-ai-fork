@@ -110,10 +110,11 @@ surface) and reserved an `org` namespace tier.
 
 Draft slice ladder (to be re-planned as its own milestone doc after maintainer edits):
 
-- B-0: **ADR — the module model.** One vocabulary: a "module" = skill | knowledge collection |
-  playbook | tool group | sub-agent profile. Defines how org-authored content enters the Library
-  (reopens F065 D7 with the injection harness it demanded), and what an "agent profile" is
-  (practice_areas already carries the config vocabulary from F1-S3).
+- B-0: **✓ LANDED 2026-07-08 (both docs status: proposed — maintainer edits/accepts).**
+  `docs/adr/F067-module-model.md` (module vocabulary; org-authored harness with immutable approved
+  snapshots + strict frontmatter allowlist denying `allowed-tools`; profiles as in-repo manifests;
+  HITL seam reserved) + `docs/fork/plans/MODULES-milestone.md` (the B-1…B-7b re-plan — SUPERSEDES
+  the sketch below, which is kept for the record).
 - B-1: House Brief admin page (birdseye candidate A — cheap, already re-prioritised as G9; feeds
   "who the agent acts for").
 - B-2: org-authored skills → agent path (candidate C): author in the existing builder → propose to
