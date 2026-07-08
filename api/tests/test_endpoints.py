@@ -419,6 +419,10 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # tests/test_practice_area_playbooks_api.py + tests/test_matter_capabilities_api.py.
     ("POST", "/api/v1/practice-areas/{key}/playbooks"),
     ("DELETE", "/api/v1/practice-areas/{key}/playbooks/{playbook_id}"),
+    # B-3 (fork, ADR-F067 D1) — knowledge-collection binding. Dedicated coverage in
+    # tests/test_practice_area_knowledge_api.py.
+    ("POST", "/api/v1/practice-areas/{key}/knowledge-bases"),
+    ("DELETE", "/api/v1/practice-areas/{key}/knowledge-bases/{kb_id}"),
     ("GET", "/api/v1/matters/{project_id}/capabilities"),
     ("PATCH", "/api/v1/matters/{project_id}/capabilities"),
     # PRIV-3 (fork) — ROPA register read API (ADR-F019). Dedicated coverage in

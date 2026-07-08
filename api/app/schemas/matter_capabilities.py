@@ -46,7 +46,7 @@ class CapabilityToggleInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["skill", "tool", "playbook"]
+    kind: Literal["skill", "tool", "playbook", "knowledge"]
     key: str = Field(min_length=1, max_length=200)
     enabled: bool
 

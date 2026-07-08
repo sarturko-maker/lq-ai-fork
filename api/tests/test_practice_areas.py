@@ -1114,6 +1114,22 @@ async def test_attach_tool_group_unknown_is_404(
     assert resp.status_code == 404
 
 
+async def test_attach_composition_only_group_is_404(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    """F067 B-3: the derived knowledge group can never be bound as a tool group — the
+    attach surface rejects it exactly like an unregistered key (same 404 path)."""
+    area = PracticeArea(key="attachcomp", name="A", unit_label="Matter", position=904)
+    db_session.add(area)
+    await db_session.flush()
+    resp = await client.post(
+        "/api/v1/practice-areas/attachcomp/tool-groups",
+        headers=_bearer(admin),
+        json={"group_key": "knowledge"},
+    )
+    assert resp.status_code == 404
+
+
 async def test_detach_tool_group_idempotent(
     client: AsyncClient, admin: User, db_session: AsyncSession
 ) -> None:

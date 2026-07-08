@@ -181,6 +181,60 @@ class PracticeAreaPlaybook(Base):
         )
 
 
+class PracticeAreaKnowledgeBase(Base):
+    """Many-to-many join: practice area ↔ knowledge collection (availability binding) —
+    ADR-F067 D1, migration 0092.
+
+    Mirrors :class:`PracticeAreaPlaybook`: ``knowledge_base_id`` IS a real FK (knowledge
+    collections are SQL rows). A collection bound here is AVAILABLE to the area's runs
+    ONLY if it is also adopted into the Org Library (kind ``knowledge``,
+    ``org_library_entries``) — the same ``build_area_inventory`` intersection every
+    other kind goes through (ADR-F065 D3, no second resolution path). Unlike a skill or
+    playbook, a knowledge collection's content never becomes instructions: it reaches
+    the model only as fenced RETRIEVED-DATA through the guarded ``search_knowledge``
+    tool, so adoption + binding IS the entire control (D1 — no propose/approve harness
+    needed for this kind). Hard-deleting a knowledge base CASCADE-drops its bindings; a
+    soft-delete (``archived_at``) leaves the binding in place but the inventory skips
+    archived collections at resolve time (same drift-drop posture as a deleted
+    playbook).
+    """
+
+    __tablename__ = "practice_area_knowledge_bases"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "practice_area_id", "knowledge_base_id", name="pk_practice_area_knowledge_bases"
+        ),
+    )
+
+    practice_area_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "practice_areas.id",
+            ondelete="CASCADE",
+            name="fk_practice_area_knowledge_bases_area_id",
+        ),
+        nullable=False,
+    )
+    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "knowledge_bases.id",
+            ondelete="CASCADE",
+            name="fk_practice_area_knowledge_bases_kb_id",
+        ),
+        nullable=False,
+    )
+    attached_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<PracticeAreaKnowledgeBase area_id={self.practice_area_id} "
+            f"knowledge_base_id={self.knowledge_base_id}>"
+        )
+
+
 class PracticeAreaToolGroup(Base):
     """Many-to-many join: practice area ↔ tool-group NAME (ADR-F062, SETUP-4a).
 
@@ -229,12 +283,15 @@ class OrgLibraryEntry(Base):
 
     Replaces the Level-0 disable-only ``DeploymentCapabilityToggle`` (ADR-F062, superseded).
     Adopt-in polarity: a capability (``skill`` name / ``tool`` group key /
-    ``playbook_id::text``) is AVAILABLE to any area's runs ONLY if a row here adopts it —
-    absence is the single off-state ("not in your Library"). ``build_area_inventory``
-    intersects an area's bindings with Library membership at the one fail-closed chokepoint
-    (D3); bind-time validation rejects binding a non-adopted capability (D4). Grants stay
-    CODE — the ADR-F062 invariant is untouched; the Library only NARROWS availability,
-    adopt-in instead of disable-out (D1).
+    ``playbook_id::text`` / ``knowledge_base_id::text``) is AVAILABLE to any area's runs
+    ONLY if a row here adopts it — absence is the single off-state ("not in your
+    Library"). ``build_area_inventory`` intersects an area's bindings with Library
+    membership at the one fail-closed chokepoint (D3); bind-time validation rejects
+    binding a non-adopted capability (D4). Grants stay CODE — the ADR-F062 invariant is
+    untouched; the Library only NARROWS availability, adopt-in instead of disable-out
+    (D1). ``knowledge`` (migration 0092, ADR-F067 D1) is the fourth kind — a knowledge
+    collection needs no propose/approve harness of its own since its content is fenced
+    RETRIEVED-DATA, never instructions; adoption + binding is the entire control.
 
     ``enabled`` is intentionally ABSENT (unlike the toggle it replaces): membership IS the
     state, so ``GET /admin/capabilities`` reports ``enabled`` as a deprecated alias for
@@ -247,7 +304,7 @@ class OrgLibraryEntry(Base):
     __table_args__ = (
         PrimaryKeyConstraint("capability_kind", "capability_key", name="pk_org_library_entries"),
         CheckConstraint(
-            "capability_kind IN ('skill', 'tool', 'playbook')",
+            "capability_kind IN ('skill', 'tool', 'playbook', 'knowledge')",
             name="chk_org_library_entries_kind",
         ),
         CheckConstraint(

@@ -9,7 +9,7 @@ catalog display metadata, for ANY active user — not just admins. These prove:
   source/author/version) resolved the same way the admin catalog does,
 * a dangling entry (adopted, then the underlying catalog entry vanished)
   returns ``label=None`` (and the rest of the catalog fields ``None`` too),
-* canonical ordering: kind (tool -> skill -> playbook), then label
+* canonical ordering: kind (tool -> skill -> playbook -> knowledge), then label
   (case-insensitive, ``None`` last), then key,
 * ``adopted_by`` never appears on the wire (member-visible surface, no
   cross-user identifiers).
@@ -18,6 +18,7 @@ catalog display metadata, for ANY active user — not just admins. These prove:
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.main import app
+from app.models.knowledge import KnowledgeBase
 from app.models.playbook import Playbook
 from app.models.practice_area import OrgLibraryEntry
 from app.models.user import User
@@ -108,6 +110,15 @@ async def _make_playbook(db: AsyncSession, *, name: str = "Lib NDA playbook") ->
     return pb
 
 
+async def _make_kb(
+    db: AsyncSession, owner: User, *, name: str = "Lib knowledge collection"
+) -> KnowledgeBase:
+    kb = KnowledgeBase(owner_id=owner.id, name=name, description="A knowledge collection.")
+    db.add(kb)
+    await db.flush()
+    return kb
+
+
 # --- authz ---------------------------------------------------------------------
 async def test_member_gets_200(client: AsyncClient, member: User) -> None:
     resp = await client.get(_URL, headers=_bearer(member))
@@ -167,6 +178,23 @@ async def test_playbook_entry_metadata(
     assert entries[0]["source"] is None  # playbooks carry no provenance field (D-A)
 
 
+async def test_knowledge_entry_metadata(
+    client: AsyncClient, member: User, db_session: AsyncSession
+) -> None:
+    kb = await _make_kb(db_session, member)
+    await _adopt(db_session, "knowledge", str(kb.id))
+    resp = await client.get(_URL, headers=_bearer(member))
+    entries = resp.json()["entries"]
+    assert len(entries) == 1
+    assert entries[0]["kind"] == "knowledge"
+    assert entries[0]["key"] == str(kb.id)
+    assert entries[0]["label"] == "Lib knowledge collection"
+    assert entries[0]["description"] == "A knowledge collection."
+    # source stays None: knowledge collections carry no provenance field either (D-A);
+    # adoption + binding IS the control (ADR-F067 D1).
+    assert entries[0]["source"] is None
+
+
 # --- dangling entries --------------------------------------------------------
 async def test_dangling_skill_has_null_label(
     client: AsyncClient, member: User, db_session: AsyncSession, fixture_registry: None
@@ -196,6 +224,32 @@ async def test_dangling_playbook_has_null_label(
     import uuid
 
     await _adopt(db_session, "playbook", str(uuid.uuid4()))
+    resp = await client.get(_URL, headers=_bearer(member))
+    entries = resp.json()["entries"]
+    assert entries[0]["label"] is None
+
+
+async def test_dangling_knowledge_has_null_label_when_unknown(
+    client: AsyncClient, member: User, db_session: AsyncSession
+) -> None:
+    # Adopted, but no such collection row exists (deleted after adoption).
+    import uuid
+
+    await _adopt(db_session, "knowledge", str(uuid.uuid4()))
+    resp = await client.get(_URL, headers=_bearer(member))
+    entries = resp.json()["entries"]
+    assert entries[0]["label"] is None
+
+
+async def test_dangling_knowledge_has_null_label_when_archived(
+    client: AsyncClient, member: User, db_session: AsyncSession
+) -> None:
+    # Adopted, then archived — archived collections drop out of the catalog too
+    # (same drift-drop posture as a deleted playbook).
+    kb = await _make_kb(db_session, member)
+    kb.archived_at = datetime.now(UTC)
+    await db_session.flush()
+    await _adopt(db_session, "knowledge", str(kb.id))
     resp = await client.get(_URL, headers=_bearer(member))
     entries = resp.json()["entries"]
     assert entries[0]["label"] is None

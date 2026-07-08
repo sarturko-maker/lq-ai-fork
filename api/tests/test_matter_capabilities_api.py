@@ -28,8 +28,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.main import app
 from app.models.audit import AuditLog
+from app.models.knowledge import KnowledgeBase
 from app.models.playbook import Playbook
-from app.models.practice_area import OrgLibraryEntry, PracticeArea, PracticeAreaPlaybook
+from app.models.practice_area import (
+    OrgLibraryEntry,
+    PracticeArea,
+    PracticeAreaKnowledgeBase,
+    PracticeAreaPlaybook,
+)
 from app.models.project import MatterCapabilityToggle, Project
 from app.models.user import User
 from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_db
@@ -88,6 +94,21 @@ async def _bind_playbook(db: AsyncSession, area_id: uuid.UUID, *, name: str) -> 
     return pb
 
 
+async def _bind_knowledge_base(
+    db: AsyncSession, area_id: uuid.UUID, owner: User, *, name: str
+) -> KnowledgeBase:
+    """B-3 (ADR-F067 D1): a knowledge collection bound to the area AND adopted into the
+    Org Library — the panel resolves knowledge through the same adopt-in intersection as
+    playbooks (mirrors ``_bind_playbook``)."""
+    kb = KnowledgeBase(owner_id=owner.id, name=name, description="House know-how.")
+    db.add(kb)
+    await db.flush()
+    db.add(PracticeAreaKnowledgeBase(practice_area_id=area_id, knowledge_base_id=kb.id))
+    db.add(OrgLibraryEntry(capability_kind="knowledge", capability_key=str(kb.id)))
+    await db.flush()
+    return kb
+
+
 def _url(project_id: uuid.UUID) -> str:
     return f"/api/v1/matters/{project_id}/capabilities"
 
@@ -112,7 +133,13 @@ async def test_get_commercial_defaults_all_on(
     assert resp.status_code == 200
     body = resp.json()
     assert body["practice_area_key"] == "commercial"
-    assert [s["kind"] for s in body["sections"]] == ["playbook", "skill", "tool", "mcp"]
+    assert [s["kind"] for s in body["sections"]] == [
+        "playbook",
+        "knowledge",
+        "skill",
+        "tool",
+        "mcp",
+    ]
 
     # Redlining tool group is available + enabled by default.
     redlining = _entry(body, "tool", "redlining")
@@ -136,7 +163,8 @@ async def test_get_unfiled_matter_returns_only_mcp(
     body = resp.json()
     assert body["practice_area_key"] is None
     nonempty = {s["kind"]: len(s["entries"]) for s in body["sections"]}
-    assert nonempty == {"playbook": 0, "skill": 0, "tool": 0, "mcp": 1}
+    # knowledge: 0 — this fixture binds/adopts no knowledge collection (B-3).
+    assert nonempty == {"playbook": 0, "knowledge": 0, "skill": 0, "tool": 0, "mcp": 1}
 
 
 async def test_get_cross_user_matter_is_404(
@@ -183,6 +211,52 @@ async def test_put_disables_tool_then_get_reflects(
     # A fresh GET reflects the override.
     body = (await client.get(_url(matter.id), headers=_bearer(user))).json()
     assert _entry(body, "tool", "redlining")["enabled"] is False
+
+
+async def test_knowledge_toggle_round_trip(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    """B-3 (ADR-F067 D1): a bound + adopted knowledge collection appears in the panel's
+    knowledge section (default on), the lawyer can toggle it off (persisted + reflected
+    on GET), and toggle it back on."""
+    area_id = await _commercial_area_id(db_session)
+    kb = await _bind_knowledge_base(db_session, area_id, user, name="House templates")
+    matter = await _make_matter(db_session, user, area_id=area_id)
+
+    # Available + enabled by default.
+    body = (await client.get(_url(matter.id), headers=_bearer(user))).json()
+    entry = _entry(body, "knowledge", str(kb.id))
+    assert entry["available"] is True and entry["enabled"] is True
+
+    # Toggle OFF — persisted with set_by, reflected on a fresh GET.
+    resp = await client.patch(
+        _url(matter.id),
+        headers=_bearer(user),
+        json={"toggles": [{"kind": "knowledge", "key": str(kb.id), "enabled": False}]},
+    )
+    assert resp.status_code == 200
+    assert _entry(resp.json(), "knowledge", str(kb.id))["enabled"] is False
+    row = (
+        await db_session.execute(
+            select(MatterCapabilityToggle).where(
+                MatterCapabilityToggle.project_id == matter.id,
+                MatterCapabilityToggle.capability_kind == "knowledge",
+                MatterCapabilityToggle.capability_key == str(kb.id),
+            )
+        )
+    ).scalar_one()
+    assert row.enabled is False and row.set_by == user.id
+    body = (await client.get(_url(matter.id), headers=_bearer(user))).json()
+    assert _entry(body, "knowledge", str(kb.id))["enabled"] is False
+
+    # Toggle back ON.
+    resp = await client.patch(
+        _url(matter.id),
+        headers=_bearer(user),
+        json={"toggles": [{"kind": "knowledge", "key": str(kb.id), "enabled": True}]},
+    )
+    assert resp.status_code == 200
+    assert _entry(resp.json(), "knowledge", str(kb.id))["enabled"] is True
 
 
 async def test_put_upsert_is_idempotent(

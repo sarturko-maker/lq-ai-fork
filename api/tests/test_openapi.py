@@ -267,6 +267,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # ADR-F054 (fork) — admin playbook attach/detach (capability availability)
         "/api/v1/practice-areas/{key}/playbooks",
         "/api/v1/practice-areas/{key}/playbooks/{playbook_id}",
+        # B-3 (fork, ADR-F067 D1) — admin knowledge-collection attach/detach
+        "/api/v1/practice-areas/{key}/knowledge-bases",
+        "/api/v1/practice-areas/{key}/knowledge-bases/{kb_id}",
         # SETUP-4b (fork, ADR-F062 addendum) — bulk reposition
         "/api/v1/practice-areas/reorder",
         # PRIV-3 (fork) — ROPA register read API (ADR-F019)
@@ -418,7 +421,9 @@ async def test_openapi_paths_match_sketch() -> None:
     #   POST/DELETE share one path) (174 -> 176).
     # +6: B-2a (ADR-F067 D2/D3) — org-skills harness: user-skills propose +
     #   proposals, admin/org-skills queue + approve/reject/revoke (176 -> 182).
-    assert len(actual) == 182  # +3: ADR-F054 capability panel (GET/PUT
+    # +2: B-3 (ADR-F067 D1) — admin knowledge-collection attach/detach
+    #   (/practice-areas/{key}/knowledge-bases + .../{kb_id} = 2 new paths, 182 -> 184).
+    assert len(actual) == 184  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

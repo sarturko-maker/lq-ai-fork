@@ -28,6 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.area_agent import build_area_subagents
 from app.agents.capabilities import (
+    COMPOSITION_ONLY_GROUP_KEYS,
+    KIND_KNOWLEDGE,
     KIND_PLAYBOOK,
     KIND_SKILL,
     KIND_TOOL,
@@ -37,18 +39,22 @@ from app.api.dependencies import ActiveUser, AdminUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, NotFound, ValidationError
+from app.models.knowledge import KnowledgeBase
 from app.models.org_skill import OrgSkillVersion
 from app.models.playbook import Playbook
 from app.models.practice_area import (
     OrgLibraryEntry,
     PracticeArea,
+    PracticeAreaKnowledgeBase,
     PracticeAreaPlaybook,
     PracticeAreaSkill,
     PracticeAreaToolGroup,
 )
 from app.models.project import Project
 from app.schemas.practice_areas import (
+    BoundKnowledgeBase,
     BoundPlaybook,
+    KnowledgeBaseAttachRequest,
     PlaybookAttachRequest,
     PracticeAreaConfigUpdate,
     PracticeAreaCreate,
@@ -93,8 +99,10 @@ async def _bound_skill_names(db: AsyncSession, area_id: uuid.UUID) -> list[str]:
 
 def _canonical_group_order(keys: set[str]) -> list[str]:
     """REGISTRY-CANONICAL order (ADR-F062 D4): ``TOOL_GROUP_REGISTRY`` insertion
-    order filtered to ``keys`` — never DB row order (SETUP-4b, ``bound_tool_groups``)."""
-    return [k for k in TOOL_GROUP_REGISTRY if k in keys]
+    order filtered to ``keys`` — never DB row order (SETUP-4b, ``bound_tool_groups``).
+    Composition-only keys (F067 B-3) are excluded: a forged/legacy binding row
+    must not display as a bound tool group (the grant fence already drops it)."""
+    return [k for k in TOOL_GROUP_REGISTRY if k in keys and k not in COMPOSITION_ONLY_GROUP_KEYS]
 
 
 async def _bound_tool_group_keys(db: AsyncSession, area_id: uuid.UUID) -> list[str]:
@@ -130,6 +138,28 @@ async def _bound_playbooks(db: AsyncSession, area_id: uuid.UUID) -> list[BoundPl
         )
     ).all()
     return [BoundPlaybook(id=pb_id, name=name) for pb_id, name in rows]
+
+
+async def _bound_knowledge_bases(db: AsyncSession, area_id: uuid.UUID) -> list[BoundKnowledgeBase]:
+    """One area's bound (non-archived) knowledge collections, name order (mutation paths).
+
+    Mirrors :func:`_bound_playbooks`; ``KnowledgeBase.name`` is not unique either — the
+    ``id`` tiebreaker keeps same-named collections from flapping order between reads."""
+    rows = (
+        await db.execute(
+            select(KnowledgeBase.id, KnowledgeBase.name)
+            .join(
+                PracticeAreaKnowledgeBase,
+                PracticeAreaKnowledgeBase.knowledge_base_id == KnowledgeBase.id,
+            )
+            .where(
+                PracticeAreaKnowledgeBase.practice_area_id == area_id,
+                KnowledgeBase.archived_at.is_(None),
+            )
+            .order_by(KnowledgeBase.name, KnowledgeBase.id)
+        )
+    ).all()
+    return [BoundKnowledgeBase(id=kb_id, name=name) for kb_id, name in rows]
 
 
 async def _all_bound_skill_names(
@@ -190,11 +220,35 @@ async def _all_bound_playbooks(
     return out
 
 
+async def _all_bound_knowledge_bases(
+    db: AsyncSession, area_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[BoundKnowledgeBase]]:
+    """Batched knowledge-collection lookup for the list path — ONE query across every
+    area (no N+1, mirrors :func:`_all_bound_playbooks`)."""
+    out: dict[uuid.UUID, list[BoundKnowledgeBase]] = {aid: [] for aid in area_ids}
+    if not area_ids:
+        return out
+    rows = await db.execute(
+        select(PracticeAreaKnowledgeBase.practice_area_id, KnowledgeBase.id, KnowledgeBase.name)
+        .join(KnowledgeBase, KnowledgeBase.id == PracticeAreaKnowledgeBase.knowledge_base_id)
+        .where(
+            PracticeAreaKnowledgeBase.practice_area_id.in_(area_ids),
+            KnowledgeBase.archived_at.is_(None),
+        )
+        # name is not unique — the id tiebreaker keeps order stable (mirrors playbooks).
+        .order_by(PracticeAreaKnowledgeBase.practice_area_id, KnowledgeBase.name, KnowledgeBase.id)
+    )
+    for area_id, kb_id, kb_name in rows:
+        out[area_id].append(BoundKnowledgeBase(id=kb_id, name=kb_name))
+    return out
+
+
 def _to_read(
     area: PracticeArea,
     bound_skills: list[str],
     bound_tool_groups: list[str],
     bound_playbooks: list[BoundPlaybook],
+    bound_knowledge_bases: list[BoundKnowledgeBase],
 ) -> PracticeAreaRead:
     return PracticeAreaRead(
         id=area.id,
@@ -210,6 +264,7 @@ def _to_read(
         bound_skills=bound_skills,
         bound_tool_groups=bound_tool_groups,
         bound_playbooks=bound_playbooks,
+        bound_knowledge_bases=bound_knowledge_bases,
         created_at=area.created_at,
         updated_at=area.updated_at,
     )
@@ -223,6 +278,7 @@ async def _to_read_single(db: AsyncSession, area: PracticeArea) -> PracticeAreaR
         await _bound_skill_names(db, area.id),
         await _bound_tool_group_keys(db, area.id),
         await _bound_playbooks(db, area.id),
+        await _bound_knowledge_bases(db, area.id),
     )
 
 
@@ -233,12 +289,14 @@ async def _list_read_models(db: AsyncSession, areas: list[PracticeArea]) -> list
     skills_by_area = await _all_bound_skill_names(db, area_ids)
     groups_by_area = await _all_bound_tool_group_keys(db, area_ids)
     playbooks_by_area = await _all_bound_playbooks(db, area_ids)
+    knowledge_bases_by_area = await _all_bound_knowledge_bases(db, area_ids)
     return [
         _to_read(
             area,
             skills_by_area[area.id],
             groups_by_area[area.id],
             playbooks_by_area[area.id],
+            knowledge_bases_by_area[area.id],
         )
         for area in areas
     ]
@@ -267,7 +325,9 @@ def _require_registered_group(group_key: str) -> None:
     Shared by create + attach so the message/details shape cannot drift. 404 (not 422)
     mirrors the skill-not-in-registry posture; the key is an identifier, never content.
     """
-    if group_key not in TOOL_GROUP_REGISTRY:
+    # F067 B-3: a composition-only group (knowledge) can never be bound as a tool
+    # group — treat it exactly like an unregistered key.
+    if group_key not in TOOL_GROUP_REGISTRY or group_key in COMPOSITION_ONLY_GROUP_KEYS:
         raise NotFound(
             f"Tool group {group_key!r} is not in the registry.",
             details={"group_key": group_key},
@@ -925,6 +985,117 @@ async def detach_practice_area_playbook(
         practice_area_id=area.id,
         request=request,
         details={"playbook_id": str(playbook_id)},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{key}/knowledge-bases",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Attach a knowledge collection to a practice area (admin).",
+    response_class=Response,
+)
+async def attach_practice_area_knowledge_base(
+    key: str,
+    payload: KnowledgeBaseAttachRequest,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> Response:
+    """POST /api/v1/practice-areas/{key}/knowledge-bases — ADR-F067 D1 (mirrors the
+    playbook/tool-group pairs).
+
+    Body ``{knowledge_base_id}``; the collection must exist and not be archived (unknown
+    or archived -> 404). The binding makes the collection AVAILABLE to the area's runs —
+    unlike a skill or playbook its content never becomes instructions: it reaches the
+    model only as fenced RETRIEVED-DATA through the guarded ``search_knowledge`` tool, so
+    adoption + binding IS the entire control (no per-matter toggle gate here beyond the
+    inventory's own toggleable posture). Re-attaching returns 409.
+    """
+    area = await _load_area_or_404(db, key)
+    kb = (
+        await db.execute(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id == payload.knowledge_base_id,
+                KnowledgeBase.archived_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if kb is None:
+        raise NotFound(
+            f"Knowledge collection {payload.knowledge_base_id} is not available.",
+            details={"knowledge_base_id": str(payload.knowledge_base_id)},
+        )
+    # ADR-F065 D4: the collection must be adopted into the Org Library (422, distinct from 404).
+    await _require_in_library(db, KIND_KNOWLEDGE, str(payload.knowledge_base_id))
+    area_id = area.id
+    db.add(
+        PracticeAreaKnowledgeBase(
+            practice_area_id=area_id, knowledge_base_id=payload.knowledge_base_id
+        )
+    )
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        # Mirrors the tool-group pair's FK-vs-PK disambiguation: a concurrent area delete
+        # fails THIS insert's FK (area gone -> 404, matching _load_area_or_404's posture),
+        # not "already attached" (only the composite-PK duplicate is a true 409).
+        if "fk_practice_area_knowledge_bases_area_id" in str(exc.orig):
+            raise NotFound("practice area not found", details={"key": key}) from exc
+        raise Conflict(
+            "Knowledge collection is already attached to this practice area.",
+            details={"key": key, "knowledge_base_id": str(payload.knowledge_base_id)},
+        ) from exc
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="practice_area.knowledge_attach",
+        resource_type="practice_area",
+        resource_id=key,
+        practice_area_id=area_id,
+        request=request,
+        details={"knowledge_base_id": str(payload.knowledge_base_id)},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/{key}/knowledge-bases/{kb_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Detach a knowledge collection from a practice area (admin).",
+    response_class=Response,
+)
+async def detach_practice_area_knowledge_base(
+    key: str,
+    kb_id: uuid.UUID,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> Response:
+    """DELETE /api/v1/practice-areas/{key}/knowledge-bases/{kb_id} — ADR-F067 D1.
+
+    Idempotent: detaching a not-attached collection is a no-op 204 (the desired end
+    state holds); an unknown area is a 404.
+    """
+    area = await _load_area_or_404(db, key)
+    await db.execute(
+        delete(PracticeAreaKnowledgeBase).where(
+            PracticeAreaKnowledgeBase.practice_area_id == area.id,
+            PracticeAreaKnowledgeBase.knowledge_base_id == kb_id,
+        )
+    )
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="practice_area.knowledge_detach",
+        resource_type="practice_area",
+        resource_id=key,
+        practice_area_id=area.id,
+        request=request,
+        details={"knowledge_base_id": str(kb_id)},
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

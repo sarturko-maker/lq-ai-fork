@@ -35,6 +35,7 @@ import logging
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -43,6 +44,7 @@ from app.agents.assessment_tools import build_assessment_tools
 from app.agents.budget import BudgetEnvelope
 from app.agents.commercial_tools import build_commercial_tools
 from app.agents.deal_changes import DealChangeLedger
+from app.agents.knowledge_tools import build_knowledge_tools
 from app.agents.live_changes import ChangeLedger
 from app.agents.redline_service import RedlineService
 from app.agents.ropa_changes import RopaChangeLedger
@@ -59,6 +61,7 @@ logger = logging.getLogger(__name__)
 KIND_SKILL = "skill"
 KIND_TOOL = "tool"
 KIND_PLAYBOOK = "playbook"
+KIND_KNOWLEDGE = "knowledge"
 KIND_MCP = "mcp"
 
 
@@ -112,6 +115,23 @@ ASSESSMENT_GROUP = ToolGroupSpec(
         "the ROPA register."
     ),
 )
+# ADR-F067 D1 (B-3): the knowledge-collection search tool group. Unlike the domain
+# groups above it is NOT attached via ``practice_area_tool_groups`` rows and needs no
+# ``kind='tool'`` adoption — it materialises when the run has ≥1 ENABLED knowledge
+# collection (``knowledge_bases`` adopted as kind ``knowledge`` + bound to the area +
+# not toggled off). Composition injects :data:`KNOWLEDGE_GROUP.key` into the build set
+# in that case (see ``build_area_tool_groups``); the collections themselves already
+# went through the Store → Library → bind → inventory chokepoint, so this is downstream
+# composition of resolved entries, not a second resolution path. Its one tool searches
+# those collections as fenced RETRIEVED-DATA (never instructions).
+KNOWLEDGE_GROUP = ToolGroupSpec(
+    key="knowledge",
+    label="Knowledge collections",
+    description=(
+        "Search the organisation's knowledge collections bound to this practice area "
+        "and ground answers in them, with collection and file citations."
+    ),
+)
 
 # --- tool-group registry (ADR-F062, SETUP-4a) --------------------------------
 #
@@ -144,6 +164,11 @@ class GroupBuildContext:
     binding: MatterBinding
     envelope: BudgetEnvelope
     redline_service_provider: Callable[[], RedlineService]
+    # ADR-F067 D1 (B-3): the run's ENABLED knowledge collections (bound ∩ adopted ∩
+    # matter-toggled), resolved by composition from the inventory. Only the knowledge
+    # group's adapter reads it; the default keeps every existing construction site + the
+    # parity/composition tests green.
+    knowledge_base_ids: tuple[uuid.UUID, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -209,6 +234,20 @@ def _build_assessment(
     return build_assessment_tools(ctx.session_factory, run_id=ctx.run_id, binding=ctx.binding)
 
 
+def _build_knowledge(
+    ctx: GroupBuildContext, ledger: ChangeLedger | None
+) -> list[Callable[..., Any]]:
+    # ADR-F067 D1 (B-3): the knowledge-collection search tool. Scoped to the run's
+    # ENABLED collections (resolved by composition onto the context); fenced
+    # RETRIEVED-DATA output. No ledger.
+    return build_knowledge_tools(
+        ctx.session_factory,
+        run_id=ctx.run_id,
+        binding=ctx.binding,
+        knowledge_base_ids=ctx.knowledge_base_ids,
+    )
+
+
 # Insertion order IS the canonical group order (see the note above). ``DealChangeLedger`` /
 # ``RopaChangeLedger`` are their own no-arg constructors (satisfy
 # ``Callable[[], ChangeLedger]`` structurally).
@@ -221,7 +260,18 @@ TOOL_GROUP_REGISTRY: dict[str, ToolGroupDef] = {
         spec=ROPA_GROUP, build=_build_ropa, ledger_factory=RopaChangeLedger
     ),
     ASSESSMENT_GROUP.key: ToolGroupDef(spec=ASSESSMENT_GROUP, build=_build_assessment),
+    # ADR-F067 D1 (B-3): no ledger and never attached via practice_area_tool_groups —
+    # composition injects this key when the run has enabled knowledge collections. It
+    # sits LAST so it never perturbs the seeded areas' grant order/ledger selection
+    # (registry-order parity, D4): its adapter has no ledger, so the "first ledger"
+    # choice is unchanged.
+    KNOWLEDGE_GROUP.key: ToolGroupDef(spec=KNOWLEDGE_GROUP, build=_build_knowledge),
 }
+
+# F067 B-3 ruling: derived group — materialises iff ≥1 enabled knowledge collection;
+# never adopted/bound as a tool. Registered above ONLY so composition can build it;
+# every kind='tool' surface (catalog, adopt, bind, bound-row resolution) fences it out.
+COMPOSITION_ONLY_GROUP_KEYS: frozenset[str] = frozenset({KNOWLEDGE_GROUP.key})
 
 
 # --- recommended Library sets (STORE-2 D-C) ----------------------------------
@@ -394,6 +444,19 @@ class _OrgSkillSnapshot(Protocol):
     def description(self) -> str | None: ...
 
 
+class _KnowledgeBaseLike(Protocol):
+    """Structural type for a ``knowledge_bases`` row (ADR-F067 D1, B-3).
+
+    Only what the availability chokepoint needs to build a panel entry: the id (the
+    capability key is ``id::text``), the display ``name`` (the entry label), and
+    ``archived_at`` (a soft-deleted collection is skipped at resolve time, the same
+    drift-drop posture as a deleted playbook)."""
+
+    id: uuid.UUID
+    name: str
+    archived_at: datetime | None
+
+
 @dataclass(frozen=True)
 class CapabilityEntry:
     """One capability the panel can show — available/default/toggleable flags."""
@@ -429,8 +492,10 @@ MCP_PLACEHOLDER = CapabilityEntry(
 )
 
 # Section order + labels for the panel (maintainer: "playbooks, skills and tools").
+# `knowledge` (ADR-F067 D1, B-3) slots in right after playbooks.
 _SECTION_ORDER: tuple[tuple[str, str], ...] = (
     (KIND_PLAYBOOK, "Playbooks"),
+    (KIND_KNOWLEDGE, "Knowledge"),
     (KIND_SKILL, "Skills"),
     (KIND_TOOL, "Tools"),
     (KIND_MCP, "MCP servers"),
@@ -490,7 +555,7 @@ class CapabilityInventory:
         return out
 
     def sections(self) -> list[CapabilitySection]:
-        """All four sections in panel order (a section may be empty; MCP always has
+        """All five sections in panel order (a section may be empty; MCP always has
         its placeholder)."""
         return [
             CapabilitySection(
@@ -510,6 +575,7 @@ def build_area_inventory(
     tool_group_keys: Sequence[str],
     library_entries: Iterable[_LibraryEntry],
     org_skill_snapshots: Mapping[str, _OrgSkillSnapshot] | None = None,
+    area_knowledge_bases: Sequence[_KnowledgeBaseLike] = (),
 ) -> CapabilityInventory:
     """Compute the area's available capabilities (pure — no I/O). ADR-F054 + ADR-F065 + ADR-F067.
 
@@ -548,6 +614,15 @@ def build_area_inventory(
     revoke signal (an approved snapshot that was revoked / superseded is simply absent
     from the map, so a still-bound revoked skill lands here). That warning also fires for
     plain registry drift, which was silently dropped before this slice.
+
+    ``area_knowledge_bases`` are the knowledge collections bound to this area via
+    ``practice_area_knowledge_bases`` (ADR-F067 D1, B-3). A collection becomes AVAILABLE
+    only if adopted into the Library as ``(knowledge, id::text)`` — the same adopt-in
+    intersection as every other kind — and is skipped if archived (soft-delete drift
+    drop, mirroring a deleted playbook). Its content reaches the model only as fenced
+    RETRIEVED-DATA through the guarded ``search_knowledge`` tool, so it needs no
+    propose/approve harness: adoption + binding is the entire control. The default ``()``
+    keeps every non-B-3 call site green (nothing bound ⇒ no knowledge entries).
     """
     # ADR-F065: the set of (kind, key) the org ADOPTED into its Library. A binding resolves
     # only if it is a member — adopt-in, the inverse of the old disable-out toggle.
@@ -569,6 +644,27 @@ def build_area_inventory(
                 key=str(pb.id),
                 label=label,
                 description=(pb.description or None),
+                available=True,
+                default_enabled=True,
+                toggleable=True,
+            )
+        )
+
+    # Knowledge collections (ADR-F067 D1, B-3) — the area's bound
+    # practice_area_knowledge_bases rows, narrowed to the adopted Library set, with any
+    # archived collection dropped at resolve time (soft-delete drift, same posture as a
+    # deleted playbook). Panel order sits right after playbooks (see _SECTION_ORDER).
+    for kb in area_knowledge_bases:
+        if getattr(kb, "archived_at", None) is not None:
+            continue
+        if (KIND_KNOWLEDGE, str(kb.id)) not in adopted:
+            continue
+        entries.append(
+            CapabilityEntry(
+                kind=KIND_KNOWLEDGE,
+                key=str(kb.id),
+                label=kb.name,
+                description=None,
                 available=True,
                 default_enabled=True,
                 toggleable=True,
@@ -655,6 +751,21 @@ def build_area_inventory(
                 "event": "tool_group_unknown_skipped",
                 "count": len(unknown_groups),
                 "keys": unknown_groups,
+            },
+        )
+    # F067 B-3: a composition-only group (knowledge) must never resolve from a
+    # practice_area_tool_groups row — every write surface rejects the key, so a row
+    # here is stray/forged data; drop it fail-closed (defense in depth).
+    composition_only = sorted(group_key_set & COMPOSITION_ONLY_GROUP_KEYS)
+    if composition_only:
+        group_key_set -= COMPOSITION_ONLY_GROUP_KEYS
+        logger.warning(
+            "composition-only tool-group rows bound to an area; dropped from "
+            "availability (no grant)",
+            extra={
+                "event": "tool_group_composition_only_skipped",
+                "count": len(composition_only),
+                "keys": composition_only,
             },
         )
     for group_key, tdef in TOOL_GROUP_REGISTRY.items():

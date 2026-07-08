@@ -140,8 +140,10 @@ def test_mutating_route_entry_count_pinned() -> None:
     POST/DELETE /branding/logo), all AdminUser-gated at the handler level
     (the router itself is unauth-mounted for the public GETs): 126 → 129.
     B-2a (ADR-F067 D2/D3) adds 4 mutating org-skills routes (POST propose,
-    MutatingUser-gated; POST approve/reject/revoke, AdminUser-gated): 129 → 133."""
-    assert len(_mutating_routes()) == 133
+    MutatingUser-gated; POST approve/reject/revoke, AdminUser-gated): 129 → 133.
+    B-3 (ADR-F067 D1) adds 2 mutating practice-area routes (POST/DELETE
+    /practice-areas/{key}/knowledge-bases), both AdminUser-gated: 133 → 135."""
+    assert len(_mutating_routes()) == 135
 
 
 @pytest.mark.unit
@@ -150,13 +152,15 @@ def test_api_v1_path_count_pinned() -> None:
     STORE-2 (ADR-F065 D-B) adds 1 route (GET /api/v1/library, member-readable): 173 → 174.
     BRAND-1a (ADR-F068) adds 2 paths (/branding + /branding/logo): 174 → 176.
     B-2a (ADR-F067 D2/D3) adds 6 paths (user-skills propose + proposals;
-    admin/org-skills + approve/reject/revoke): 176 → 182."""
+    admin/org-skills + approve/reject/revoke): 176 → 182.
+    B-3 (ADR-F067 D1) adds 2 paths (POST/DELETE
+    /practice-areas/{key}/knowledge-bases): 182 → 184."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 182
+    assert len(paths) == 184
 
 
 @pytest.mark.unit

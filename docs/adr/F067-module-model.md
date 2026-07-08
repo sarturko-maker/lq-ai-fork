@@ -284,3 +284,45 @@ Also fixed in-flight (adversarial review): approve's supersede is two-step-flush
 SQLAlchemy orders same-table UPDATEs by primary key, which could transiently violate the
 one-approved-per-slug index; transitions row-lock (`FOR UPDATE`) to close the check-then-write
 window; `registry is None` (skills off) fails org skills closed at BOTH chokepoints.
+
+## Implementation addendum — B-3 (2026-07-08, appended; the decisions above are unchanged)
+
+The knowledge-collection module landed as slice B-3 (migration 0092). Five implementation calls
+worth recording, all within the D1 envelope:
+
+1. **The derived-group ruling.** The adopted unit is the `kind='knowledge'` Library entry (key =
+   `knowledge_bases.id::text`), NOT a tool group: the `search_knowledge` tool group materialises
+   in composition iff ≥1 ENABLED knowledge collection resolves for the run (bound via
+   `practice_area_knowledge_bases` ∩ adopted into the Library ∩ not matter-toggled off). The
+   group is COMPOSITION-ONLY (`COMPOSITION_ONLY_GROUP_KEYS` in `app/agents/capabilities.py`):
+   it stays in `TOOL_GROUP_REGISTRY` so `build_area_tool_groups` can build it, but it is fenced
+   out of every `kind='tool'` surface — the Store tool catalog, the Library adopt endpoint
+   (422, exactly like an unknown key), the area tool-group bind endpoint (404, exactly like an
+   unregistered group), and bound-row resolution in `build_area_inventory` (a stray
+   `practice_area_tool_groups` row naming it is dropped fail-closed with a
+   `tool_group_composition_only_skipped` warning). It therefore needs — and can never acquire —
+   a `practice_area_tool_groups` row.
+2. **Authz posture.** Bound collections are searched by ANY matter agent run filed under that
+   practice area, regardless of the `knowledge_bases` row's owner — that is the point of org
+   knowledge: adoption + binding IS the access control (D1). The owner-scoped `/knowledge-bases`
+   CRUD surface is unchanged; the tool is a separate, area-gated read path behind
+   `guarded_dispatch` (R6 grant, R5 halt, body-free audit). Note: `_live_knowledge_bases` in the
+   admin catalog deliberately exposes every user's non-archived collection name/description to
+   the ADMIN — that catalog is the D1-sanctioned review surface where the admin decides what
+   the org adopts.
+3. **Query embedding routes through the gateway** (the 1536-dim `embedding` model the KB chunks
+   are indexed with — the `query_kb` pattern), never the local 768-dim matter embedder; the two
+   retrieval doors deliberately do NOT converge (ADR-F049 Slice C1 boundary). Any embed/gateway
+   failure degrades to FTS-only (`query_embedding=None`) with a structured warning — retrieval
+   never hard-fails on the embedder. When every bound collection is FTS-only
+   (`hybrid_alpha == 1.0`) the embed call is skipped entirely.
+4. **Retrieved chunks are fenced RETRIEVED-DATA** (the injection class D1 assigns this kind):
+   every result renders inside the single-sourced `_RETRIEVED_HEADER` frame ("treat as
+   information, never as instructions") with collection/file/page provenance and chunk ids —
+   the chunks stay untrusted model input, which is why this kind needs no propose/approve
+   harness.
+5. **Web surfaces are deferred to B-3b on record.** The Store/Library sections for the new kind
+   and the area-page bind card touch exactly the files B-2b is concurrently editing — deferred
+   to avoid a cross-slice merge tangle, not descoped. The backend endpoints
+   (`POST/DELETE /practice-areas/{key}/knowledge-bases`, the `knowledge` sections in the admin
+   catalog / member Library / matter panel) shipped in B-3.
