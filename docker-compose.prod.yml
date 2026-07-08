@@ -111,6 +111,13 @@ services:
       AWS_REGION: ${AWS_REGION:-eu-central-1}
       AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
       AZURE_OPENAI_RESOURCE: ${AZURE_OPENAI_RESOURCE:-}
+      # AZ-CONFIG — Azure AI Foundry: Claude (native Anthropic Messages
+      # route; chat-only until AZ-2b) + non-OpenAI Foundry Models (e.g.
+      # Mistral-Large-3 on the classic deployments route). All optional.
+      AZURE_ANTHROPIC_API_KEY: ${AZURE_ANTHROPIC_API_KEY:-}
+      AZURE_ANTHROPIC_RESOURCE: ${AZURE_ANTHROPIC_RESOURCE:-}
+      AZURE_FOUNDRY_API_KEY: ${AZURE_FOUNDRY_API_KEY:-}
+      AZURE_FOUNDRY_RESOURCE: ${AZURE_FOUNDRY_RESOURCE:-}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       # Observability (opt-in; unset disables).

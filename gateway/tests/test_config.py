@@ -131,6 +131,75 @@ def test_load_config_parses_example(example_env: None) -> None:
 
 
 @pytest.mark.unit
+def test_load_config_azure_foundry_entries_default_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AZ-CONFIG: the example's three Azure entries load with NO AZURE_* env.
+
+    The example seeds fresh deployments (named-volume first boot), so it must
+    parse with every ``${AZURE_*:-disabled}`` placeholder falling back to its
+    default. Asserts the type mapping (azure-claude rides the ``anthropic``
+    adapter; azure-mistral rides ``azure_openai`` on the services.ai host),
+    the env-var plumbing, and the explicit tier-3 enterprise posture (the
+    tier trap: ``openai_compatible`` would default to tier 1).
+    """
+
+    for var in (
+        "AZURE_OPENAI_RESOURCE",
+        "AZURE_OPENAI_API_KEY",
+        "AZURE_ANTHROPIC_RESOURCE",
+        "AZURE_ANTHROPIC_API_KEY",
+        "AZURE_FOUNDRY_RESOURCE",
+        "AZURE_FOUNDRY_API_KEY",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+    config = load_config(EXAMPLE_CONFIG)
+    providers = {provider.name: provider for provider in config.providers}
+
+    azure_openai = providers["azure-openai"]
+    assert azure_openai.type == "azure_openai"
+    assert azure_openai.api_key_env == "AZURE_OPENAI_API_KEY"
+    assert azure_openai.tier == 3
+    assert azure_openai.base_url == "https://disabled.openai.azure.com"
+
+    azure_claude = providers["azure-claude"]
+    assert azure_claude.type == "anthropic"
+    assert azure_claude.api_key_env == "AZURE_ANTHROPIC_API_KEY"
+    assert azure_claude.tier == 3
+    assert azure_claude.base_url == "https://disabled.services.ai.azure.com/anthropic"
+    assert azure_claude.models == ["claude-sonnet-5", "claude-opus-4-8"]
+
+    azure_mistral = providers["azure-mistral"]
+    assert azure_mistral.type == "azure_openai"
+    assert azure_mistral.api_key_env == "AZURE_FOUNDRY_API_KEY"
+    assert azure_mistral.tier == 3
+    assert azure_mistral.base_url == "https://disabled.services.ai.azure.com"
+    assert azure_mistral.models == ["Mistral-Large-3"]
+    # api_version rides in via extra-allow, so load_config succeeds without
+    # it and the loss would only surface as a startup skip-warning; pin it.
+    assert (azure_mistral.model_extra or {}).get("api_version") == "2024-10-21"
+
+    # The parsed ``tier:`` FIELD (asserted above) is only resolution step 4;
+    # the example ships ``inference_tiers.defaults.anthropic: 4`` ACTIVE
+    # (step 3), which would shadow azure-claude's tier 3 without the
+    # ``overrides: azure-claude: 3`` entry (step 2). Assert the DERIVED
+    # runtime tier — the value stamped on responses, the routing log, and
+    # checked by ``tier_policy.privileged_minimum_tier: 3``.
+    from app.router import derive_routed_inference_tier
+
+    for provider in (azure_openai, azure_claude, azure_mistral):
+        assert (
+            derive_routed_inference_tier(
+                provider=provider,
+                native_model=provider.models[0],
+                inference_tiers=config.inference_tiers,
+            )
+            == 3
+        ), f"{provider.name} must derive runtime tier 3 (enterprise Azure posture)"
+
+
+@pytest.mark.unit
 def test_anonymization_config_rejects_non_int_tiers() -> None:
     """``apply_at_tiers`` must be ``list[int]``; bad values raise."""
 

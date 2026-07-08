@@ -13,10 +13,8 @@ then CLAUDE.md, then the ADRs/plans named below.
 > Memory: [[pivot-modular-azure]]. This supersedes the "PICK UP = STORE-3" pointer below (STORE done).
 >
 > **THE SLICE LADDER (execute top-down; one PR each; full ADR-F005 gate every time):**
-> - **PR #227 (docs, OPEN)** — the pivot record (5 plan docs, doc-only, branch
->   `pivot-docs-modular-azure`). Merge when CI is green; no containerized suites needed (no service
->   touched); squash with `--repo sarturko-maker/lq-ai-fork`.
-> - **R-1 ✓ SHIPPED (branch `r1-redline-continuity`, ADR-F066 accepted, mig 0089) — redline
+> - **PR #227 ✓ MERGED** — the pivot record (5 plan docs, doc-only).
+> - **R-1 ✓ SHIPPED (PR #228 merged `08cceb99`, ADR-F066 accepted, mig 0089) — redline
 >   continuity.** Follow-up redlines now continue from the agent's own latest working version:
 >   `files.parent_file_id` + `files.is_snapshot` (mig 0089, up/down/up verified on throwaway
 >   pgvector); write-side lineage on redline/response outputs + WOPI snapshots;
@@ -36,31 +34,26 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   the suite runner died reporting nothing (agents_empty_result); lead re-ran. (2) ruff inside a
 >   container with ONLY api/ mounted falls back to line-length 88 and mass-rewraps — ALWAYS mount
 >   the repo root. (3) targeted in-container tests need /skills mounted (mig 0032 seeds from it).
-> - **AZ-CONFIG — one PR bundling AZ-1 + AZ-2a + AZ-3 + AZ-4a (all CONFIG-ONLY, each independently
->   enableable via its own env vars; nothing changes when unset).** Content: `gateway.yaml.example`
->   gains (1) the azure-openai entry updated to a GA api-version with deployment-name `models:` comments,
->   (2) NEW `azure-claude` entry — `type: anthropic`, `base_url:
->   https://${AZURE_ANTHROPIC_RESOURCE:-disabled}.services.ai.azure.com/anthropic`, `api_key_env:
->   AZURE_ANTHROPIC_API_KEY`, tier 3, note "text-only until AZ-2b", (3) NEW `azure-mistral` entry —
->   `type: azure_openai` on the `services.ai.azure.com` host (classic deployments route works for
->   non-OpenAI Foundry models), models = e.g. a `Mistral-Large-3` deployment (ONLY Large-3 gets an
->   agent-facing alias — medium-3-5/Codestral have NO tool-calling on Azure), (4) `azure-` model_aliases
->   (non-colliding) + `cost_tracking.rates` placeholder entries, (5) `embedding` alias variant comment for
->   an azure text-embedding-3 deployment (Door B). Plus: `.env.example` + docker-compose gateway env
->   passthrough (`${VAR:-}`) for the new vars; gateway config-parse tests if the pattern fits
->   (`test_build_adapter.py` style); README note re the `gateway-config` NAMED-VOLUME seed trap (example
->   edits do NOT propagate to an already-seeded volume). **Tier trap: never `type: openai_compatible`
->   for a cloud provider (defaults tier 1) — explicit cloud type/tier.** NO real resource names/keys —
->   repo is public. **RE-PRIORITISED (maintainer, 2026-07-07): budget-constrained — ship inference-on-
->   Foundry readiness FIRST. AZ-CONFIG + AZ-2b are the critical path; AZ-4 embeddings PARKED** (local
->   Door-A embedder is $0/private/proven and stays the answer; item (5) shrinks to a comment-only
->   alias example; Voyage — maintainer sighted voyage-4/-lite/rerank-2.5 live in the Foundry catalog,
->   updating the "rerank unconfirmed" finding — revisits ONLY if real-matter tabular/retrieval quality
->   shows the embedder is the bottleneck; the CUAD eval harness is ready for that head-to-head).
->   Note for AZ-CONFIG's live story: once merged, an operator points `smart`/`fast`/`budget` at Foundry
->   deployments via the operator Models page (hot-apply proven in ONBOARD-0) — GPT + Mistral-Large-3
->   become agent-capable with ZERO code; Claude joins after AZ-2b.
-> - **AZ-2b — Anthropic adapter tool-calling (the one real gateway slice; retires fork blocker #2).**
+> - **AZ-CONFIG ✓ SHIPPED (branch `az-config-foundry`) — AZ-1 + AZ-2a + AZ-3 + AZ-4a in one
+>   config-only PR; each provider independently enableable; nothing changes when unset.**
+>   `gateway.yaml.example`: azure-openai api_version → GA `2024-10-21`; NEW `azure-claude`
+>   (`type: anthropic`, native Messages route on `…services.ai.azure.com/anthropic`, TEXT-ONLY until
+>   AZ-2b, no agent alias); NEW `azure-mistral` (`type: azure_openai` on the services.ai host,
+>   Mistral-Large-3 — the agent-capable Mistral pick on Azure); commented azure aliases + cost-rate
+>   placeholders + Door-B embedding variant (AZ-4 PARKED per budget — local Door-A embedder stays);
+>   ACTIVE `inference_tiers.overrides: azure-claude: 3` (review catch: `defaults.anthropic: 4` would
+>   shadow the entry's tier 3 — red/green-proven vs `derive_routed_inference_tier`). Env plumbing:
+>   AZURE_ANTHROPIC_*/AZURE_FOUNDRY_* in `.env.example` + `.env.prod.example` +
+>   `deploy/caddy-tailscale/.env.example`, forwarded `${VAR:-}` in both compose files;
+>   tenant-gateway.yaml.example commented blocks. Test loads the REAL example with zero AZURE_* env
+>   (types/tier-3/api_version/DERIVED runtime tier). Gate: gateway suite **596 passed / 2 skipped**,
+>   ruff + mypy --strict clean (CI-parity container); boot probe (example mounted, no AZURE_* env):
+>   key-less providers skipped non-fatally, /health 200. Live smoke vs a real Foundry resource =
+>   AZ-5, on record. Operator story: point `smart`/`fast`/`budget` at Foundry deployments via the
+>   Models page (hot-apply proven in ONBOARD-0) — GPT + Mistral-Large-3 agent-capable with ZERO code;
+>   Claude joins after AZ-2b. REMEMBER the `gateway-config` NAMED-VOLUME trap: the example seeds
+>   FIRST boot only; existing stacks edit the live gateway.yaml/admin API.
+> - **NEXT ▶ AZ-2b — Anthropic adapter tool-calling (the one real gateway slice; retires fork blocker #2).**
 >   `gateway/app/providers/anthropic.py`: request side — forward `tools`/`tool_choice`, translate
 >   assistant `tool_calls`→`tool_use` blocks + `role:"tool"`→`tool_result` (exists), stop collapsing
 >   block content to `""`; response side — `tool_use` blocks → OpenAI-shape `tool_calls` +
