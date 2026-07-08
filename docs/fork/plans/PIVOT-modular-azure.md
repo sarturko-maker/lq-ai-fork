@@ -71,12 +71,14 @@ Status: **R-0 diagnosis DONE (2026-07-07, code trace).** Root cause, exactly:
   compatible routes we already speak; the /models Model Inference route is legacy — its SDK retires
   2026-08-26); Voyage **real but awkward** (law-2 = ~$5+/hr GPU managed app; serverless catalog =
   general-purpose voyage-4 with Voyage-native schema) — split + partly defer.
-- AZ-1: Azure OpenAI provider — config + env + aliases + rates; smoke test. First to enable. One PR.
-- AZ-2a: Claude-on-Foundry chat — config entry + env plumb (works today, text). One PR.
-- AZ-2b: Anthropic adapter tool-calling (request tools/tool_use/tool_result + streaming deltas) —
-  unlocks Claude as an AGENT model, Foundry and direct; respx tests, mypy --strict. One PR.
-- AZ-3: Mistral-Large-3 — config-only via the azure_openai-type route on the services.ai host (only
-  Large-3 gets an agent alias; medium-3-5/Codestral lack tool-calling on Azure). One PR.
+- AZ-1 + AZ-2a + AZ-3 + AZ-4a: **✓ SHIPPED as AZ-CONFIG (PR #229, 2026-07-08)** — one config-only
+  PR: azure-openai GA api-version, azure-claude chat entry, azure-mistral (Mistral-Large-3), env
+  plumbing, tier override (defaults.anthropic would shadow the entry tier — review catch), example
+  loads with zero AZURE_* env (tested, boot-probed).
+- AZ-2b: **✓ SHIPPED (PR #230, 2026-07-08)** — Anthropic adapter tool-calling (tools/tool_choice/
+  tool_use/tool_result + streaming input_json_delta; consecutive tool-result merge; block-content
+  extraction). Retires fork blocker #2 — Claude agent-capable direct AND on Foundry. Gateway suite
+  616/2; live proof deferred to the AZ-5 sandbox smoke, on record.
 - AZ-4 — **PARKED (maintainer, 2026-07-07: budget-constrained — ship what works; inference-on-Foundry
   readiness outranks embeddings).** The local Door-A embedder is $0, private, and proven — it IS the
   shipping answer. AZ-4a shrinks to a comment-only `embedding`-alias example inside the AZ-CONFIG PR;
@@ -84,8 +86,11 @@ Status: **R-0 diagnosis DONE (2026-07-07, code trace).** Root cause, exactly:
   2026-07-07, which confirms the previously-UNCONFIRMED reranker) revisits ONLY if real-matter
   tabular/retrieval quality shows the embedder is the bottleneck — the CUAD eval harness is ready for
   that head-to-head. Ties into F056.
-- AZ-5: VM sandbox deploy runbook (compose on an Azure VM; secrets via env; gateway-config named-
-  volume seeding; per-provider synthetic smoke tests). Builds on ADR-F058 delivery modes.
+- AZ-5: **✓ SHIPPED (2026-07-08)** — `docs/fork/runbooks/azure-vm-sandbox.md` (Foundry resource +
+  deployments, VM sizing/NSG/DNS-01+S3 constraints, named-volume Path A/B, per-provider synthetic
+  smokes incl. the azure-claude tool smoke that discharges AZ-2b's deferred live proof, teardown/
+  cost hygiene). Workstream AZ dev-side COMPLETE — next step is the maintainer executing it on a
+  real Azure resource.
 - AZ-6 (later): enterprise posture — AKS, Entra ID keyless (configurable audience — scope strings per
   route recorded in the report), per-client isolation. Not planned yet.
 - Region note: one Foundry resource in **Sweden Central (or East US2)** satisfies all three families —
