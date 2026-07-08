@@ -99,12 +99,34 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   B-7a profile manifests (parity oracle: applying Commercial reproduces today's seeded state) →
 >   B-7b the wizard (absorbs ONBOARD-1/2 + G13/#473; acceptance = maintainer-walked fresh-org
 >   rehearsal).
-> - **NEXT ▶ BRAND-1a backend (workflow IN FLIGHT overnight 2026-07-08)** — see the BRAND-1 entry
->   below; scout plan (session scratchpad `brand-1-plan.md`) CORRECTED the token detail: the brandable
->   set is the SEMANTIC tokens in `web/src/app.css` (`--brand` family — the scarce blue), NOT the
->   legacy `--lq-*` set (those stay untouched); ADR number = **F068**; logo = BYTEA raster-only
->   (unauth path must not need S3 creds); injection = dual-scope `<style id="lq-branding">` tag
->   (inline setProperty on `<html>` would break dark mode). Slice 1b (web) follows.
+> - **BRAND-1a ✓ SHIPPED (backend + wizard; ADR-F068 proposed, mig 0090).** `deployment_branding`
+>   singleton (org-profile pattern); UNAUTH per-IP-rate-limited `GET /api/v1/branding` (200 defaults
+>   on empty row, max-age=300) + `GET /branding/logo` (sniffed type, nosniff, immutable, ?v= ms-
+>   resolution buster); admin `PUT` (closed palette allowlist — themes light/dark × 7 `--brand`-family
+>   tokens, `--primary` is ink and NOT brandable; product_name rejects Unicode-category
+>   control/format chars — SMTP-subject header-injection surface) + `POST/DELETE /logo` (magic-byte
+>   sniff PNG/JPEG/WEBP, client content-type IGNORED, SVG impossible, 512 KB cap, no pillow);
+>   validation rules single-sourced on the MODEL module (shared with the seeder — review catch);
+>   `ensure_first_run_branding` (inserts only when table empty AND a BRAND_* env set; accent fans out
+>   server-side); lifecycle emails read the configured name (composer belt-and-braces strips);
+>   setup-tenant.sh BRAND_PRODUCT_NAME/BRAND_ACCENT_LIGHT/BRAND_ACCENT_DARK with PER-KEY fences +
+>   QUOTED name emission (generic check_value charset NOT widened — shell-injection discipline);
+>   compose + .env examples plumbed. Gate: containerized api suite **3437 passed / 47 skipped**
+>   (baseline 3387, +50); mig 0090 up/down/up on throwaway pgvector; ruff CI-exact clean; 3-lens
+>   review all findings applied; **LIVE 12/12 probe** on the rebuilt dev stack (unauth GET, PUT
+>   round-trip, non-admin rejected, palette/CR-LF 422s, spoofed-SVG 422, real PNG sniffed + served
+>   nosniff/immutable, delete, defaults restored). NOTE: the workflow's fix agent died without
+>   reporting (StructuredOutput trap AGAIN) — lead verified its applied edits + suite exit 0 by hand.
+> - **NEXT ▶ BRAND-1b — the web half.** Scout plan = session scratchpad `brand-1-plan.md` §§1,2,4,7
+>   (also summarized in ADR-F068): branding store + unauth fetch (bootstrap `skipAuth` precedent);
+>   pre-paint localStorage cache in app.html mirroring the theme anti-flash pattern — RE-VALIDATE
+>   hex/allowlist at EVERY injection site (localStorage is poisonable); dual-scope
+>   `<style id="lq-branding">` tag `:root{}+.dark{}` (inline setProperty on `<html>` BREAKS dark
+>   mode); wordmark/footer("NAME — powered by LQ.AI Oscar Edition", attribution HARD LINE)/login
+>   hero/~19 title strings via a title helper; favicon swap to the logo endpoint when set; admin
+>   Branding page (areas-page template; contrast math in page-helpers.ts — NO @testing-library/svelte);
+>   update `saas-rebrand-branding.cy.ts` pins; live verify needs the PREBUILT web container REBUILT +
+>   screenshots (login page unauth branding, header, dark-mode accent, admin page).
 > - **BRAND-1 — tenant white-labeling (maintainer, 2026-07-07: clients brand the product — palette,
 >   logo, product name — WITHOUT coding; task #480).** The substrate makes this cheap BY DESIGN:
 >   (a) the ADR-F013 token layer means palette = overriding a handful of `--lq-*` CSS custom

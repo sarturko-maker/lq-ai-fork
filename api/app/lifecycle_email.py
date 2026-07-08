@@ -9,14 +9,49 @@ hand over out-of-band — ADR-F061 D6).
 
 Content-only: no secrets beyond the single-use token in the link, and the token
 is NEVER logged (the transport logs neither subject nor body).
+
+BRAND-1a (ADR-F068): the product name in the subject/body is parameterized —
+callers resolve it via :func:`get_branding_name` (the deployment-branding
+singleton, default "LQ.AI"). The name lands in the SMTP SUBJECT header, so the
+composer strips CR/LF/control characters belt-and-braces on top of the PUT
+boundary's rejection.
 """
 
 from __future__ import annotations
 
 from urllib.parse import urlsplit
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import get_settings
 from app.email import send_email
+from app.models.deployment_branding import DeploymentBranding, strip_control_chars
+
+DEFAULT_PRODUCT_NAME = "LQ.AI"
+
+
+def _header_safe(name: str) -> str:
+    """Strip control/format/line-separator characters (incl. CR/LF) from a
+    subject-bound string.
+
+    Belt-and-braces: the PUT boundary already REJECTS these characters
+    (app/api/branding.py), but the subject header is an injection sink, so
+    the composer never trusts its input either. Uses the SAME shared
+    character classes as the boundary (app/models/deployment_branding).
+    """
+    return strip_control_chars(name).strip()
+
+
+async def get_branding_name(db: AsyncSession) -> str:
+    """The deployment's configured product name, or ``"LQ.AI"`` (BRAND-1a).
+
+    Reads the ``deployment_branding`` singleton; an empty/absent name means
+    the default brand.
+    """
+    result = await db.execute(select(DeploymentBranding.product_name).limit(1))
+    name = result.scalar_one_or_none()
+    return _header_safe(name or "") or DEFAULT_PRODUCT_NAME
 
 
 def _effective_base_url() -> str:
@@ -52,11 +87,14 @@ def build_reset_url(token: str) -> str:
     return f"{_effective_base_url()}/lq-ai/reset-password?token={token}"
 
 
-async def send_invite_email(*, to_addr: str, accept_url: str) -> bool:
+async def send_invite_email(
+    *, to_addr: str, accept_url: str, product_name: str = DEFAULT_PRODUCT_NAME
+) -> bool:
     """Best-effort invite email. Returns ``True`` only on a successful send."""
-    subject = "You've been invited to LQ.AI"
+    name = _header_safe(product_name) or DEFAULT_PRODUCT_NAME
+    subject = f"You've been invited to {name}"
     body = (
-        "An administrator has invited you to LQ.AI.\n\n"
+        f"An administrator has invited you to {name}.\n\n"
         "Accept the invitation and set your password here:\n"
         f"{accept_url}\n\n"
         "This link is single-use and expires soon. If you did not expect this "
@@ -65,11 +103,14 @@ async def send_invite_email(*, to_addr: str, accept_url: str) -> bool:
     return await send_email(to_addr=to_addr, subject=subject, body=body)
 
 
-async def send_password_reset_email(*, to_addr: str, reset_url: str) -> bool:
+async def send_password_reset_email(
+    *, to_addr: str, reset_url: str, product_name: str = DEFAULT_PRODUCT_NAME
+) -> bool:
     """Best-effort password-reset email. Returns ``True`` only on success."""
-    subject = "Reset your LQ.AI password"
+    name = _header_safe(product_name) or DEFAULT_PRODUCT_NAME
+    subject = f"Reset your {name} password"
     body = (
-        "We received a request to reset your LQ.AI password.\n\n"
+        f"We received a request to reset your {name} password.\n\n"
         "Set a new password here:\n"
         f"{reset_url}\n\n"
         "This link is single-use and expires within the hour. If you did not "

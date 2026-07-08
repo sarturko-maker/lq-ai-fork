@@ -373,6 +373,9 @@ def test_interactive_mode_saves_secretfree_manifest_0600(tmp_path: Path) -> None
                 "sha-def5678",  # image tag
                 "full",  # node profile
                 "anthropic",  # model provider
+                "",  # brand product name (BRAND-1a — skip: default brand)
+                "",  # brand accent light (skip)
+                "",  # brand accent dark (skip)
                 "age1" + "q" * 40,  # age recipient
                 "",  # backup dead-man
                 "",  # restore dead-man
@@ -473,6 +476,57 @@ def test_budget_profile_refuses_anything_else(tmp_path: Path) -> None:
         proc = _run(manifest, tmp_path / "out", "--no-deploy", "--dry-run")
         assert proc.returncode != 0, f"RUN_DEFAULT_BUDGET_PROFILE={bad!r} should be refused"
         assert "run_default_budget_profile" in proc.stderr.lower()
+        assert not (tmp_path / "out").exists()
+
+
+# --------------------------------------------------------------------------- #
+# BRAND-1a — BRAND_* white-label seed (ADR-F068). BRAND_PRODUCT_NAME bypasses
+# the generic charset fence (it legitimately carries spaces) but has its OWN
+# tight fence ^[A-Za-z0-9 ._-]{1,80}$ and is written QUOTED into the
+# root-sourced .env.prod; the accents are anchored #RRGGBB.
+# --------------------------------------------------------------------------- #
+def test_brand_name_with_spaces_written_quoted(tmp_path: Path) -> None:
+    """A spaced product name is accepted and lands QUOTED (sourced-file safety)."""
+    out_dir = _render(tmp_path, BRAND_PRODUCT_NAME="Acme Legal Workbench")
+    text = (out_dir / ".env.prod").read_text()
+    assert 'BRAND_PRODUCT_NAME="Acme Legal Workbench"' in text
+
+
+def test_brand_accents_written_when_set(tmp_path: Path) -> None:
+    out_dir = _render(tmp_path, BRAND_ACCENT_LIGHT="#c02020", BRAND_ACCENT_DARK="#ff6a6a")
+    env = _parse_env(out_dir / ".env.prod")
+    assert env["BRAND_ACCENT_LIGHT"] == "#c02020"
+    assert env["BRAND_ACCENT_DARK"] == "#ff6a6a"
+
+
+def test_brand_keys_omitted_entirely_when_unset(tmp_path: Path) -> None:
+    """No BRAND_* ⇒ no BRAND_* keys at all (api seeds nothing)."""
+    out_dir = _render(tmp_path)
+    env = _parse_env(out_dir / ".env.prod")
+    assert "BRAND_PRODUCT_NAME" not in env
+    assert "BRAND_ACCENT_LIGHT" not in env
+    assert "BRAND_ACCENT_DARK" not in env
+
+
+def test_brand_name_shell_metachars_refused(tmp_path: Path) -> None:
+    """The dedicated fence admits NO shell metacharacters — $(…), quotes and
+    backticks die before anything is written (root-sourced env file)."""
+    for bad in ("Acme$(id)", 'Acme"Legal', "Acme`id`", "Acme;Legal", "x" * 81):
+        manifest = tmp_path / "tenant.conf"
+        manifest.write_text(_manifest_text(BRAND_PRODUCT_NAME=bad))
+        proc = _run(manifest, tmp_path / "out", "--no-deploy", "--dry-run")
+        assert proc.returncode != 0, f"BRAND_PRODUCT_NAME={bad!r} should be refused"
+        assert "brand_product_name" in proc.stderr.lower()
+        assert not (tmp_path / "out").exists()
+
+
+def test_brand_accent_fence_refuses_non_hex(tmp_path: Path) -> None:
+    for bad in ("red", "#fff", "c02020", "#c0202g"):
+        manifest = tmp_path / "tenant.conf"
+        manifest.write_text(_manifest_text(BRAND_ACCENT_LIGHT=bad))
+        proc = _run(manifest, tmp_path / "out", "--no-deploy", "--dry-run")
+        assert proc.returncode != 0, f"BRAND_ACCENT_LIGHT={bad!r} should be refused"
+        assert "brand_accent_light" in proc.stderr.lower()
         assert not (tmp_path / "out").exists()
 
 

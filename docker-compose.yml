@@ -235,6 +235,11 @@ services:
       # SETUP-5a (ADR-F063) — deployment default budget profile for new agent
       # runs. Optional; unset ⇒ "" ⇒ balanced (config.py normalizes "" → None).
       RUN_DEFAULT_BUDGET_PROFILE: ${RUN_DEFAULT_BUDGET_PROFILE:-}
+      # BRAND-1a (ADR-F068) — optional white-label seed; applied only while the
+      # branding table is empty. api only — the workers never read branding.
+      BRAND_PRODUCT_NAME: ${BRAND_PRODUCT_NAME:-}
+      BRAND_ACCENT_LIGHT: ${BRAND_ACCENT_LIGHT:-}
+      BRAND_ACCENT_DARK: ${BRAND_ACCENT_DARK:-}
     volumes:
       - ./skills:/skills:ro
     ports:

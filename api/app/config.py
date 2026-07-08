@@ -450,6 +450,36 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- First-run branding seed (BRAND-1a, ADR-F068) -----
+    # Optional white-label seed applied by ensure_first_run_branding: inserted
+    # ONCE, only when the deployment_branding table is empty AND at least one
+    # BRAND_* value is set — an admin's in-app edits always win afterwards.
+    # Bare env names (no env_prefix), per the FIRST_RUN_ADMIN_EMAIL precedent.
+    # The accents are validated at use (hex #RRGGBB); an invalid value is
+    # warned about and skipped rather than crashing the boot (the lifespan's
+    # degrade-not-crash posture).
+    brand_product_name: str = Field(
+        default="",
+        description=(
+            "Product name seeded into the branding singleton at first boot "
+            "(max 80 chars, no control characters). Empty ⇒ default brand."
+        ),
+    )
+    brand_accent_light: str | None = Field(
+        default=None,
+        description=(
+            "Light-theme accent (#RRGGBB) seeded at first boot; fans out to the "
+            "brandable token family server-side (ADR-F068). Unset ⇒ default blue."
+        ),
+    )
+    brand_accent_dark: str | None = Field(
+        default=None,
+        description=(
+            "Dark-theme accent (#RRGGBB) seeded at first boot; fans out to the "
+            "brandable token family server-side (ADR-F068). Unset ⇒ default blue."
+        ),
+    )
+
     # ----- Public base URL for emailed links (SETUP-3a, ADR-F061 D6) -----
     # The browser-facing origin used to build invite / password-reset links
     # (e.g. https://acme.lq-ai.example.com). Distinct from collabora_wopi_host
@@ -751,6 +781,14 @@ class Settings(BaseSettings):
     rate_limit_bootstrap_status_ip_per_window: int = Field(
         default=30,
         description="Max /admin/bootstrap-status probes per window per source IP.",
+    )
+    # BRAND-1a (ADR-F068) — the unauthenticated branding surface (GET /branding
+    # + GET /branding/logo share one per-IP bucket). Public-by-design data, but
+    # unauth endpoints get a brake like bootstrap-status; the responses are
+    # cacheable (max-age=300 / immutable) so a browser rarely re-hits.
+    rate_limit_branding_ip_per_window: int = Field(
+        default=30,
+        description="Max /branding (+ /branding/logo) reads per window per source IP.",
     )
     # SETUP-3a (ADR-F061 D7) — unauthenticated lifecycle surfaces. The reset
     # request is doubly bucketed (per-IP AND per-submitted-email) so neither a

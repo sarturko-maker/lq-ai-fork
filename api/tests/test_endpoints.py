@@ -205,6 +205,13 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/models"),
     # M3-0.1 / DE-283 — unauthenticated fresh-install state probe
     ("GET", "/api/v1/admin/bootstrap-status"),
+    # BRAND-1a (fork, ADR-F068) — deployment branding: unauth reads + admin
+    # writes. Dedicated coverage in tests/test_branding.py.
+    ("GET", "/api/v1/branding"),
+    ("PUT", "/api/v1/branding"),
+    ("GET", "/api/v1/branding/logo"),
+    ("POST", "/api/v1/branding/logo"),
+    ("DELETE", "/api/v1/branding/logo"),
     # D0.5 — Admin alias CRUD proxy
     ("GET", "/api/v1/admin/aliases"),
     ("GET", "/api/v1/admin/aliases/{name}"),

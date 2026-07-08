@@ -146,6 +146,10 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/tier-policy",
         # M3-0.1 / DE-283 — unauthenticated fresh-install state probe
         "/api/v1/admin/bootstrap-status",
+        # BRAND-1a (fork, ADR-F068) — deployment branding: unauth GETs +
+        # AdminUser-gated writes on the same two paths
+        "/api/v1/branding",
+        "/api/v1/branding/logo",
         # M3-0.3 / DE-276 — admin ingest-health aggregate
         "/api/v1/admin/ingest-health",
         # M3-B1 — Word add-in manifest generation (admin-only sideload helper)
@@ -401,7 +405,10 @@ async def test_openapi_paths_match_sketch() -> None:
     #   DELETE /admin/library/{kind}/{key} = 2 new paths).
     # +1: STORE-2 (ADR-F065 D-B) — GET /api/v1/library, the member-readable
     #   read model over the same org_library_entries table (173 -> 174).
-    assert len(actual) == 174  # +3: ADR-F054 capability panel (GET/PUT
+    # +2: BRAND-1a (ADR-F068) — deployment branding: /branding (unauth GET +
+    #   admin PUT share one path) + /branding/logo (unauth GET + admin
+    #   POST/DELETE share one path) (174 -> 176).
+    assert len(actual) == 176  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

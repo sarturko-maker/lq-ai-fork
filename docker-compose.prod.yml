@@ -247,6 +247,13 @@ services:
       # this > balanced and persists the resolved value. NOTE the `${VAR:-}`
       # form delivers "" (never unset) — config.py normalizes "" → None.
       RUN_DEFAULT_BUDGET_PROFILE: ${RUN_DEFAULT_BUDGET_PROFILE:-}
+      # BRAND-1a (ADR-F068) — white-label seed. The api lifespan seeds the
+      # branding singleton ONLY while its table is empty AND at least one
+      # BRAND_* is set; admin UI edits win afterwards. Bare env names (no
+      # env_prefix). api only — the workers never read branding.
+      BRAND_PRODUCT_NAME: ${BRAND_PRODUCT_NAME:-}
+      BRAND_ACCENT_LIGHT: ${BRAND_ACCENT_LIGHT:-}
+      BRAND_ACCENT_DARK: ${BRAND_ACCENT_DARK:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
       interval: 5s

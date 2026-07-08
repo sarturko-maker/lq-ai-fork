@@ -975,7 +975,7 @@ async def _build_and_send_invite(
     """
     settings = get_settings()
     from app.auth_tokens import issue_invite
-    from app.lifecycle_email import build_accept_url, send_invite_email
+    from app.lifecycle_email import build_accept_url, get_branding_name, send_invite_email
 
     plaintext, token = await issue_invite(
         db,
@@ -986,7 +986,11 @@ async def _build_and_send_invite(
         now=now,
     )
     accept_url = build_accept_url(plaintext)
-    email_sent = await send_invite_email(to_addr=email, accept_url=accept_url)
+    # BRAND-1a (ADR-F068): the subject carries the deployment's product name.
+    product_name = await get_branding_name(db)
+    email_sent = await send_invite_email(
+        to_addr=email, accept_url=accept_url, product_name=product_name
+    )
 
     await audit_action(
         db,

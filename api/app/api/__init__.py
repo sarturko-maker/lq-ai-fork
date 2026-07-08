@@ -30,6 +30,7 @@ from app.api import (
     auth,
     autonomous,
     bootstrap,
+    branding,
     chat_receipts,
     chats,
     enhance_prompt,
@@ -72,6 +73,13 @@ api_router.include_router(users.router)
 # (M3-0.1 / DE-283). Mounted without `_active` because the login screen
 # consults it before the operator has credentials.
 api_router.include_router(bootstrap.router)
+
+# BRAND-1a (ADR-F068): deployment branding. Mounted without `_active` because
+# the login/accept-invite/reset-password pages render the tenant's name, logo
+# and accent BEFORE the user has credentials. The unauth reads are per-IP
+# rate-limited; every WRITE endpoint carries the AdminUser dependency at the
+# handler level (the organization_profile PUT pattern).
+api_router.include_router(branding.router)
 
 # Service-to-service router (gateway → backend). Authenticated by the
 # shared X-LQ-AI-Gateway-Key header per ADR 0006, NOT by the user-token

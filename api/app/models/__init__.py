@@ -22,6 +22,7 @@ from app.models.autonomous import (
     PrecedentEntry,
 )
 from app.models.chat import Chat, Message
+from app.models.deployment_branding import DeploymentBranding
 from app.models.document import Document, DocumentChunk
 from app.models.editor_lock import EditorLock
 from app.models.enhance_prompt import EnhancePromptInteraction
@@ -56,6 +57,7 @@ __all__ = [
     "AutonomousSession",
     "AutonomousWatch",
     "Chat",
+    "DeploymentBranding",
     "Document",
     "DocumentChunk",
     "EditorLock",
