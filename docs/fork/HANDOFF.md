@@ -217,6 +217,34 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   the tabular wizard, the autonomous surfaces, settings/autonomous and both learn pages — a
 >   follow-up noun sweep is a real slice, not a one-page touch-up (deferred on record). Gate: svelte-check 0 errors; vitest 112 files /
 >   1265 tests, all green.
+> - **B-6 HITL-1 ✓ SHIPPED (branch `hitl-1-pause-substrate`, PR #248, mig 0093, ADR-F071 proposed;
+>   contract = scratchpad `hitl1-contract.md`, spike = `hitl-spike-report.md`) — the stop-and-ask
+>   PAUSE substrate, backend-only.** deepagents-native `interrupt_on` → `HumanInTheLoopMiddleware`;
+>   `practice_areas.hitl_policy JSONB` compiled at composition (`app/agents/hitl.py`
+>   `compile_hitl_policy`) into `interrupt_on` ∩ the run's actual grant set (`{t.__name__}`, plain
+>   closures); runner detects the root `__interrupt__` (in-stream fast signal) and VERIFIES via
+>   `aget_state` (state authoritative) before settling **`awaiting_input`** through the existing
+>   `settle_run` fence + persisting one `hitl_request` step (bounded JSON of tool name+args). New
+>   run status `awaiting_input` + step kind `hitl_request` (mig 0093 widens both 0048 CHECKs; StrEnums
+>   widened same PR). **Zero-config invariant (maintainer HARD ruling):** `hitl_policy={}` ⇒ NO
+>   `interrupt_on` kwarg ⇒ no middleware ⇒ graph byte-identical to today (pinned by a build_deep_agent
+>   spy test). Subagent opt-out `interrupt_on={}` stamped ONLY when a policy compiled; the deepagents
+>   GP subagent INHERITS (accepted — closes the `task`-delegation bypass). Paused thread LOCKED this
+>   slice (follow-up 409s — guards the `repair_dangling_tool_calls` clash with zero repair changes);
+>   delete-thread is the escape hatch. Defensive web hardening only (`statusBadge` default +
+>   `agents.ts` union) so the cockpit shows a neutral "Waiting" badge instead of crashing — NO confirm
+>   card (HITL-3). Gate: ruff (root config) + `mypy app` (229 files) clean; full containerized
+>   `tests/agents/` + `test_migrations.py` **929 passed / 46 skipped**; mig 0093 up/down/up on throwaway
+>   pgvector (lossy downgrade: awaiting_input→failed in place, hitl_request steps deleted); web
+>   `npm run check` 1534 files 0 errors + `test:frontend` 1265/1265. Review (5-dim adversarial, 9
+>   agents): correctness/security/migration-web CLEAN; 4 test-quality/robustness findings all FIXED
+>   (de-tautologised the GROUP_TOOL_NAMES drift guard against literal ground truth; added
+>   armed-but-not-paused + in-stream-drift + builder-kwarg-omission runner tests; isinstance guard in
+>   the compiler). **NEXT = HITL-2** (resume round-trip): `POST /runs/{run_id}/resume` (owner-404,
+>   closed approve|reject enum), runner `Command(resume=…)` input + SKIP-repair on resume,
+>   `awaiting_input` joins the continuable set, cancel-while-paused — the FIVE route drift guards trip.
+>   Then HITL-3 (confirm card + admin `hitl_policy` write w/ 422 + live Commercial apply_redline
+>   verify). Maintainer open item: confirm-card vocabulary ("Waiting for your go-ahead" / Approve·Refuse).
 > - Slice traps (recur): FIVE drift guards trip on new routes (test_endpoints _PARAM_VALUES +
 >   IMPLEMENTED_ROUTES; test_mutation_rbac ×3 pins now 135/184/69; test_openapi EXPECTED_PATHS +
 >   the SECOND len(actual) pin ~:419 now 184); api CI runs `mypy app` (containerized pytest gate

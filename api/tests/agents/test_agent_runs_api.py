@@ -502,10 +502,14 @@ async def test_create_run_cap_ignores_terminal_runs(
     db_session: AsyncSession,
     user_a: User,
 ) -> None:
-    """Only status='running' counts toward the cap — terminal rows don't."""
+    """Only status='running' counts toward the cap — terminal rows don't.
+
+    ``awaiting_input`` (HITL-1, ADR-F071) is a settled, parked state: a run
+    waiting on a human must not eat the lawyer's concurrency budget.
+    """
     for _ in range(2):
         await _make_run(db_session, user=user_a, status="running")
-    for terminal in ("completed", "failed", "cap_exceeded"):
+    for terminal in ("completed", "failed", "cap_exceeded", "awaiting_input"):
         await _make_run(db_session, user=user_a, status=terminal)
 
     with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
@@ -877,6 +881,34 @@ async def test_follow_up_on_interrupted_thread_is_admitted(
         )
     assert resp.status_code == 202
     assert resp.json()["thread_id"] == str(thread.id)
+
+
+@pytest.mark.integration
+async def test_follow_up_on_paused_thread_returns_409(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+    thread_saver: InMemorySaver,
+) -> None:
+    """HITL-1 (ADR-F071 R11): a paused (``awaiting_input``) thread is LOCKED —
+    admitting a follow-up would run ``repair_dangling_tool_calls`` and destroy
+    the pending interrupt, so the thread refuses (``thread_not_continuable``)
+    and reads ``continuable=False`` until HITL-2's resume lands."""
+    thread = await _make_thread(db_session, user=user_a)
+    await _make_run(db_session, user=user_a, status="awaiting_input", thread=thread)
+    await _put_checkpoint(thread_saver, thread.id)
+
+    detail = await client.get(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a))
+    assert detail.json()["continuable"] is False
+
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "resume?", "thread_id": str(thread.id)},
+        )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "thread_not_continuable"
 
 
 @pytest.mark.integration

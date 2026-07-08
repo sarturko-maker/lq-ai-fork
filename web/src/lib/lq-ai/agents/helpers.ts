@@ -204,6 +204,14 @@ export function statusBadge(
 			return { label: 'Cancelled', tone: 'neutral' };
 		case 'cap_exceeded':
 			return { label: 'Step cap reached', tone: 'warn' };
+		case 'awaiting_input':
+			// HITL-1 (ADR-F071): paused on a stop-and-ask policy; the confirm
+			// card is a later slice — a calm badge, never a crash.
+			return { label: 'Waiting', tone: 'neutral' };
+		default:
+			// Defensive: an unknown status (future widening) must never return
+			// undefined — callers index TONE_TO_DOT[badge.tone] during render.
+			return { label: run.status, tone: 'neutral' };
 	}
 }
 

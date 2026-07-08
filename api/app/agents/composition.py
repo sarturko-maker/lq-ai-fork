@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -48,6 +49,7 @@ from app.agents.capabilities import (
 from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.fan_out_middleware import FanOutQuotaMiddleware
+from app.agents.hitl import compile_hitl_policy, stamp_subagent_opt_out
 from app.agents.lease import RunLease, settle_run
 from app.agents.live_changes import ChangeLedger
 from app.agents.matter_consolidation import build_matter_consolidation_tools
@@ -556,6 +558,10 @@ async def compose_and_execute_run(
         # for an org with no approved org skills (or a matter with none enabled).
         org_skill_files: dict[str, str] = {}
         practice_playbook_block: str | None = None
+        # HITL-1 (ADR-F071): the area's stop-and-ask policy, captured inside the
+        # area block below. The {} default (unbound runs / unconfigured areas)
+        # compiles to None — no HITL middleware, graph byte-identical to today's.
+        hitl_policy: dict[str, Any] = {}
         is_follow_up = False
         async with session_factory() as db:
             run = await db.get(AgentRun, run_id)
@@ -649,6 +655,10 @@ async def compose_and_execute_run(
                             # rendered below carries no unit_label, so it is derived
                             # here where the ORM row is live (plan B3).
                             matter_memory_heading = f"{area.unit_label} memory"
+                            # HITL-1 (ADR-F071): captured as a scalar while the row
+                            # is live (the ORM row detaches when the session block
+                            # closes); compiled against the final grant set below.
+                            hitl_policy = area.hitl_policy or {}
                             registry = skill_registry_provider()
                             bound_skill_names = (
                                 (
@@ -960,6 +970,19 @@ async def compose_and_execute_run(
         else:
             wiring = SkillWiring(backend=None, main_sources=None, subagents=[])
 
+        # HITL-1 (ADR-F071): compile the area's stop-and-ask policy against the
+        # run's ACTUAL grant set (plain async closures — the model-visible tool
+        # name is the closure's __name__; deepagents builtins are never granted,
+        # so they are structurally ungateable). None (empty or fully-dropped
+        # policy) ⇒ the runner never sets the interrupt_on kwarg and the graph
+        # is byte-identical to today's (zero-config invariant). When a policy
+        # DID compile, every fork-authored subagent spec opts OUT (spec-level {}
+        # suppresses inheritance — LEAD-only in v1); the deepagents auto
+        # "general-purpose" subagent still inherits it, which closes the
+        # task-delegation bypass for lead-granted tools (accepted, ADR-F071).
+        interrupt_on = compile_hitl_policy(hitl_policy, frozenset(t.__name__ for t in tools))
+        stamp_subagent_opt_out(wiring.subagents, interrupt_on)
+
         # F2 N0 (ADR-F049): wire the native memory substrate. The skills backend
         # becomes the CompositeBackend default (so /skills is unaffected); the
         # /memories/* (+ /conversation_history/) routes are added for whichever
@@ -1066,6 +1089,9 @@ async def compose_and_execute_run(
                 publisher=publisher,
                 lease=lease,
                 change_ledger=change_ledger,
+                # HITL-1 (ADR-F071): None for the unconfigured case — the runner
+                # then never sets the kwarg (zero-config invariant).
+                interrupt_on=interrupt_on,
             )
         finally:
             await http_client.aclose()

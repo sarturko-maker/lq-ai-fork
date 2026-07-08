@@ -39,7 +39,7 @@ from app.agents.composition import (
 from app.agents.runner import SYSTEM_PROMPT
 from app.agents.tools import MatterBinding
 from app.clients.gateway import set_gateway_client
-from app.models.agent_run import AgentRun, AgentThread
+from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
 from app.models.audit import AuditLog
 from app.models.organization_profile import OrganizationProfile
 from app.models.playbook import Playbook, PlaybookPosition
@@ -226,16 +226,17 @@ async def comp_env(
         await db.execute(delete(System).where(System.source_project_id == project_id))
         await db.execute(delete(Project).where(Project.id == project_id))
         await db.execute(delete(User).where(User.id == user_id))
-        # Restore the shared seeded Commercial row: the tier-floor test
-        # commits an UPDATE to it (commit_factory bypasses the per-test
+        # Restore the shared seeded Commercial row: the tier-floor and HITL
+        # tests commit UPDATEs to it (commit_factory bypasses the per-test
         # rollback), which would otherwise pollute later tests (e.g.
-        # test_practice_areas) in the full suite.
+        # test_practice_areas) in the full suite. hitl_policy restores to {}
+        # (NOT NULL DEFAULT '{}' — the zero-config shipped state, ADR-F071).
         from app.models.practice_area import PracticeArea
 
         await db.execute(
             PracticeArea.__table__.update()
             .where(PracticeArea.key == "commercial")
-            .values(default_tier_floor=None)
+            .values(default_tier_floor=None, hitl_policy={})
         )
         await db.commit()
 
@@ -2075,3 +2076,135 @@ async def test_tabular_doctrine_present_for_new_area_with_tabular_row(
             )
             await db.execute(delete(PracticeArea).where(PracticeArea.id == area_id))
             await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# HITL-1 — hitl_policy → interrupt_on → pause (ADR-F071)
+# ---------------------------------------------------------------------------
+
+
+async def _run_steps(env: CompositionEnv, run_id: uuid.UUID) -> list[AgentRunStep]:
+    async with env.factory() as db:
+        return list(
+            (
+                await db.execute(
+                    select(AgentRunStep)
+                    .where(AgentRunStep.run_id == run_id)
+                    .order_by(AgentRunStep.seq.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def _tool_audit_rows(env: CompositionEnv, run_id: uuid.UUID) -> list[AuditLog]:
+    async with env.factory() as db:
+        return list(
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.resource_type == "agent_run",
+                        AuditLog.resource_id == str(run_id),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def test_area_hitl_policy_pauses_the_gated_tool_run(
+    comp_env: CompositionEnv,
+) -> None:
+    """T10 (ADR-F071): the full read→compile→thread→pause path. A Commercial
+    ``hitl_policy`` gating ``search_documents`` stops the run BEFORE the tool
+    executes: the run settles ``awaiting_input`` with the ``hitl_request`` step,
+    and NO dispatch ever passed the guard (zero tool audit rows)."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.models.practice_area import PracticeArea
+
+    area_id = await _area_id(comp_env, "commercial")
+    async with comp_env.factory() as db:
+        await db.execute(
+            PracticeArea.__table__.update()
+            .where(PracticeArea.id == area_id)
+            .values(hitl_policy={"search_documents": True})
+        )
+        await db.commit()
+    await _file_matter_under(comp_env, area_id)
+
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    builder = CapturingBuilder(
+        model=ScriptedToolCallingModel(
+            responses=[
+                tool_call_message("search_documents", {"query": "liability"}),
+                final_message("never reached"),
+            ]
+        )
+    )
+    saver = InMemorySaver()
+
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=builder,
+        session_factory_provider=lambda: comp_env.factory,
+        checkpointer_provider=lambda: saver,
+    )
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "awaiting_input"
+    assert run.final_answer is None
+    assert run.error is None
+    # The pause landed BEFORE execution: nothing dispatched through the guard.
+    assert await _tool_audit_rows(comp_env, run_id) == []
+    steps = await _run_steps(comp_env, run_id)
+    assert [s.kind for s in steps] == ["model_turn", "hitl_request"]
+    assert steps[-1].name == "search_documents"
+    assert json.loads(steps[-1].summary) == [
+        {"args": {"query": "liability"}, "tool": "search_documents"}
+    ]
+
+
+async def test_zero_config_hitl_policy_composes_to_no_pause(
+    comp_env: CompositionEnv,
+) -> None:
+    """T1(b) (ADR-F071 zero-config invariant): the shipped default
+    ``hitl_policy={}`` composes to NO ``interrupt_on`` — the identical
+    area-filed, checkpointer'd run executes its tool through the guard and
+    completes exactly as before, with no ``hitl_request`` row anywhere.
+    (Kwarg absence is pinned at the compiler — ``compile_hitl_policy({}, …)
+    is None`` — and the untouched pre-HITL suites are the byte-identical
+    proof; this pins the composed end-to-end behaviour.)"""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    area_id = await _area_id(comp_env, "commercial")  # seeded row: hitl_policy = {}
+    await _file_matter_under(comp_env, area_id)
+
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    builder = CapturingBuilder(
+        model=ScriptedToolCallingModel(
+            responses=[
+                tool_call_message("search_documents", {"query": "liability"}),
+                final_message("No documents attached; nothing to cite."),
+            ]
+        )
+    )
+    saver = InMemorySaver()
+
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=builder,
+        session_factory_provider=lambda: comp_env.factory,
+        checkpointer_provider=lambda: saver,
+    )
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "completed"
+    assert run.final_answer is not None
+    # The tool DID dispatch through the guard — no pause path exists.
+    rows = await _tool_audit_rows(comp_env, run_id)
+    assert [r.details["tool"] for r in rows] == ["search_documents"]
+    steps = await _run_steps(comp_env, run_id)
+    assert all(s.kind != "hitl_request" for s in steps)

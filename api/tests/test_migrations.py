@@ -1655,3 +1655,99 @@ async def test_matter_capability_toggles_kind_check_admits_knowledge(
         )
         await db_session.flush()
     await db_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# HITL-1 (ADR-F071) — awaiting_input + hitl_request + practice_areas.hitl_policy
+# (migration 0093)
+# ---------------------------------------------------------------------------
+
+
+async def _hitl_probe_run(db_session: AsyncSession, *, status: str) -> None:
+    """Insert a minimal user→thread→run chain with the given run status."""
+    from app.models.agent_run import AgentRun, AgentThread
+
+    user = User(email=f"hitl-chk-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
+    db_session.add(user)
+    await db_session.flush()
+    thread = AgentThread(user_id=user.id, title="hitl chk probe")
+    db_session.add(thread)
+    await db_session.flush()
+    db_session.add(
+        AgentRun(
+            user_id=user.id,
+            thread_id=thread.id,
+            status=status,
+            prompt="hitl chk probe",
+            model_alias="smart",
+            max_steps=20,
+        )
+    )
+    await db_session.flush()
+
+
+@pytest.mark.integration
+async def test_agent_runs_status_check_admits_awaiting_input(db_session: AsyncSession) -> None:
+    """0093 (ADR-F071) widens chk_agent_runs_status to admit 'awaiting_input'
+    while still rejecting an unknown status."""
+    from sqlalchemy.exc import IntegrityError
+
+    await _hitl_probe_run(db_session, status="awaiting_input")  # must NOT raise
+    with pytest.raises(IntegrityError):
+        await _hitl_probe_run(db_session, status="bogus")
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_agent_run_steps_kind_check_admits_hitl_request(db_session: AsyncSession) -> None:
+    """0093 (ADR-F071) widens chk_agent_run_steps_kind to admit 'hitl_request'
+    while still rejecting an unknown kind."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
+
+    user = User(email=f"hitl-step-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
+    db_session.add(user)
+    await db_session.flush()
+    thread = AgentThread(user_id=user.id, title="hitl step chk probe")
+    db_session.add(thread)
+    await db_session.flush()
+    run = AgentRun(
+        user_id=user.id,
+        thread_id=thread.id,
+        status="running",
+        prompt="hitl step chk probe",
+        model_alias="smart",
+        max_steps=20,
+    )
+    db_session.add(run)
+    await db_session.flush()
+
+    db_session.add(AgentRunStep(run_id=run.id, seq=1, kind="hitl_request", summary="[]"))
+    await db_session.flush()  # 'hitl_request' must NOT raise post-0093
+    db_session.add(AgentRunStep(run_id=run.id, seq=2, kind="bogus", summary="[]"))
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_practice_areas_hitl_policy_column(db_session: AsyncSession) -> None:
+    """0093 (ADR-F071): practice_areas.hitl_policy exists, NOT NULL, default '{}'
+    — the shipped default IS the zero-config invariant."""
+    row = (
+        await db_session.execute(
+            text(
+                "SELECT is_nullable, column_default FROM information_schema.columns "
+                "WHERE table_name = 'practice_areas' AND column_name = 'hitl_policy'"
+            )
+        )
+    ).one()
+    assert row.is_nullable == "NO"
+    assert "'{}'::jsonb" in (row.column_default or "")
+
+    # The seeded areas landed the default (no seed touches the column).
+    seeded = (
+        (await db_session.execute(text("SELECT hitl_policy FROM practice_areas"))).scalars().all()
+    )
+    assert seeded and all(policy == {} for policy in seeded)

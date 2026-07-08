@@ -11,11 +11,18 @@
  */
 import { apiRequest, apiStreamRequest } from './client';
 
-/** Lifecycle of a run (CHECK constraint on agent_runs.status). */
-export type AgentRunStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'cap_exceeded';
+/** Lifecycle of a run (CHECK constraint on agent_runs.status). `awaiting_input` =
+ * paused on a stop-and-ask policy (HITL-1, ADR-F071); resume UI is a later slice. */
+export type AgentRunStatus =
+	| 'running'
+	| 'completed'
+	| 'failed'
+	| 'cancelled'
+	| 'cap_exceeded'
+	| 'awaiting_input';
 
 /** Observable loop events a step row records. */
-export type AgentRunStepKind = 'model_turn' | 'tool_call' | 'tool_result';
+export type AgentRunStepKind = 'model_turn' | 'tool_call' | 'tool_result' | 'hitl_request';
 
 export interface AgentRun {
 	id: string;

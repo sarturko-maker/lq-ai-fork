@@ -40,17 +40,24 @@ from typing import Any, Protocol, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.assessment_tools import build_assessment_tools
+from app.agents.assessment_tools import ASSESSMENT_TOOL_NAMES, build_assessment_tools
 from app.agents.budget import BudgetEnvelope
-from app.agents.commercial_tools import build_commercial_tools
+from app.agents.commercial_tools import COMMERCIAL_TOOL_NAMES, build_commercial_tools
 from app.agents.deal_changes import DealChangeLedger
-from app.agents.knowledge_tools import build_knowledge_tools
+from app.agents.knowledge_tools import KNOWLEDGE_TOOL_NAMES, build_knowledge_tools
 from app.agents.live_changes import ChangeLedger
+from app.agents.matter_consolidation import MATTER_CONSOLIDATION_TOOL_NAMES
+from app.agents.matter_conversation_tools import MATTER_CONVERSATION_TOOL_NAMES
+from app.agents.matter_fact_tools import MATTER_FACT_TOOL_NAMES
+from app.agents.matter_memory_tools import MATTER_MEMORY_TOOL_NAMES
+from app.agents.matter_read_tools import MATTER_READ_TOOL_NAMES
+from app.agents.matter_roster_tools import MATTER_ROSTER_TOOL_NAMES
 from app.agents.redline_service import RedlineService
+from app.agents.review_edited_document_tools import REVIEW_EDITED_DOCUMENT_TOOL_NAMES
 from app.agents.ropa_changes import RopaChangeLedger
-from app.agents.ropa_tools import build_ropa_tools
-from app.agents.tabular_tool import build_tabular_tools
-from app.agents.tools import MatterBinding
+from app.agents.ropa_tools import ROPA_TOOL_NAMES, build_ropa_tools
+from app.agents.tabular_tool import TABULAR_TOOL_NAMES, build_tabular_tools
+from app.agents.tools import MATTER_TOOL_NAMES, MatterBinding
 from app.models.playbook import Playbook
 from app.skills.registry import SkillRegistry
 
@@ -272,6 +279,48 @@ TOOL_GROUP_REGISTRY: dict[str, ToolGroupDef] = {
 # never adopted/bound as a tool. Registered above ONLY so composition can build it;
 # every kind='tool' surface (catalog, adopt, bind, bound-row resolution) fences it out.
 COMPOSITION_ONLY_GROUP_KEYS: frozenset[str] = frozenset({KNOWLEDGE_GROUP.key})
+
+
+# --- HITL-eligible tool names (ADR-F071, HITL-1) ------------------------------
+#
+# The runtime tool names each registry group grants (its ``*_TOOL_NAMES`` frozenset —
+# the truth lives in the builder modules; this map is the drift-guarded transcription,
+# pinned against TOOL_GROUP_REGISTRY by tests/agents/test_capabilities.py). Keys MUST
+# cover the registry exactly.
+GROUP_TOOL_NAMES: dict[str, frozenset[str]] = {
+    REDLINING_GROUP.key: COMMERCIAL_TOOL_NAMES,
+    TABULAR_GROUP.key: TABULAR_TOOL_NAMES,
+    ROPA_GROUP.key: ROPA_TOOL_NAMES,
+    ASSESSMENT_GROUP.key: ASSESSMENT_TOOL_NAMES,
+    KNOWLEDGE_GROUP.key: KNOWLEDGE_TOOL_NAMES,
+}
+
+# The matter-bound, area-agnostic grants composition always builds for a bound run
+# (app/agents/composition.py — the appends between build_matter_tools and the domain
+# groups). Same transcription posture as GROUP_TOOL_NAMES.
+_MATTER_SCOPE_TOOL_NAMES: frozenset[str] = frozenset().union(
+    MATTER_TOOL_NAMES,
+    MATTER_MEMORY_TOOL_NAMES,
+    MATTER_FACT_TOOL_NAMES,
+    MATTER_CONSOLIDATION_TOOL_NAMES,
+    MATTER_READ_TOOL_NAMES,
+    MATTER_CONVERSATION_TOOL_NAMES,
+    REVIEW_EDITED_DOCUMENT_TOOL_NAMES,
+    MATTER_ROSTER_TOOL_NAMES,
+)
+
+
+def hitl_eligible_tool_names() -> frozenset[str]:
+    """Every runtime tool name a ``hitl_policy`` key may target (ADR-F071).
+
+    The union of all tool names composition can ever grant a run: the always-built
+    matter-scope tools plus every registry group's grant set. deepagents builtins
+    (``task``, ``read_file``, …) are deliberately ABSENT — they are never in a run's
+    grant set, so a policy naming one compiles to nothing (the policy ∩ grants
+    intersection drops it). HITL-3's admin write surface 422s on any name outside
+    this set; HITL-1 only compiles (unknown names drop with a warning).
+    """
+    return _MATTER_SCOPE_TOOL_NAMES | frozenset().union(*GROUP_TOOL_NAMES.values())
 
 
 # --- recommended Library sets (STORE-2 D-C) ----------------------------------

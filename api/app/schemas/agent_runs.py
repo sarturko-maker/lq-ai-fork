@@ -24,9 +24,12 @@ from pydantic import BaseModel, ConfigDict, Field
 class AgentRunStatus(StrEnum):
     """Lifecycle of a deep-agent run.
 
-    Matches the CHECK constraint on ``agent_runs.status``.
-    ``cancelled`` is RESERVED for the cancel endpoint (later slice);
-    nothing sets it in F0-S2.
+    Matches the CHECK constraint on ``agent_runs.status`` (widened by
+    migration ``0093``). ``cancelled`` is RESERVED for the cancel endpoint
+    (later slice); nothing sets it in F0-S2. ``awaiting_input`` (HITL-1,
+    ADR-F071) is a SETTLED state: the run paused on a stop-and-ask policy
+    before a gated tool executed; resume is a HITL-2 follow-up run — until
+    then the thread is locked (409 ``thread_not_continuable``).
     """
 
     running = "running"
@@ -34,17 +37,22 @@ class AgentRunStatus(StrEnum):
     failed = "failed"
     cancelled = "cancelled"  # RESERVED — cancel endpoint is a later slice
     cap_exceeded = "cap_exceeded"
+    awaiting_input = "awaiting_input"
 
 
 class AgentRunStepKind(StrEnum):
     """The observable loop events a step row records.
 
-    Matches the CHECK constraint on ``agent_run_steps.kind``.
+    Matches the CHECK constraint on ``agent_run_steps.kind`` (widened by
+    migration ``0093``). ``hitl_request`` (HITL-1, ADR-F071) records the
+    stop-and-ask: the pending tool name(s) + a display-only args digest —
+    the approved bytes remain the checkpointed tool call itself.
     """
 
     model_turn = "model_turn"
     tool_call = "tool_call"
     tool_result = "tool_result"
+    hitl_request = "hitl_request"
 
 
 class BudgetProfile(StrEnum):

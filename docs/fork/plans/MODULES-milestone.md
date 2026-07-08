@@ -210,6 +210,21 @@ counts/IDs only).
   lease-sweep interaction; live: a redline apply under a "confirm applies" policy stops, the
   lawyer confirms, the run completes.
 - **Dependencies:** spike has none (start early, parallel); the slice needs the spike ADR accepted.
+- **Status:** spike DONE (deepagents-native `interrupt_on` chosen — Option A, probe-proven).
+  Re-sliced into a 3-PR ladder (ADR-F071):
+  - **HITL-1 — substrate + pause: SHIPPED.** Mig 0093 (`awaiting_input` status,
+    `hitl_request` step kind, `practice_areas.hitl_policy` JSONB default `{}`); policy
+    compiler ∩ run grant set (`app/agents/hitl.py`); runner pause detection + settle
+    `awaiting_input` + one `hitl_request` step row + instant `data-run` tail; subagent
+    opt-out (lead-only v1); zero-config invariant regression-pinned; defensive web badge
+    ("Waiting"). Paused threads are LOCKED (409 follow-up) until HITL-2; delete-thread is
+    the escape hatch.
+  - **HITL-2 — resume round-trip (NEXT):** `POST /runs/{run_id}/resume`
+    (approve/reject), `Command(resume=…)` input, SKIP-repair-on-resume, `awaiting_input`
+    continuable + cancel-while-paused. New route ⇒ the five route drift guards trip.
+  - **HITL-3 — cockpit + admin:** confirm card from the settled `hitl_request` step,
+    pending chip, area admin card writing `hitl_policy` (422 on names outside
+    `hitl_eligible_tool_names()`); the live "confirm before applying a redline" verify.
 
 ## B-7 — the wizard (absorbs ONBOARD-1 template catalog + ONBOARD-2 admin wizard + G13/#473)
 

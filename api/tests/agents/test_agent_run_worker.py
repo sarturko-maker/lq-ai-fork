@@ -205,6 +205,30 @@ async def test_sweep_never_touches_settled_rows(
     assert (await _row(commit_factory, run_id)).status == AgentRunStatus.completed.value
 
 
+async def test_sweep_never_touches_a_paused_run(
+    commit_factory: async_sessionmaker[AsyncSession],
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+) -> None:
+    """HITL-1 (ADR-F071): ``awaiting_input`` is a SETTLED state — both orphan
+    rules key on status='running', so a run parked on a human (stale heartbeat
+    and all) is never falsely failed, however long the human thinks."""
+    run_id = await make_run(status=AgentRunStatus.awaiting_input.value)
+    await _age_row(
+        commit_factory,
+        run_id,
+        set_sql=(
+            "started_at = now() - interval '1 day', "
+            "claimed_at = now() - interval '1 day', "
+            "heartbeat_at = now() - interval '1 day'"
+        ),
+    )
+
+    result = await _sweep(commit_factory)
+
+    assert result["swept"] == 0
+    assert (await _row(commit_factory, run_id)).status == AgentRunStatus.awaiting_input.value
+
+
 # ---------------------------------------------------------------------------
 # execute_run_job
 # ---------------------------------------------------------------------------
