@@ -1174,3 +1174,371 @@ async def test_unarmed_run_never_passes_interrupt_on_to_the_builder(
         interrupt_on={"send_notice": {"allowed_decisions": ["approve", "reject"]}},
     )
     assert seen == [True]
+
+
+# ---------------------------------------------------------------------------
+# HITL-2 resume (ADR-F071)
+# ---------------------------------------------------------------------------
+
+
+async def _run_and_thread_owner(
+    factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID
+) -> tuple[uuid.UUID, uuid.UUID]:
+    async with factory() as db:
+        run = await db.get(AgentRun, run_id)
+        assert run is not None
+        return run.thread_id, run.user_id
+
+
+async def _insert_run_on_thread(
+    factory: async_sessionmaker[AsyncSession],
+    *,
+    thread_id: uuid.UUID,
+    user_id: uuid.UUID,
+    prompt: str = "[resume: approve]",
+) -> uuid.UUID:
+    """A fresh running run on an EXISTING thread — the run-per-resume shape."""
+    async with factory() as db:
+        run = AgentRun(
+            user_id=user_id,
+            thread_id=thread_id,
+            status="running",
+            prompt=prompt,
+            model_alias="smart",
+            max_steps=20,
+        )
+        db.add(run)
+        await db.commit()
+        return run.id
+
+
+async def _drive_to_send_notice_pause(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+    saver: Any,
+    send_notice: Callable[..., str],
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Run an armed agent to a stop-and-ask pause on ``send_notice``.
+
+    Returns (thread_id, user_id). The SAME ``saver`` must be reused for the
+    resume so the checkpointed interrupt is visible.
+    """
+    from app.agents.hitl import compile_hitl_policy
+
+    pause_run = await make_run()
+    thread_id, user_id = await _run_and_thread_owner(commit_factory, pause_run)
+    interrupt_on = compile_hitl_policy({"send_notice": True}, frozenset({"send_notice"}))
+    assert interrupt_on is not None
+    await execute_agent_run(
+        pause_run,
+        commit_factory,
+        tools=[send_notice],
+        model=ScriptedToolCallingModel(
+            responses=[
+                tool_call_message("send_notice", {"recipient": "counterparty"}),
+                final_message("unused"),
+            ]
+        ),
+        checkpointer=saver,
+        thread_id=thread_id,
+        interrupt_on=interrupt_on,
+    )
+    paused, _ = await _load_run_and_steps(commit_factory, pause_run)
+    assert paused.status == "awaiting_input"
+    return thread_id, user_id
+
+
+async def test_resume_approve_executes_gated_tool_and_completes(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """HITL-2 (ADR-F071): approving a paused run drives the graph with
+    Command(resume=…) on the SAME thread — the gated tool now executes and the
+    run settles ``completed``. Exercises the REAL HumanInTheLoopMiddleware."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agents.hitl import compile_hitl_policy
+
+    saver = InMemorySaver()
+    executed = {"n": 0}
+
+    def send_notice(recipient: str) -> str:
+        """Send a notice document to a recipient."""
+        executed["n"] += 1
+        return "sent"
+
+    thread_id, user_id = await _drive_to_send_notice_pause(
+        make_run, commit_factory, saver, send_notice
+    )
+    assert executed["n"] == 0  # nothing ran while paused
+
+    resume_run = await _insert_run_on_thread(commit_factory, thread_id=thread_id, user_id=user_id)
+    await execute_agent_run(
+        resume_run,
+        commit_factory,
+        tools=[send_notice],
+        model=ScriptedToolCallingModel(responses=[final_message("Notice sent.")]),
+        checkpointer=saver,
+        thread_id=thread_id,
+        # composition re-arms the policy on the resume run — a further gated
+        # call would pause again; this one does not.
+        interrupt_on=compile_hitl_policy({"send_notice": True}, frozenset({"send_notice"})),
+        resume_decision={"type": "approve"},
+    )
+
+    rr, _ = await _load_run_and_steps(commit_factory, resume_run)
+    assert rr.status == "completed"
+    assert rr.final_answer == "Notice sent."
+    assert executed["n"] == 1  # the APPROVED call executed exactly once
+
+
+async def test_resume_reject_closes_turn_without_executing(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """HITL-2 (ADR-F071): rejecting a paused run hands the model the refusal so
+    it closes the turn — the gated tool NEVER executes. Distinct from cancel."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agents.hitl import compile_hitl_policy
+
+    saver = InMemorySaver()
+    executed = {"n": 0}
+
+    def send_notice(recipient: str) -> str:
+        """Send a notice document to a recipient."""
+        executed["n"] += 1
+        return "sent"
+
+    thread_id, user_id = await _drive_to_send_notice_pause(
+        make_run, commit_factory, saver, send_notice
+    )
+
+    resume_run = await _insert_run_on_thread(
+        commit_factory, thread_id=thread_id, user_id=user_id, prompt="[resume: reject]"
+    )
+    await execute_agent_run(
+        resume_run,
+        commit_factory,
+        tools=[send_notice],
+        model=ScriptedToolCallingModel(responses=[final_message("Understood — I won't send it.")]),
+        checkpointer=saver,
+        thread_id=thread_id,
+        interrupt_on=compile_hitl_policy({"send_notice": True}, frozenset({"send_notice"})),
+        resume_decision={"type": "reject", "message": "not authorised"},
+    )
+
+    rr, _ = await _load_run_and_steps(commit_factory, resume_run)
+    assert rr.status == "completed"
+    assert executed["n"] == 0  # rejected → the tool never ran
+
+
+async def test_resume_reject_without_message_still_closes_turn(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """HITL-2 (ADR-F071): a reject with NO message is valid — the endpoint
+    permits it and the middleware supplies a default rejection to the model
+    (``decision.get("message") or <default>``). The tool still never runs."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agents.hitl import compile_hitl_policy
+
+    saver = InMemorySaver()
+    executed = {"n": 0}
+
+    def send_notice(recipient: str) -> str:
+        """Send a notice document to a recipient."""
+        executed["n"] += 1
+        return "sent"
+
+    thread_id, user_id = await _drive_to_send_notice_pause(
+        make_run, commit_factory, saver, send_notice
+    )
+    resume_run = await _insert_run_on_thread(
+        commit_factory, thread_id=thread_id, user_id=user_id, prompt="[resume: reject]"
+    )
+    await execute_agent_run(
+        resume_run,
+        commit_factory,
+        tools=[send_notice],
+        model=ScriptedToolCallingModel(responses=[final_message("Won't do it.")]),
+        checkpointer=saver,
+        thread_id=thread_id,
+        interrupt_on=compile_hitl_policy({"send_notice": True}, frozenset({"send_notice"})),
+        resume_decision={"type": "reject"},  # no message
+    )
+    rr, _ = await _load_run_and_steps(commit_factory, resume_run)
+    assert rr.status == "completed"
+    assert executed["n"] == 0
+
+
+async def test_resume_path_skips_repair(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HITL-2 (ADR-F071): the resume path MUST NOT call
+    ``repair_dangling_tool_calls`` — repair would answer the gated call with a
+    synthetic ToolMessage and destroy the pending interrupt before the resume
+    could apply the human's decision."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    import app.agents.runner as runner_mod
+    from app.agents.hitl import compile_hitl_policy
+
+    saver = InMemorySaver()
+    calls = {"repair": 0}
+    real_repair = runner_mod.repair_dangling_tool_calls
+
+    async def spy(agent: Any, thread_id: uuid.UUID) -> int:
+        result = await real_repair(agent, thread_id)  # delegate FIRST so a raise still fails loud
+        calls["repair"] += 1
+        return result
+
+    monkeypatch.setattr(runner_mod, "repair_dangling_tool_calls", spy)
+    executed = {"n": 0}
+
+    def send_notice(recipient: str) -> str:
+        """Send a notice document to a recipient."""
+        executed["n"] += 1
+        return "sent"
+
+    thread_id, user_id = await _drive_to_send_notice_pause(
+        make_run, commit_factory, saver, send_notice
+    )
+    calls["repair"] = 0  # ignore the pause run's own entry repair
+
+    resume_run = await _insert_run_on_thread(commit_factory, thread_id=thread_id, user_id=user_id)
+    await execute_agent_run(
+        resume_run,
+        commit_factory,
+        tools=[send_notice],
+        model=ScriptedToolCallingModel(responses=[final_message("Notice sent.")]),
+        checkpointer=saver,
+        thread_id=thread_id,
+        interrupt_on=compile_hitl_policy({"send_notice": True}, frozenset({"send_notice"})),
+        resume_decision={"type": "approve"},
+    )
+    rr, _ = await _load_run_and_steps(commit_factory, resume_run)
+    assert rr.status == "completed"  # the resume drove the graph to completion...
+    assert executed["n"] == 1  # ...the approved tool ran...
+    assert calls["repair"] == 0  # ...and repair was NEVER called on the resume path
+
+
+async def test_new_message_follow_up_dissolves_the_pause(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HITL-2 (ADR-F071): the R11-retirement headline — a NON-resume follow-up
+    (a new user message) on a PAUSED thread is the way OUT besides resume. The
+    runner repairs the dangling gated call and the model answers the new message,
+    so the run reaches ``completed`` and the gated tool never fires. Production
+    shape: composition re-arms the area's ``interrupt_on`` for every run on the
+    thread, so this follow-up graph carries the HITL middleware too."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    import app.agents.runner as runner_mod
+    from app.agents.hitl import compile_hitl_policy
+
+    saver = InMemorySaver()
+    calls = {"repair": 0}
+    real_repair = runner_mod.repair_dangling_tool_calls
+
+    async def spy(agent: Any, thread_id: uuid.UUID) -> int:
+        result = await real_repair(agent, thread_id)
+        calls["repair"] += 1
+        return result
+
+    monkeypatch.setattr(runner_mod, "repair_dangling_tool_calls", spy)
+    executed = {"n": 0}
+
+    def send_notice(recipient: str) -> str:
+        """Send a notice document to a recipient."""
+        executed["n"] += 1
+        return "sent"
+
+    thread_id, user_id = await _drive_to_send_notice_pause(
+        make_run, commit_factory, saver, send_notice
+    )
+    calls["repair"] = 0
+
+    # A new-message follow-up (resume_decision=None) with the policy RE-ARMED,
+    # exactly as composition wires every run on the thread.
+    follow_up = await _insert_run_on_thread(
+        commit_factory,
+        thread_id=thread_id,
+        user_id=user_id,
+        prompt="actually, never mind — summarise",
+    )
+    await execute_agent_run(
+        follow_up,
+        commit_factory,
+        tools=[send_notice],
+        model=ScriptedToolCallingModel(responses=[final_message("Sure — here is a summary.")]),
+        checkpointer=saver,
+        thread_id=thread_id,
+        interrupt_on=compile_hitl_policy({"send_notice": True}, frozenset({"send_notice"})),
+    )
+    fr, _ = await _load_run_and_steps(commit_factory, follow_up)
+    assert fr.status == "completed"  # the pause DISSOLVED — the run finished...
+    assert fr.final_answer == "Sure — here is a summary."
+    assert calls["repair"] == 1  # ...via repair on the NON-resume path...
+    assert executed["n"] == 0  # ...and the gated tool never fired
+
+
+async def test_resume_without_pending_interrupt_settles_failed(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """HITL-2 (ADR-F071): a resume whose interrupt has vanished (already
+    resolved, or the thread never paused) settles ``failed`` with a bounded,
+    non-leaky error — never a silent mis-completion."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    saver = InMemorySaver()
+    base_run = await make_run()
+    thread_id, user_id = await _run_and_thread_owner(commit_factory, base_run)
+    # Run to normal completion — the checkpoint schedules no further work.
+    await execute_agent_run(
+        base_run,
+        commit_factory,
+        tools=[read_clause],
+        model=ScriptedToolCallingModel(responses=[final_message("done")]),
+        checkpointer=saver,
+        thread_id=thread_id,
+    )
+
+    resume_run = await _insert_run_on_thread(commit_factory, thread_id=thread_id, user_id=user_id)
+    await execute_agent_run(
+        resume_run,
+        commit_factory,
+        tools=[read_clause],
+        model=ScriptedToolCallingModel(responses=[final_message("unused")]),
+        checkpointer=saver,
+        thread_id=thread_id,
+        resume_decision={"type": "approve"},
+    )
+    rr, _ = await _load_run_and_steps(commit_factory, resume_run)
+    assert rr.status == "failed"
+    assert rr.error is not None
+    assert "no pending interrupt" in rr.error
+
+
+async def test_resume_without_checkpointer_refuses_at_entry(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """HITL-2 (ADR-F071): a resume without a checkpointer+thread is
+    unrecoverable — refuse at entry (mirrors the interrupt_on guard)."""
+    run_id = await make_run()
+    model = ScriptedToolCallingModel(responses=[final_message("unused")])
+    with pytest.raises(ValueError, match=r"(?i)checkpointer and a thread_id"):
+        await execute_agent_run(
+            run_id,
+            commit_factory,
+            tools=[read_clause],
+            model=model,
+            resume_decision={"type": "approve"},
+        )

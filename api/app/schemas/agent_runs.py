@@ -17,6 +17,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,11 +26,12 @@ class AgentRunStatus(StrEnum):
     """Lifecycle of a deep-agent run.
 
     Matches the CHECK constraint on ``agent_runs.status`` (widened by
-    migration ``0093``). ``cancelled`` is RESERVED for the cancel endpoint
-    (later slice); nothing sets it in F0-S2. ``awaiting_input`` (HITL-1,
-    ADR-F071) is a SETTLED state: the run paused on a stop-and-ask policy
-    before a gated tool executed; resume is a HITL-2 follow-up run — until
-    then the thread is locked (409 ``thread_not_continuable``).
+    migration ``0093``). ``awaiting_input`` (HITL-1, ADR-F071) is a SETTLED
+    state: the run paused on a stop-and-ask policy before a gated tool
+    executed. HITL-2 resolves it — ``POST /agents/runs/{id}/resume`` spawns a
+    follow-up run with the human's approve/reject decision, and a paused
+    thread now also admits an ordinary follow-up (a new message dissolves the
+    pause). Cancelling a paused run settles it ``cancelled``.
     """
 
     running = "running"
@@ -109,6 +111,32 @@ class AgentRunCreate(BaseModel):
     # F0-S5: continue this conversation (404 unowned; 409 when the
     # thread is busy or not continuable — ADR-F008).
     thread_id: uuid.UUID | None = None
+
+
+class ResumeDecision(BaseModel):
+    """The human's resolution of ONE paused ask (HITL-2, ADR-F071).
+
+    v1 is deliberately a SINGLE decision applied to the whole pending ask
+    (one Approve/Refuse button pair — no per-call granularity, since ``edit``
+    is a named non-goal until an arg-diff review UX exists). The runner fans
+    this one decision across every gated tool call in the paused turn when it
+    builds ``Command(resume=…)``. ``message`` is only meaningful for a
+    ``reject`` (the refusal the model sees when it closes the turn); it is
+    validated (reject-don't-sanitize), never sanitized, and never logged.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["approve", "reject"]
+    message: str | None = Field(default=None, max_length=2_000)
+
+
+class AgentRunResume(BaseModel):
+    """Request body for ``POST /agents/runs/{run_id}/resume`` (HITL-2)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: ResumeDecision
 
 
 class AgentRunRead(BaseModel):

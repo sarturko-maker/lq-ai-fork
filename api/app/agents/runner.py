@@ -48,6 +48,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
+from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import thread_config
@@ -319,6 +320,7 @@ async def _drive_agent(
     heartbeat_seconds: float | None = None,
     change_ledger: ChangeLedger | None = None,
     runtime_context: AgentRuntimeContext | None = None,
+    resume_command: Command | None = None,
 ) -> _DriveOutcome:
     """Stream the agent, persisting one step row + COMMIT per event.
 
@@ -392,10 +394,15 @@ async def _drive_agent(
     # — both or neither, or rt.context is empty and the namespace callables raise.
     if runtime_context is not None:
         stream_kwargs["context"] = runtime_context
-    stream = agent.astream_events(
-        {"messages": [{"role": "user", "content": prompt}]},
-        **stream_kwargs,
+    # HITL-2 (ADR-F071): a resume drives the graph with Command(resume=…)
+    # INSTEAD of a fresh user message — it answers the pending interrupt and the
+    # loop continues from the paused superstep. ``prompt`` is unused on this path.
+    graph_input: Any = (
+        resume_command
+        if resume_command is not None
+        else {"messages": [{"role": "user", "content": prompt}]}
     )
+    stream = agent.astream_events(graph_input, **stream_kwargs)
     try:
         async with asyncio.timeout(wall_clock_seconds):
             async for event in stream:
@@ -613,25 +620,34 @@ async def repair_dangling_tool_calls(agent: Any, thread_id: uuid.UUID) -> int:
     return len(synthetic)
 
 
-async def _pending_hitl_actions(agent: Any, thread_id: uuid.UUID) -> list[dict[str, Any]] | None:
-    """The pending stop-and-ask actions iff the thread is genuinely paused (ADR-F071).
+async def _pending_interrupt_objects(agent: Any, thread_id: uuid.UUID) -> list[Any]:
+    """The raw pending interrupt objects iff the thread is genuinely paused (ADR-F071).
 
-    The checkpointed state is authoritative (the in-stream ``__interrupt__``
-    chunk is only the fast signal): the run is paused iff the latest
-    checkpoint still schedules work (``next`` non-empty) AND a task recorded
-    an interrupt. Returns the display-only copy
-    ``[{"tool": name, "args": {...}}, ...]`` extracted from the interrupts'
-    HITLRequest payloads (the approved bytes remain the checkpointed tool
-    call itself), or ``None`` when not paused.
+    ONE state-walk shared by the pause-detection projections below so a langgraph
+    pin bump touches a single place. The checkpointed state is authoritative (the
+    in-stream ``__interrupt__`` chunk is only the fast signal): the run is paused
+    iff the latest checkpoint still schedules work (``next`` non-empty) AND a task
+    recorded an interrupt. Returns ``[]`` when not paused; each caller applies its
+    own filter/projection.
     """
     state = await agent.aget_state(thread_config(thread_id))
     if state is None or not getattr(state, "next", None):
-        return None
-    interrupts = [
+        return []
+    return [
         interrupt
         for task in getattr(state, "tasks", None) or ()
         for interrupt in getattr(task, "interrupts", None) or ()
     ]
+
+
+async def _pending_hitl_actions(agent: Any, thread_id: uuid.UUID) -> list[dict[str, Any]] | None:
+    """The pending stop-and-ask actions iff the thread is genuinely paused (ADR-F071).
+
+    Display-only copy ``[{"tool": name, "args": {...}}, ...]`` extracted from the
+    interrupts' HITLRequest payloads (the approved bytes remain the checkpointed
+    tool call itself). ``None`` when not paused.
+    """
+    interrupts = await _pending_interrupt_objects(agent, thread_id)
     if not interrupts:
         return None
     actions: list[dict[str, Any]] = []
@@ -642,6 +658,49 @@ async def _pending_hitl_actions(agent: Any, thread_id: uuid.UUID) -> list[dict[s
             if isinstance(request, dict):
                 actions.append({"tool": request.get("name"), "args": request.get("args") or {}})
     return actions
+
+
+async def _pending_interrupts(agent: Any, thread_id: uuid.UUID) -> list[tuple[str, int]] | None:
+    """Pending interrupt ids + their action-request counts, for a resume (HITL-2, ADR-F071).
+
+    A resume's graph input is ``Command(resume={<interrupt_id>: {"decisions": [...]}})``, so
+    the resume job must recover the interrupt id(s) at resume time — we deliberately never
+    persist a langgraph-internal id in our schema (the checkpoint is the source of truth). The
+    action-request COUNT sizes each interrupt's ``decisions`` list: v1 takes ONE human decision
+    and fans it across every gated call in the paused turn (no per-call granularity until
+    ``edit`` lands). Returns ``None`` when the thread is not genuinely paused.
+    """
+    result: list[tuple[str, int]] = []
+    for interrupt in await _pending_interrupt_objects(agent, thread_id):
+        interrupt_id = getattr(interrupt, "id", None)
+        value = getattr(interrupt, "value", None)
+        requests = value.get("action_requests") if isinstance(value, dict) else None
+        count = len(requests) if isinstance(requests, list) else 0
+        if isinstance(interrupt_id, str) and count > 0:
+            result.append((interrupt_id, count))
+    return result or None
+
+
+def _build_resume_command(pending: list[tuple[str, int]], decision: dict[str, Any]) -> Command:
+    """Map each pending interrupt id to the human's decision (HITL-2, ADR-F071).
+
+    One decision per action request (v1 fan-out: the single human choice applies to every
+    gated call in the turn). Fresh decision dicts per entry so a consumer can never alias
+    them. ``decision`` is the row's validated ``resume_decision``
+    (``{"type": "approve"}`` / ``{"type": "reject", "message": ...}``).
+    """
+    decision_type = decision["type"]
+    message = decision.get("message")
+    resume_map: dict[str, Any] = {}
+    for interrupt_id, count in pending:
+        entries: list[dict[str, Any]] = []
+        for _ in range(count):
+            entry: dict[str, Any] = {"type": decision_type}
+            if decision_type == "reject" and message is not None:
+                entry["message"] = message
+            entries.append(entry)
+        resume_map[interrupt_id] = {"decisions": entries}
+    return Command(resume=resume_map)
 
 
 async def execute_agent_run(
@@ -666,6 +725,7 @@ async def execute_agent_run(
     heartbeat_seconds: float | None = None,
     change_ledger: ChangeLedger | None = None,
     interrupt_on: dict[str, Any] | None = None,
+    resume_decision: dict[str, Any] | None = None,
 ) -> None:
     """Execute one persisted agent run end to end.
 
@@ -694,18 +754,31 @@ async def execute_agent_run(
     with the run's actual grant set, so an unconfigured area passes
     ``None`` and the graph is byte-identical to today's. An armed run
     that pauses settles ``awaiting_input`` (a SETTLED state) with one
-    ``hitl_request`` step row; resume is a HITL-2 follow-up run.
+    ``hitl_request`` step row.
+
+    ``resume_decision`` (HITL-2, ADR-F071) makes THIS run a resume of a
+    paused run on the same thread: the graph input becomes
+    ``Command(resume=…)`` built from the human's approve/reject choice
+    (fanned across the paused turn's gated calls), and
+    ``repair_dangling_tool_calls`` is SKIPPED — repair would answer the
+    gated call with a synthetic ToolMessage and destroy the pause. A
+    resume run composes with the SAME ``interrupt_on`` policy, so a
+    resumed run that makes a further gated call simply pauses again.
 
     Terminal writes: ``completed`` (+ ``final_answer``), ``cap_exceeded``
     (step cap), ``awaiting_input`` (HITL pause), or ``failed``
     (``error='timeout'`` for the wall clock; otherwise a bounded
     exception summary — never a stack trace).
     """
-    # HITL-1 (ADR-F071): a pause without a checkpoint is unrecoverable —
-    # refuse to arm at entry. Composition always provides both for real
-    # runs; eval/scenario paths never arm.
-    if interrupt_on and (checkpointer is None or thread_id is None):
-        raise ValueError("interrupt_on requires a checkpointer and a thread_id (ADR-F071)")
+    # HITL-1/2 (ADR-F071): a pause OR a resume without a checkpoint is
+    # unrecoverable — refuse at entry. Composition always provides both for
+    # real runs; eval/scenario paths never arm and never resume.
+    if (interrupt_on or resume_decision is not None) and (
+        checkpointer is None or thread_id is None
+    ):
+        raise ValueError(
+            "interrupt_on / resume_decision require a checkpointer and a thread_id (ADR-F071)"
+        )
     # Load-then-release: the run's fields are snapshotted in a short
     # session; the loop itself holds NO long-lived connection (each step
     # write opens its own — see _persist_step). A Postgres restart
@@ -766,9 +839,38 @@ async def execute_agent_run(
             system_prompt=system_prompt,
             **agent_kwargs,
         )
-        if checkpointer is not None and thread_id is not None:
-            # F1-S1 thread repair: a prior run settled non-cooperatively
-            # may have left dangling tool_calls in the transcript.
+        # HITL-2 (ADR-F071): on a resume, recover the pending interrupt(s) from
+        # the checkpoint and build the graph's Command(resume=…) input. This must
+        # happen BEFORE (and INSTEAD OF) repair: repair answers the gated tool_call
+        # with a synthetic ToolMessage, which would destroy the very interrupt we
+        # are resuming. A resume whose interrupt has vanished (raced with a cancel,
+        # or dissolved by a new-message follow-up) settles `failed` honestly.
+        resume_command: Command | None = None
+        if resume_decision is not None and thread_id is not None:
+            pending = await _pending_interrupts(agent, thread_id)
+            if pending is None:
+                settled = await _finalize(
+                    db_session_factory,
+                    run_id,
+                    status=AgentRunStatus.failed,
+                    error="resume: no pending interrupt (already resolved or cancelled)",
+                    lease=lease,
+                )
+                if publisher is not None and settled:
+                    publisher.run_finished(
+                        status=AgentRunStatus.failed.value,
+                        error="resume: no pending interrupt (already resolved or cancelled)",
+                    )
+                elif publisher is not None:
+                    publisher.close()
+                return
+            resume_command = _build_resume_command(pending, resume_decision)
+        elif checkpointer is not None and thread_id is not None:
+            # F1-S1 thread repair (NON-resume path only): a prior run settled
+            # non-cooperatively may have left dangling tool_calls in the transcript.
+            # A NEW-message follow-up on a PAUSED thread also lands here — repair
+            # then dissolves the pause honestly (synthetic answers for the gated
+            # calls), which is the intended "a new message abandons the ask" path.
             await repair_dangling_tool_calls(agent, thread_id)
         outcome = await _drive_agent(
             agent,
@@ -784,6 +886,7 @@ async def execute_agent_run(
             heartbeat_seconds=heartbeat_seconds,
             change_ledger=change_ledger,
             runtime_context=runtime_context,
+            resume_command=resume_command,
         )
         final_answer, cap_hit, token_cap_hit, total_tokens = (
             outcome.final_answer,

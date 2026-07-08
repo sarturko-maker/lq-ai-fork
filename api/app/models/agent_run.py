@@ -36,6 +36,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     DateTime,
@@ -46,7 +47,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -191,6 +192,17 @@ class AgentRun(Base):
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # HITL-2 (ADR-F071, migration 0094): the human's resume choice on a
+    # run-per-resume follow-up. NULL for every ordinary run; its PRESENCE marks
+    # this run as a resume of a paused (``awaiting_input``) run on the same
+    # thread, and the composition point keys off it to build the graph's
+    # ``Command(resume=…)`` input (skipping ``repair_dangling_tool_calls``,
+    # which would otherwise destroy the pending interrupt). Shape:
+    # ``{"type": "approve"}`` or ``{"type": "reject", "message": <str|null>}`` —
+    # the closed-enum decision the resume endpoint validated. Dict-typed only at
+    # this boundary; the runner degrades a malformed value to ``failed`` rather
+    # than raising (mirrors ``hitl_policy``).
+    resume_decision: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
         return (

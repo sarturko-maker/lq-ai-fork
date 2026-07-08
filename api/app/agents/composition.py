@@ -577,6 +577,11 @@ async def compose_and_execute_run(
             # Slice O (ADR-F053): the run's cost/effort profile, resolved below to
             # the four-brake envelope (captured as a scalar before the row detaches).
             run_budget_profile = run.budget_profile
+            # HITL-2 (ADR-F071): a non-NULL resume_decision marks this run as a
+            # resume of a paused (awaiting_input) run on the same thread. Captured
+            # here (row detaches on block exit); threaded to the runner, which builds
+            # Command(resume=…) from it and SKIPS repair. NULL for every ordinary run.
+            run_resume_decision = run.resume_decision
             # C-CLIENT (ADR-F030): load the company/client tier once, for every
             # run. Read-only injection at the prompt seam (system_prompt_for
             # below); absent/empty profile → None → no client block.
@@ -1092,6 +1097,9 @@ async def compose_and_execute_run(
                 # HITL-1 (ADR-F071): None for the unconfigured case — the runner
                 # then never sets the kwarg (zero-config invariant).
                 interrupt_on=interrupt_on,
+                # HITL-2 (ADR-F071): non-NULL on a resume run — the runner drives the
+                # graph with Command(resume=…) and skips repair. NULL for ordinary runs.
+                resume_decision=run_resume_decision,
             )
         finally:
             await http_client.aclose()

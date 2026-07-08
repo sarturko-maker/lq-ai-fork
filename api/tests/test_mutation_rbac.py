@@ -142,8 +142,10 @@ def test_mutating_route_entry_count_pinned() -> None:
     B-2a (ADR-F067 D2/D3) adds 4 mutating org-skills routes (POST propose,
     MutatingUser-gated; POST approve/reject/revoke, AdminUser-gated): 129 → 133.
     B-3 (ADR-F067 D1) adds 2 mutating practice-area routes (POST/DELETE
-    /practice-areas/{key}/knowledge-bases), both AdminUser-gated: 133 → 135."""
-    assert len(_mutating_routes()) == 135
+    /practice-areas/{key}/knowledge-bases), both AdminUser-gated: 133 → 135.
+    HITL-2 (ADR-F071) adds 1 mutating route (POST /agents/runs/{run_id}/resume,
+    MutatingUser-gated): 135 → 136."""
+    assert len(_mutating_routes()) == 136
 
 
 @pytest.mark.unit
@@ -154,26 +156,29 @@ def test_api_v1_path_count_pinned() -> None:
     B-2a (ADR-F067 D2/D3) adds 6 paths (user-skills propose + proposals;
     admin/org-skills + approve/reject/revoke): 176 → 182.
     B-3 (ADR-F067 D1) adds 2 paths (POST/DELETE
-    /practice-areas/{key}/knowledge-bases): 182 → 184."""
+    /practice-areas/{key}/knowledge-bases): 182 → 184.
+    HITL-2 (ADR-F071) adds 1 path (POST /agents/runs/{run_id}/resume): 184 → 185."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 184
+    assert len(paths) == 185
 
 
 @pytest.mark.unit
 def test_swapped_routers_expose_no_ungated_write() -> None:
-    """Spot-pin: all 69 tenant-data writes are get_mutating_user-gated
-    (53 direct swaps + 16 autonomous via the stacked opt-in gate, §E; B-2a adds
-    POST /user-skills/{skill_id}/propose — the author-side org-skill propose)."""
+    """Spot-pin: all get_mutating_user-gated writes (53 direct swaps + 16
+    autonomous via the stacked opt-in gate, §E; B-2a adds POST
+    /user-skills/{skill_id}/propose — the author-side org-skill propose).
+    HITL-2 (ADR-F071) adds POST /agents/runs/{run_id}/resume (MutatingUser):
+    69 → 70."""
     gated = sum(
         1
         for _m, _p, route in _mutating_routes()
         if "get_mutating_user" in _auth_callables(route.dependant)
     )
-    assert gated == 69
+    assert gated == 70
 
 
 # ---------------------------------------------------------------------------

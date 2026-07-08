@@ -396,6 +396,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # F1-S1 (fork) — cancel + thread delete (ADR-F009). Dedicated coverage
     # in tests/agents/test_agent_lifecycle_api.py.
     ("POST", "/api/v1/agents/runs/{run_id}/cancel"),
+    # HITL-2 (fork) — resume a paused run (ADR-F071). Dedicated coverage in
+    # tests/agents/test_agent_lifecycle_api.py.
+    ("POST", "/api/v1/agents/runs/{run_id}/resume"),
     ("DELETE", "/api/v1/agents/threads/{thread_id}"),
     # F1-S2 (fork) — cockpit reads (ADR-F002). Dedicated coverage in
     # tests/test_practice_areas.py and tests/agents/test_matter_activity.py.

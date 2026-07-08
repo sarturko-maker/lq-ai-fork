@@ -93,7 +93,9 @@ from app.schemas.agent_runs import (
     AgentRunDetailResponse,
     AgentRunListResponse,
     AgentRunRead,
+    AgentRunResume,
     AgentRunStatus,
+    AgentRunStepKind,
     AgentRunStepRead,
     AgentRunWithSteps,
     AgentThreadDetailResponse,
@@ -123,6 +125,11 @@ _TITLE_LIMIT = 120
 # Follow-up admission set (F1-S1, ADR-F009): any settled run admits the
 # next turn — thread repair fixes dangling tool calls; checkpoint state
 # is still required (has_checkpoint) for honest continuation.
+# HITL-2 (ADR-F071): ``awaiting_input`` is settled-but-resumable. It admits a
+# follow-up here so a NEW user message DISSOLVES the pause (repair synthesizes
+# answers for the gated calls; spike §3.3) — the dedicated resume endpoint is
+# the OTHER way out (approve/reject the pending ask). This retires the HITL-1
+# R11 interim lock that 409'd every follow-up on a paused thread.
 _TERMINAL_STATUSES = frozenset(
     s.value
     for s in (
@@ -130,6 +137,7 @@ _TERMINAL_STATUSES = frozenset(
         AgentRunStatus.failed,
         AgentRunStatus.cancelled,
         AgentRunStatus.cap_exceeded,
+        AgentRunStatus.awaiting_input,
     )
 )
 
@@ -1057,6 +1065,179 @@ async def get_agent_thread(
 
 
 @router.post(
+    "/runs/{run_id}/resume",
+    response_model=AgentRunRead,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Resume a paused (awaiting_input) run with an approve/reject decision.",
+)
+async def resume_agent_run(
+    run_id: uuid.UUID,
+    body: AgentRunResume,
+    request: Request,
+    user: MutatingUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentRunRead:
+    """POST /api/v1/agents/runs/{run_id}/resume — HITL-2 (ADR-F071).
+
+    Resolve a run paused by a stop-and-ask policy (``awaiting_input``). The
+    decision (``approve`` | ``reject``, validated by :class:`AgentRunResume`)
+    is persisted on a NEW follow-up run on the same thread — run-per-resume:
+    the paused run keeps its intact lease and stays ``awaiting_input`` as the
+    durable record of the ask. The worker drives that run with
+    ``Command(resume=…)`` built from the decision, fanned across the paused
+    turn's gated calls: ``approve`` executes them (still through the
+    ``guarded_dispatch`` chokepoint — an approval never widens a grant),
+    ``reject`` hands the model the refusal so it closes the turn. Returns 202
+    with the resume run row.
+
+    404 (never 403) when ``run_id`` is absent or another user's. 409
+    ``run_not_awaiting_input`` when the run is not paused; 409
+    ``run_superseded`` when a newer LIVE run already exists on the thread (the
+    pause was resolved or dissolved by a follow-up — a ``failed``/``cancelled``
+    successor that never consumed the interrupt does NOT supersede); 409
+    ``matter_archived`` when the bound Matter was archived since the pause; 409
+    ``thread_busy`` on a concurrent resume (DB-enforced by the partial unique
+    index). 429 at the running-run cap. ``reject`` is a first-class resume,
+    distinct from cancel (which abandons the ask).
+    """
+    run = await db.get(AgentRun, run_id)
+    if run is None or run.user_id != user.id:
+        raise HTTPException(status_code=404, detail="run not found")
+    if run.status != AgentRunStatus.awaiting_input.value:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="run_not_awaiting_input")
+    # Stale-resume guard: the paused run must still be the thread's newest LIVE
+    # run. Once genuinely resumed (or dissolved by a new-message follow-up) a
+    # newer run has consumed the checkpoint interrupt and this ask is superseded —
+    # the paused row is never mutated, so its status alone cannot tell "still
+    # pending" from "already resolved". `failed`/`cancelled` successors are
+    # EXCLUDED: a resume run that settled failed BEFORE driving the graph (enqueue
+    # failure, worker restart) or was cancelled never consumed the interrupt, so
+    # the pause is still live and must remain re-approvable. The runner's
+    # `_pending_interrupts` is the authoritative double-execution guard — a resume
+    # after the interrupt WAS consumed settles `failed` ("no pending interrupt"),
+    # never double-runs the tool.
+    latest_live_run_id = (
+        await db.execute(
+            select(AgentRun.id)
+            .where(
+                AgentRun.thread_id == run.thread_id,
+                AgentRun.status.not_in(
+                    [AgentRunStatus.failed.value, AgentRunStatus.cancelled.value]
+                ),
+            )
+            .order_by(AgentRun.started_at.desc(), AgentRun.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest_live_run_id != run.id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="run_superseded")
+
+    # Matter-archived honesty guard (mirrors create_agent_run): if the paused
+    # run's Matter was archived since the pause, composition would load NO binding
+    # (project WHERE archived_at IS NULL) — the gated tool and the HITL middleware
+    # both vanish, so the approved action could not execute while the UI still
+    # presents the matter. Refuse honestly instead of a silent no-op / misleading
+    # "no pending interrupt" failure (F0-S5 rationale, extended to resume).
+    thread = await db.get(AgentThread, run.thread_id)
+    if thread is not None and not await _thread_matter_active(db, thread):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="matter_archived")
+
+    # Flood brake (shared with create): the resume run is a running run.
+    running_count: int = (
+        await db.execute(
+            select(func.count())
+            .select_from(AgentRun)
+            .where(
+                AgentRun.user_id == user.id,
+                AgentRun.status == AgentRunStatus.running.value,
+            )
+        )
+    ).scalar_one()
+    if running_count >= _MAX_CONCURRENT_RUNS_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too_many_running_runs",
+        )
+
+    # Tool name of the pending ask for the audit row (counts/types/IDs only —
+    # never args or the decision message). The hitl_request step records it.
+    hitl_tool = (
+        await db.execute(
+            select(AgentRunStep.name)
+            .where(
+                AgentRunStep.run_id == run.id,
+                AgentRunStep.kind == AgentRunStepKind.hitl_request.value,
+            )
+            .order_by(AgentRunStep.seq.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    # The resume run inherits the paused run's binding + resolved envelope
+    # (budget_profile / max_steps / model_alias already resolved at create).
+    # ``prompt`` is a fork-authored marker, never model/user prose — the graph
+    # input on this run is Command(resume=…), not the prompt (runner).
+    resume = AgentRun(
+        user_id=user.id,
+        thread_id=run.thread_id,
+        project_id=run.project_id,
+        status=AgentRunStatus.running.value,
+        prompt=f"[resume: {body.decision.type}]",
+        model_alias=run.model_alias,
+        max_steps=run.max_steps,
+        budget_profile=run.budget_profile,
+        resume_decision=body.decision.model_dump(exclude_none=True),
+    )
+    db.add(resume)
+    try:
+        # flush assigns resume.id AND surfaces the one-running-run-per-thread
+        # unique-index race here (a concurrent resume/follow-up).
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        if "uq_agent_runs_thread_running" in str(exc.orig):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="thread_busy") from exc
+        raise
+    await db.execute(
+        sa_update(AgentThread).where(AgentThread.id == run.thread_id).values(last_run_at=func.now())
+    )
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="agent_run.hitl_decision",
+        resource_type="agent_run",
+        resource_id=str(run.id),
+        project_id=run.project_id,
+        request=request,
+        # counts/types/IDs only (audit contract) — no args, no decision message.
+        details={
+            "decision": body.decision.type,
+            "resume_run_id": str(resume.id),
+            "tool": hitl_tool,
+        },
+    )
+    await db.commit()
+    await db.refresh(resume)
+
+    # Same posture as create: a run that could not be queued has no executor —
+    # settle it failed now rather than leave it for the claim-grace sweep.
+    if not await enqueue_agent_run_job(resume.id):
+        await db.execute(
+            sa_update(AgentRun)
+            .where(AgentRun.id == resume.id, AgentRun.status == AgentRunStatus.running.value)
+            .values(
+                status=AgentRunStatus.failed.value,
+                error="enqueue failed: no worker will execute this run",
+                finished_at=func.now(),
+            )
+        )
+        await db.commit()
+        await db.refresh(resume)
+
+    return AgentRunRead.model_validate(resume)
+
+
+@router.post(
     "/runs/{run_id}/cancel",
     response_model=AgentRunRead,
     summary="Cancel a running agent run (idempotent).",
@@ -1069,13 +1250,18 @@ async def cancel_agent_run(
 ) -> AgentRunRead:
     """POST /api/v1/agents/runs/{run_id}/cancel — F1-S1 (ADR-F009).
 
-    Settle-first: the row is flipped ``running → cancelled`` by one
-    conditional UPDATE (first-writer-wins — a run that completed in the
-    race keeps its real terminal state), THEN the worker is signalled:
-    arq ``Job.abort`` as the impatient path, and the worker's own fenced
-    writes stop landing within one heartbeat anyway. Cancelling an
-    already-settled run is an explicit no-op returning the current row
-    (the finish-vs-cancel race is common and not an error).
+    Settle-first: the row is flipped to ``cancelled`` by one conditional
+    UPDATE (first-writer-wins — a run that completed in the race keeps its
+    real terminal state), THEN the worker is signalled: arq ``Job.abort`` as
+    the impatient path, and the worker's own fenced writes stop landing
+    within one heartbeat anyway. Cancelling an already-settled run is an
+    explicit no-op returning the current row (the finish-vs-cancel race is
+    common and not an error).
+
+    HITL-2 (ADR-F071): a paused ``awaiting_input`` run is cancellable too —
+    cancelling ABANDONS the pending ask (distinct from ``reject``, which
+    lets the model close the turn). A paused run has no live worker to
+    signal, so the abort fires only for the ``running`` transition.
 
     Another user's ``run_id`` returns 404 (not 403) — no existence
     disclosure. One audit row per actual cancellation; none for the
@@ -1085,10 +1271,12 @@ async def cancel_agent_run(
     if run is None or run.user_id != user.id:
         raise HTTPException(status_code=404, detail="run not found")
 
-    if run.status == AgentRunStatus.running.value:
+    _CANCELLABLE = (AgentRunStatus.running.value, AgentRunStatus.awaiting_input.value)
+    if run.status in _CANCELLABLE:
+        from_status = run.status
         result: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
             sa_update(AgentRun)
-            .where(AgentRun.id == run.id, AgentRun.status == AgentRunStatus.running.value)
+            .where(AgentRun.id == run.id, AgentRun.status == from_status)
             .values(
                 status=AgentRunStatus.cancelled.value,
                 finished_at=func.now(),
@@ -1103,13 +1291,17 @@ async def cancel_agent_run(
                 resource_id=str(run.id),
                 project_id=run.project_id,
                 request=request,
-                details={"from_status": AgentRunStatus.running.value},
+                details={"from_status": from_status},
             )
         await db.commit()
         await db.refresh(run)
-        if run.status == AgentRunStatus.cancelled.value:
-            # Best-effort, AFTER the settle is durable: a queued job
-            # aborts before starting; a running one gets CancelledError.
+        if run.status == AgentRunStatus.cancelled.value and from_status == (
+            AgentRunStatus.running.value
+        ):
+            # Best-effort, AFTER the settle is durable: a queued job aborts
+            # before starting; a running one gets CancelledError. A paused run's
+            # worker already returned when it settled awaiting_input — nothing
+            # live to abort.
             await abort_agent_run_job(run.id)
 
     return AgentRunRead.model_validate(run)
