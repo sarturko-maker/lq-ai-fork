@@ -24,6 +24,13 @@ export function describeMutationError(err: unknown, fallback: string): string {
 	return err instanceof Error ? err.message : fallback;
 }
 
+/** Locale datetime for admin timestamps ("expires {date}", "Last updated {date}");
+ *  raw string on parse failure. */
+export function formatDateTime(iso: string): string {
+	const d = new Date(iso);
+	return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
 export interface CatalogOption {
 	key: string;
 	label: string;

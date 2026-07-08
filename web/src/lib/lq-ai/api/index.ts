@@ -34,3 +34,4 @@ export * as matterMemoryApi from './matterMemory';
 export * as matterCapabilitiesApi from './matterCapabilities';
 export * as matterFilesApi from './matterFiles';
 export * as editorApi from './editor';
+export * as organizationProfileApi from './organizationProfile';

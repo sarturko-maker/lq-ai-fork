@@ -102,11 +102,9 @@ export function formatRelativeDate(isoDate: string | null | undefined): string {
 	return `${Math.floor(diffMonths / 12)}y ago`;
 }
 
-/** Locale datetime for invite expiry ("expires {date}"); raw string on parse failure. */
-export function formatDateTime(iso: string): string {
-	const d = new Date(iso);
-	return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
-}
+/** Locale datetime for invite expiry ("expires {date}") — the shared admin
+ *  helper, re-exported so this module stays the page's single import surface. */
+export { formatDateTime } from '$lib/lq-ai/admin/page-helpers';
 
 /**
  * Client-side invite email check — a cheap pre-flight only (the server's

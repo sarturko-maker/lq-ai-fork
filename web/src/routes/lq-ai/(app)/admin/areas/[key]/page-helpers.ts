@@ -109,6 +109,31 @@ export function unboundOptions(options: CatalogOption[], boundKeys: string[]): C
 }
 
 /**
+ * G13(a) — bound keys the agent will NOT actually receive at run time.
+ * `build_area_inventory` fail-closes on any bound key whose catalog entry
+ * isn't Library-adopted ("configured for redlining" yet the agent silently
+ * never gets it), so the area page has to surface the same fail-closed
+ * check the server applies. Two cases collapse into "degraded":
+ *
+ * * the catalog entry exists but `in_library` is `false` (bound, not adopted).
+ * * no catalog entry exists at all (registry drift — deleted/renamed capability).
+ *
+ * Callers pass the FULL per-kind catalog (`catalogEntriesForKind(...)`, e.g.
+ * `skillCatalogAll`) — never `libraryOnly(...)`, which would make every
+ * unadopted entry disappear before this check ever sees it. Passing one
+ * kind's catalog + that kind's bound keys keeps kinds isolated by
+ * construction (a skill key and a tool-group key never cross-pollute).
+ */
+export function degradedBindingKeys(catalog: CatalogOption[], boundKeys: string[]): Set<string> {
+	const byKey = new Map(catalog.map((o) => [o.key, o]));
+	const degraded = new Set<string>();
+	for (const key of boundKeys) {
+		if (!(byKey.get(key)?.in_library ?? false)) degraded.add(key);
+	}
+	return degraded;
+}
+
+/**
  * STORE-2 — which empty-state copy an attach picker shows when its `<select>`
  * has nothing to offer, distinguishing two honestly different reasons:
  *

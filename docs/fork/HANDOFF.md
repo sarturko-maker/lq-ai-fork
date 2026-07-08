@@ -135,12 +135,38 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   CI=true (scripts must use `CI=true` or `vitest run`); the cypress smoke specs need
 >   `CYPRESS_LQAI_ADMIN_*` env (seeded `admin@lq.ai` password ≠ the spec default — API 401 proved it
 >   environmental); legacy `--lq-*` surfaces (teal buttons) deliberately non-brandable.
-> - **NEXT ▶ MAINTAINER MORNING REVIEW.** Everything the overnight run shipped is merged; what needs
->   YOU: (1) edit/accept ADR-F067 + MODULES-milestone.md (Workstream B is gated on it — then B-1);
->   (2) edit/accept ADR-F068 (branding, shipped as proposed); (3) execute
->   `docs/fork/runbooks/azure-vm-sandbox.md` on a real Azure resource — its §5.4 azure-claude tool
->   smoke is AZ-2b's deferred live proof; (4) optionally try the Branding admin page on the dev
->   stack (it's live). Then the B ladder starts at B-1 (House Brief page + G13 chip).
+> - **MORNING SESSION 2026-07-08 ✓ (3 PRs merged: #235 / #236 / #237):** (i) PR #235 — CLAUDE.md
+>   in-house audience + two-tier authoring boundary (maintainer ruling: users author for SELF only;
+>   ONLY admins assemble Deep Agents; sole org path = propose→approve→Library→bind; MCP double-gated).
+>   (ii) PR #236 — vocabulary sweep "the firm"→"the company" (30 subs / 14 files incl. the
+>   model-facing `PRACTICE_PLAYBOOK_PROMPT` fence) **+ ADR-F067 & MODULES-milestone FLIPPED TO
+>   ACCEPTED (maintainer)** — B-2a/B-3 unblocked. (iii) PR #237 — **B-1 SHIPPED** (first MODULES
+>   slice, web-only): `/lq-ai/admin/house-brief` markdown editor + sanitized preview over the
+>   existing GET/PUT /organization-profile (NEW thin client `$lib/lq-ai/api/organizationProfile.ts`;
+>   teaching empty state; 200k client guard; nav link) + G13(a) degraded-binding chip on
+>   `admin/areas/[key]` (pure `degradedBindingKeys` vs the FULL per-kind catalog — `in_library=false`
+>   OR missing entry ⇒ degraded, matching `build_area_inventory` fail-close; amber chip "Not in your
+>   Library — the agent will not receive this. Adopt in Store."). Review fixes: chip copy;
+>   `formatDateTime` hoisted to `$lib/lq-ai/admin/page-helpers`. Gate: svelte-check 0 errors; vitest
+>   1223/1223 (109 files); live cypress probe 3/3 vs the REBUILT web container (save→PUT-200
+>   intercept→persist, empty state, chip appear/clear; net-zero teardown) — evidence
+>   `docs/fork/evidence/b1-house-brief/`. KNOWN MINORS (deferred on the PR): `updated_by` renders
+>   the raw user id; the milestone's B-1 text cited GET /library — real source is the `in_library`
+>   flag on GET /admin/capabilities (raw entries: `capability_key`).
+> - **NEXT ▶ B-2a — org-skills harness backend (F067 D2/D3; ACCEPTED, unblocked).** Spec:
+>   `docs/fork/plans/MODULES-milestone.md` § B-2a — migration `org_skill_versions` (immutable
+>   approved snapshots) + propose/approve/reject/revoke endpoints (422 strict frontmatter allowlist
+>   DENYING `allowed-tools`/`minimum_inference_tier`/`ensemble_verification`; 409 shipped-slug
+>   collision; 32 KiB cap) + composition merges approved snapshots at the SAME
+>   `build_area_inventory` chokepoint + D3.5 provenance banner (in-house vocabulary: "your
+>   company's own material"). Security-sensitive ⇒ the deeper ADR-F005 review. Pick up: read
+>   MODULES-milestone § B-2a + F067 D2/D3 + CLAUDE.md § Authoring boundary; check `user_skills` +
+>   the permissive parser `app/skills/schema.py` (strictness lands at the org PROPOSE boundary
+>   ONLY); draft the migration first. Parallel candidates: B-5 roster UI (independent), B-6 HITL
+>   spike→ADR (report in the 2026-07-08 session scratchpad `hitl-spike-report.md`).
+> - **MAINTAINER GATES STILL OPEN:** edit/accept ADR-F068 (branding — shipped + live-verified,
+>   proposed); execute `docs/fork/runbooks/azure-vm-sandbox.md` (§5.4 azure-claude tool smoke =
+>   AZ-2b's deferred live proof).
 > - **BRAND-1 — tenant white-labeling (maintainer, 2026-07-07: clients brand the product — palette,
 >   logo, product name — WITHOUT coding; task #480).** The substrate makes this cheap BY DESIGN:
 >   (a) the ADR-F013 token layer means palette = overriding a handful of `--lq-*` CSS custom
@@ -163,6 +189,18 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   `api/tests/agents/scenarios/test_*_live.py`). Ruff CI-parity trap (run CI's exact version +
 >   commands). SKILL.md colon-space guard applies to the surgical-redline edit. Dev box: run full
 >   suites ALONE (6.3 GiB, no swap — [[devbox-oom-shield]]).
+> - **FRESH GOTCHAS (2026-07-08 morning):** in-container api suites: run from a `git archive HEAD`
+>   tree — bind-mounting the REPO ROOT exposes `.env` and silently ACTIVATES live/provider tests
+>   (one hung the run); selective mounts starve `test_setup_tenant_wizard` (subprocess-runs
+>   `scripts/setup-tenant.sh`, needs the full tree) and mig 0032 needs `skills/` as a SIBLING of
+>   `api/` (`/repo/skills`, not `/skills`). Use the api container's REAL `DATABASE_URL` (CI's
+>   `lq_ai:lq_ai` creds 401 on the dev stack); never `pytest | tail` (masks the exit code); sweep
+>   leftover `lq_ai_test_*` DBs after. Background merge-watchers: merge ONLY — never chain
+>   `git checkout main && git pull` (hijacks/fails the checkout when the tree has WIP; sync with
+>   `git fetch origin main:main` instead). Web nginx does NOT proxy `/api` — cypress `cy.request`
+>   must target the API origin (`http://127.0.0.1:8000/api/v1`); raw `/admin/capabilities` entries
+>   carry `capability_key` (web projects to `key`); after clicking a save, `cy.wait` on an
+>   intercepted PUT before `cy.reload()` (reload kills in-flight fetches — probe artifact class).
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════

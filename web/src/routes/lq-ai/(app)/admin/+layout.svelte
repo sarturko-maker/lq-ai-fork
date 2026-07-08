@@ -20,6 +20,9 @@
 		// BRAND-1b (ADR-F068) — deployment white-labeling; plain admin link
 		// (the server gate is the branding endpoints' AdminUser dependency).
 		{ href: '/lq-ai/admin/branding', label: 'Branding' },
+		// B-1 (ADR-F049) — the House Brief memory tier; plain admin link (the
+		// server gate is the organization-profile PUT's AdminUser dependency).
+		{ href: '/lq-ai/admin/house-brief', label: 'House Brief' },
 		...($auth.user?.role === 'operator' ? [{ href: '/lq-ai/admin/models', label: 'Models' }] : []),
 		{ href: '/lq-ai/admin/word-addin', label: 'Word add-in' },
 		{ href: '/lq-ai/admin/intake-bridges', label: 'Intake bridges' },
