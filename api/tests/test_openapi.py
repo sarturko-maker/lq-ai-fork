@@ -137,6 +137,14 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/library/{kind}/{key}",
         # STORE-2 (ADR-F065 D-B) — member-readable Org Library read model
         "/api/v1/library",
+        # B-2a (fork, ADR-F067 D2/D3) — org-skills harness: author propose +
+        # history, admin review queue + transitions
+        "/api/v1/user-skills/{skill_id}/propose",
+        "/api/v1/user-skills/{skill_id}/proposals",
+        "/api/v1/admin/org-skills",
+        "/api/v1/admin/org-skills/{version_id}/approve",
+        "/api/v1/admin/org-skills/{version_id}/reject",
+        "/api/v1/admin/org-skills/{version_id}/revoke",
         # SETUP-3a (ADR-F061) — unauthenticated lifecycle endpoints
         "/api/v1/auth/accept-invite",
         "/api/v1/auth/password-reset-request",
@@ -408,7 +416,9 @@ async def test_openapi_paths_match_sketch() -> None:
     # +2: BRAND-1a (ADR-F068) — deployment branding: /branding (unauth GET +
     #   admin PUT share one path) + /branding/logo (unauth GET + admin
     #   POST/DELETE share one path) (174 -> 176).
-    assert len(actual) == 176  # +3: ADR-F054 capability panel (GET/PUT
+    # +6: B-2a (ADR-F067 D2/D3) — org-skills harness: user-skills propose +
+    #   proposals, admin/org-skills queue + approve/reject/revoke (176 -> 182).
+    assert len(actual) == 182  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -76,6 +76,7 @@ from app.agents.tools import MatterBinding, build_matter_tools
 from app.config import get_settings
 from app.db.session import get_session_factory
 from app.models.agent_run import AgentRun
+from app.models.org_skill import OrgSkillVersion
 from app.models.organization_profile import OrganizationProfile
 from app.models.playbook import Playbook
 from app.models.practice_area import (
@@ -88,9 +89,55 @@ from app.models.practice_area import (
 from app.models.project import MatterCapabilityToggle, Project
 from app.models.user import User
 from app.schemas.agent_runs import AgentRunStatus
+from app.skills.org_proposal import load_approved_org_skill_versions, served_skill_md
 from app.skills.registry import MutableSkillRegistry, SkillRegistry
 
 logger = logging.getLogger(__name__)
+
+
+async def _resolve_org_skill_files(
+    db: AsyncSession,
+    org_snapshots: Mapping[str, OrgSkillVersion],
+    enabled_skills: Sequence[str],
+    registry: SkillRegistry | None,
+) -> dict[str, str]:
+    """Serve approved org-skill snapshot BYTES for the enabled, non-shadowed slugs (ADR-F067).
+
+    Filters the approved snapshots to slugs that are (a) ENABLED for this matter (the
+    ADR-F054 toggle resolution) and (b) NOT known to the filesystem registry — shipped
+    wins, the same no-shadowing posture as :func:`build_area_inventory`. Each surviving
+    slug is rendered by :func:`served_skill_md`, which prefixes the D3.5 provenance banner
+    at serve time (stored bytes never mutate). Author/approver EMAILS are resolved in ONE
+    batched ``SELECT`` (never raw user IDs in model-facing text; ``"unknown"`` when the FK
+    was nulled or the user is gone). Returns ``{}`` when nothing qualifies — the wiring
+    then degrades to registry-only, unchanged.
+    """
+    enabled = set(enabled_skills)
+    wanted = {
+        slug: version
+        for slug, version in org_snapshots.items()
+        if slug in enabled and (registry is None or registry.get(slug) is None)
+    }
+    if not wanted:
+        return {}
+    ids = {
+        uid
+        for version in wanted.values()
+        for uid in (version.author_user_id, version.reviewed_by)
+        if uid is not None
+    }
+    emails: dict[uuid.UUID, str] = {}
+    if ids:
+        rows = await db.execute(select(User.id, User.email).where(User.id.in_(ids)))
+        emails = {row.id: row.email for row in rows}
+    return {
+        slug: served_skill_md(
+            version,
+            author_label=emails.get(version.author_user_id) or "unknown",
+            approver_label=emails.get(version.reviewed_by) or "unknown",
+        )
+        for slug, version in wanted.items()
+    }
 
 
 def _skill_registry_from_app_state() -> SkillRegistry | None:
@@ -490,6 +537,12 @@ async def compose_and_execute_run(
         # tool/skill/prompt assembly is byte-identical to the pre-slice path.
         enabled_skills: list[str] = []
         enabled_tool_groups: set[str] = set()
+        # ADR-F067 D2/D3: the approved org-authored skill snapshots the runtime serves this
+        # run — resolved to their FULL served SKILL.md text (provenance banner prefixed at
+        # serve time) inside the area block below, captured here so it survives the session
+        # close and reaches the skill-wiring seam. Empty default keeps wiring byte-identical
+        # for an org with no approved org skills (or a matter with none enabled).
+        org_skill_files: dict[str, str] = {}
         practice_playbook_block: str | None = None
         is_follow_up = False
         async with session_factory() as db:
@@ -661,12 +714,21 @@ async def compose_and_execute_run(
                             library_entries = (
                                 (await db.execute(select(OrgLibraryEntry))).scalars().all()
                             )
+                            # ADR-F067 D2/D3: load the APPROVED org-authored skill snapshots
+                            # (immutable bytes) ONCE, beside the Org Library. The runtime reads
+                            # ONLY state='approved' rows — never the live, mutable user_skills
+                            # row — so a post-approval edit or a revoke (state flip) is inert
+                            # until re-approved. Merged into the SAME inventory chokepoint; a
+                            # slug the filesystem registry also knows is shadowed (shipped wins,
+                            # D2) with a structured warning.
+                            org_snapshots = await load_approved_org_skill_versions(db)
                             inventory = build_area_inventory(
                                 bound_skill_names=bound_skill_names,
                                 registry=registry,
                                 area_playbooks=area_playbooks,
                                 tool_group_keys=area_tool_group_keys,
                                 library_entries=library_entries,
+                                org_skill_snapshots=org_snapshots,
                             )
                             enabled_skills = inventory.enabled_keys("skill", toggles)
                             enabled_tool_groups = set(inventory.enabled_keys("tool", toggles))
@@ -676,6 +738,14 @@ async def compose_and_execute_run(
                             ]
                             practice_playbook_block = (
                                 render_practice_playbook(enabled_playbooks) or None
+                            )
+                            # ADR-F067 D2/D3: serve the approved-snapshot BYTES (provenance
+                            # banner prefixed at serve time) for every ENABLED, adopted+bound
+                            # org skill the filesystem registry does NOT shadow. Resolved HERE
+                            # while the session is open (the author/approver email lookup is one
+                            # batched select); captured for the skill-wiring seam below.
+                            org_skill_files = await _resolve_org_skill_files(
+                                db, org_snapshots, enabled_skills, registry
                             )
 
         checkpointer = checkpointer_provider()
@@ -833,6 +903,7 @@ async def compose_and_execute_run(
                 registry,
                 area_skill_names=enabled_skills,
                 subagents=area_spec.subagents,
+                org_skill_files=org_skill_files,
             )
         else:
             wiring = SkillWiring(backend=None, main_sources=None, subagents=[])

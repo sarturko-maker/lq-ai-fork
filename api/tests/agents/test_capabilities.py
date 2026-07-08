@@ -56,6 +56,13 @@ def _lib(kind: str, key: str) -> SimpleNamespace:
     return SimpleNamespace(capability_kind=kind, capability_key=key)
 
 
+def _snap(
+    slug: str, *, title: str | None = None, description: str | None = None
+) -> SimpleNamespace:
+    """One approved org_skill_versions snapshot (structural — slug/title/description)."""
+    return SimpleNamespace(slug=slug, title=title, description=description)
+
+
 def _playbook(name: str, *, contract_type: str = "NDA", description: str = "") -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid.uuid4(), name=name, contract_type=contract_type, description=description
@@ -92,9 +99,11 @@ def _inv(
     registry: Any = None,
     area_playbooks: Sequence[Any] = (),
     library_entries: Sequence[Any] | None = None,
+    org_skill_snapshots: Any = None,
 ) -> cap.CapabilityInventory:
     """``build_area_inventory`` with adopt-in defaults: unless ``library_entries`` is given
-    explicitly, every fixture capability is adopted (so it is available)."""
+    explicitly, every fixture capability is adopted (so it is available). ``org_skill_snapshots``
+    (ADR-F067) threads straight through — default None ≡ the pre-slice registry-only path."""
     if library_entries is None:
         library_entries = _adopt_all(
             tool_group_keys=tool_group_keys,
@@ -107,6 +116,7 @@ def _inv(
         registry=registry,
         area_playbooks=list(area_playbooks),
         library_entries=list(library_entries),
+        org_skill_snapshots=org_skill_snapshots,
     )
 
 
@@ -185,11 +195,15 @@ def test_skill_unknown_to_registry_is_dropped_as_drift() -> None:
 
 
 def test_no_registry_yields_no_skills() -> None:
+    # registry None ⇒ skills off entirely; org skills are skills, so an approved snapshot must
+    # NOT resolve either (ADR-F067 — the feature being off fails closed). Passing a matching
+    # org snapshot proves the org branch does not sneak a skill in when the registry is absent.
     inv = _inv(
         tool_group_keys=["redlining", "tabular"],
-        bound_skill_names=["nda-review"],
+        bound_skill_names=["nda-review", "house-nda-clause"],
         registry=None,
         area_playbooks=[],
+        org_skill_snapshots={"house-nda-clause": _snap("house-nda-clause", title="House NDA")},
     )
     assert all(e.kind != "skill" for e in inv.entries)
 
@@ -209,6 +223,113 @@ def test_skill_label_falls_back_to_name_without_title() -> None:
 def test_empty_inventory_is_mcp_only() -> None:
     inv = empty_inventory()
     assert [e.kind for e in inv.entries] == ["mcp"]
+
+
+# --- org-authored skill snapshots (ADR-F067 D2/D3) ---------------------------
+def test_org_skill_snapshot_adopted_and_bound_resolves_with_title_label() -> None:
+    """An approved org snapshot the registry does NOT know, adopted + bound, becomes an
+    available skill entry labelled from its snapshot title."""
+    inv = _inv(
+        tool_group_keys=[],
+        bound_skill_names=["house-nda-clause"],
+        registry=_registry(),  # does not know the org slug
+        area_playbooks=[],
+        org_skill_snapshots={
+            "house-nda-clause": _snap(
+                "house-nda-clause",
+                title="House NDA clause",
+                description="Our standard NDA clause.",
+            )
+        },
+    )
+    (skill,) = [e for e in inv.entries if e.kind == "skill"]
+    assert skill.key == "house-nda-clause"
+    assert skill.label == "House NDA clause"
+    assert skill.description == "Our standard NDA clause."
+    assert skill.available and skill.toggleable and skill.default_enabled
+
+
+def test_org_skill_snapshot_label_falls_back_to_slug_without_title() -> None:
+    inv = _inv(
+        bound_skill_names=["house-nda-clause"],
+        registry=_registry(),
+        org_skill_snapshots={"house-nda-clause": _snap("house-nda-clause")},
+    )
+    (skill,) = [e for e in inv.entries if e.kind == "skill"]
+    assert skill.label == "house-nda-clause"
+
+
+def test_org_skill_snapshot_not_adopted_is_absent() -> None:
+    """Approval is not adoption (ADR-F067): a snapshot bound but NOT in the Library never
+    becomes an entry — and does NOT fire the unresolved warning (adoption is checked first)."""
+    inv = _inv(
+        bound_skill_names=["house-nda-clause"],
+        registry=_registry(),
+        area_playbooks=[],
+        org_skill_snapshots={"house-nda-clause": _snap("house-nda-clause", title="House NDA")},
+        library_entries=[],  # nothing adopted
+    )
+    assert all(e.kind != "skill" for e in inv.entries)
+
+
+def test_org_skill_revoked_or_absent_snapshot_drops_with_unresolved_warning(caplog: Any) -> None:
+    """A still-adopted+bound skill whose approved snapshot is gone (revoked/superseded ⇒
+    absent from the map) and that the registry does not know is dropped fail-closed with the
+    F067 D3.8 ``skill_unresolved_skipped`` warning (counts/keys only)."""
+    with caplog.at_level(logging.WARNING):
+        inv = _inv(
+            bound_skill_names=["revoked-skill"],
+            registry=_registry(),  # does not know it
+            org_skill_snapshots={},  # revoked ⇒ absent from the map
+        )
+    assert all(e.kind != "skill" for e in inv.entries)
+    dropped = [r for r in caplog.records if getattr(r, "event", None) == "skill_unresolved_skipped"]
+    assert dropped, "the F067 D3.8 fail-close warning did not fire"
+    assert dropped[0].count == 1 and dropped[0].keys == ["revoked-skill"]
+
+
+def test_org_skill_default_none_drops_org_only_binding_fail_closed(caplog: Any) -> None:
+    """The kwarg is OPTIONAL and fails CLOSED: omitting it drops an org-only skill (one the
+    registry does not know), never opens anything — the same posture as a revoked snapshot."""
+    with caplog.at_level(logging.WARNING):
+        inv = _inv(
+            bound_skill_names=["house-nda-clause"],
+            registry=_registry(),
+            # org_skill_snapshots omitted (default None)
+        )
+    assert all(e.kind != "skill" for e in inv.entries)
+    assert any(getattr(r, "event", None) == "skill_unresolved_skipped" for r in caplog.records)
+
+
+def test_org_skill_shadowed_by_shipped_registry_wins(caplog: Any) -> None:
+    """No shadowing (D2): when BOTH the registry and an org snapshot claim a slug the shipped
+    entry wins (its label) and the org version is ignored with the
+    ``org_skill_shadowed_by_shipped`` warning."""
+    with caplog.at_level(logging.WARNING):
+        inv = _inv(
+            bound_skill_names=["nda-review"],
+            registry=_registry(),  # knows nda-review as "NDA review"
+            org_skill_snapshots={"nda-review": _snap("nda-review", title="ORG NDA override")},
+        )
+    (skill,) = [e for e in inv.entries if e.kind == "skill"]
+    assert skill.label == "NDA review"  # shipped wins, not the org title
+    shadowed = [
+        r for r in caplog.records if getattr(r, "event", None) == "org_skill_shadowed_by_shipped"
+    ]
+    assert shadowed, "the no-shadowing warning did not fire"
+    assert shadowed[0].count == 1 and shadowed[0].keys == ["nda-review"]
+
+
+def test_org_and_shipped_skills_coexist_in_inventory_order() -> None:
+    """A mixed area: one shipped skill + one org snapshot both resolve; entry order follows
+    ``bound_skill_names`` (not sorted, not source-grouped)."""
+    inv = _inv(
+        bound_skill_names=["nda-review", "house-nda-clause"],
+        registry=_registry(),
+        org_skill_snapshots={"house-nda-clause": _snap("house-nda-clause", title="House NDA")},
+    )
+    skills = {s.kind: s for s in inv.sections()}["skill"]
+    assert [e.key for e in skills.entries] == ["nda-review", "house-nda-clause"]
 
 
 # --- STORE-1 drift guard: catalog vs Library vs binding (ADR-F065) -----------

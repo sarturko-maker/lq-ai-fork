@@ -273,6 +273,7 @@ def build_area_skill_wiring(
     *,
     area_skill_names: list[str],
     subagents: list[dict[str, Any]],
+    org_skill_files: Mapping[str, str] | None = None,
 ) -> SkillWiring:
     """Build the run's skill backend + sources + rewritten subagent specs.
 
@@ -282,10 +283,30 @@ def build_area_skill_wiring(
     model (ADR-F017). A subagent skill name not in the area's resolved set is
     dropped (⊆-area + drift, the UX-B-3 non-fatal posture; PATCH rejects it at
     config time). When ``registry`` is None (skills off — the UX-B-1/2 baseline)
-    nothing resolves: the backend is None and subagent ``skills`` are stripped,
-    so a stored name can never reach deepagents as a bogus source.
+    nothing resolves AT ALL: ``org_skill_files`` is ignored along with the registry
+    (org skills ARE skills — ADR-F067 keeps them off when the whole feature is off),
+    the backend is None and subagent ``skills`` are stripped, so a stored name can
+    never reach deepagents as a bogus source.
+
+    ``org_skill_files`` maps an approved org-authored skill slug → its FULL served
+    ``SKILL.md`` text (provenance banner already prefixed at serve time — ADR-F067
+    D3.5). Optional, default ``{}``, and honoured ONLY when a registry is present
+    (see the None-registry invariant above). Org texts ride the SAME in-memory source
+    dict as registry skills, so everything downstream — the ⊆-area subagent subsetting,
+    the sources map, the read-only :class:`RegistrySkillBackend` posture — is
+    unchanged and applies to them identically. Precedence mirrors the inventory's
+    no-shadowing rule: an org slug is seeded first, then the registry OVERWRITES it
+    on any collision (shipped wins, D2). The caller only passes slugs the registry
+    does not know, so in practice there is no overlap — the merge order is the
+    belt-and-braces guarantee.
     """
-    area_files = resolve_skill_files(registry, area_skill_names) if registry is not None else {}
+    # registry None ⇒ skills off entirely; org skills fail closed with it (ADR-F067). Seed
+    # org-authored snapshots first (only those actually bound to the area), then let the
+    # registry overwrite on any slug collision — shipped wins (ADR-F067 D2).
+    org_files = (org_skill_files or {}) if registry is not None else {}
+    area_files: dict[str, str] = {n: org_files[n] for n in area_skill_names if n in org_files}
+    if registry is not None:
+        area_files.update(resolve_skill_files(registry, area_skill_names))
     sources: dict[str, dict[str, str]] = {}
     if area_files:
         sources[SKILLS_ROOT] = area_files

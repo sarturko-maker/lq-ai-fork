@@ -414,7 +414,7 @@ def derive_summary(
     """
 
     lq = frontmatter.lq_ai
-    title = lq.title or _humanise(name)
+    title = lq.title or humanise_skill_name(name)
     version = lq.version or _top_level_str(frontmatter, "version") or "unversioned"
     author = lq.author or _top_level_str(frontmatter, "author")
     return SkillSummary(
@@ -433,12 +433,13 @@ def derive_summary(
     )
 
 
-def _humanise(name: str) -> str:
+def humanise_skill_name(name: str) -> str:
     """Turn ``msa-review-saas`` into ``Msa Review Saas``.
 
-    Used as a fallback display name when the frontmatter omits ``title``.
-    Not pretty for every name, but visible when present and explicit
-    when absent — fixing it is a one-line frontmatter edit per skill.
+    Used as a fallback display name when the frontmatter omits ``title`` (both the shipped-skill
+    summary here and the org-skill snapshot reads in ``app.api.admin`` / ``app.api.library``).
+    Not pretty for every name, but visible when present and explicit when absent — fixing it is
+    a one-line frontmatter edit per skill.
     """
 
     return " ".join(part.capitalize() for part in name.split("-")) if name else name
@@ -475,4 +476,5 @@ __all__ = [
     "derive_summary",
     "extract_inputs",
     "filter_summary_for_response",
+    "humanise_skill_name",
 ]

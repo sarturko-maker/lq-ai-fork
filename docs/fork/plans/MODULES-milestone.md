@@ -57,6 +57,12 @@ ADR-F005 security review.
 
 ### B-2a — harness backend (propose → approve → snapshot → compose)
 
+**Status: SHIPPED 2026-07-08** (migration 0091 `org_skill_versions`; implementation calls in the
+ADR-F067 B-2a addendum — proposal state on the version table, serve-time banner, operator
+excluded per ADR-F064). One correction to the text below: the chip/source data for org skills
+surfaces through `GET /admin/capabilities` (`source="org"`), and revoke leaves the Library row
+(runtime fail-close + dangling read-model entry).
+
 **Goal:** an approved org skill resolves through the real pipeline into a live Deep Agent run;
 an unapproved/revoked/edited-after-approval one provably does not.
 

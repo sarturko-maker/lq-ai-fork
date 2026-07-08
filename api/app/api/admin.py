@@ -51,7 +51,7 @@ from app.agents.capabilities import (
     RECOMMENDED_LIBRARY_SETS,
     TOOL_GROUP_REGISTRY,
 )
-from app.api.dependencies import AdminUser, OperatorUser
+from app.api.dependencies import AdminUser, OperatorUser, tenant_admin_visibility
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.config import get_settings
@@ -60,11 +60,14 @@ from app.errors import Conflict, Forbidden, NotFound
 from app.models.audit import AuditLog
 from app.models.document import Document as DocumentORM
 from app.models.file import File as FileORM
+from app.models.org_skill import OrgSkillVersion
 from app.models.playbook import Playbook as PlaybookORM
 from app.models.practice_area import OrgLibraryEntry
 from app.models.user import User as UserORM, UserSession as UserSessionORM
 from app.models.user_auth_token import UserAuthToken
+from app.skills.org_proposal import content_size_bytes, load_approved_org_skill_versions
 from app.skills.registry import MutableSkillRegistry, SkillRegistry
+from app.skills.schema import humanise_skill_name
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -1508,6 +1511,31 @@ async def _library_keys(db: AsyncSession) -> set[tuple[str, str]]:
     return {(r.capability_kind, r.capability_key) for r in rows}
 
 
+async def _approved_org_skill_slugs(db: AsyncSession) -> set[str]:
+    """The slugs with a currently ``approved`` snapshot (ADR-F067 D2/D3).
+
+    Derives the slug set from the shared :func:`load_approved_org_skill_versions` reader — the
+    catalog-key validator (adopt/PATCH-shim) only needs the keys, but routing through the one
+    reader keeps "what counts as an adoptable org skill" from drifting off the runtime's
+    snapshot load. Mirrors :func:`_library_keys`'s role for the Library table.
+    """
+    return set((await load_approved_org_skill_versions(db)).keys())
+
+
+async def _approved_org_skill_snapshots(
+    db: AsyncSession,
+) -> list[tuple[OrgSkillVersion, str | None]]:
+    """Every ``approved`` org-skill snapshot, with its author's email resolved via one
+    batched join (never a raw user id in model-/admin-facing text — ADR-F067 D3.5)."""
+    stmt = (
+        select(OrgSkillVersion, UserORM.email)
+        .outerjoin(UserORM, OrgSkillVersion.author_user_id == UserORM.id)
+        .where(OrgSkillVersion.state == "approved")
+        .order_by(OrgSkillVersion.slug)
+    )
+    return [(v, email) for v, email in (await db.execute(stmt)).all()]
+
+
 def playbook_display_label(pb: PlaybookORM) -> str:
     """``"{name} ({contract_type})"`` when ``contract_type`` is set, else ``name``.
 
@@ -1535,9 +1563,10 @@ async def _validate_catalog_key(db: AsyncSession, request: Request, kind: str, k
     """Reject a (kind, key) absent from its catalog (422 — reject, don't sanitize).
 
     Shared by the adopt endpoint and the PATCH shim so the validation cannot drift: a tool
-    group in the code registry, a skill in the skill registry (registry missing ⇒ 422 for
-    skill adopts), a non-deleted playbook id. A literal HTTPException(422) (NOT a domain
-    ValidationError, which maps to 400) — no dead row lands.
+    group in the code registry, a skill in the skill registry OR an approved org-skill
+    snapshot (ADR-F067 D2/D3 — either catalog counts as "exists"), a non-deleted playbook id.
+    A literal HTTPException(422) (NOT a domain ValidationError, which maps to 400) — no dead
+    row lands.
     """
     if kind == KIND_TOOL:
         if key not in TOOL_GROUP_REGISTRY:
@@ -1546,7 +1575,9 @@ async def _validate_catalog_key(db: AsyncSession, request: Request, kind: str, k
             )
     elif kind == KIND_SKILL:
         registry = _admin_registry_or_none(request)
-        if registry is None or registry.get(key) is None:
+        if (registry is None or registry.get(key) is None) and key not in (
+            await _approved_org_skill_slugs(db)
+        ):
             raise HTTPException(status_code=422, detail=f"Skill {key!r} is not in the registry.")
     else:  # KIND_PLAYBOOK
         live_ids = {str(pb.id) for pb in await _live_playbooks(db)}
@@ -1634,6 +1665,24 @@ async def _deployment_inventory(
                     tags=summary.tags,
                 )
             )
+
+    # ADR-F067 D2/D3 — approved org-skill snapshots join the catalog too. Shipped wins on a
+    # slug collision (no shadowing, D2): skip any slug the registry also knows.
+    for snap, author_email in await _approved_org_skill_snapshots(db):
+        if registry is not None and registry.get(snap.slug) is not None:
+            continue
+        skill_entries.append(
+            _read(
+                KIND_SKILL,
+                snap.slug,
+                snap.title or humanise_skill_name(snap.slug),
+                snap.description,
+                source="org",
+                author=author_email,
+                version=(snap.frontmatter.get("lq_ai") or {}).get("version"),
+                tags=snap.tags,
+            )
+        )
 
     playbook_entries = [
         _read(
@@ -1828,3 +1877,324 @@ async def update_deployment_capabilities(
     )
     await db.commit()
     return await _deployment_inventory(db, request)
+
+
+# ---------------------------------------------------------------------------
+# ADR-F067 D2/D3 — the org-skills review queue: the admin side of the
+# propose->approve->snapshot harness (the author side lives in
+# `app.api.user_skills`, POST/GET .../propose|proposals). AdminUser-gated —
+# APPROVE/REJECT/REVOKE are the "human review gate" D3.1 requires. Every
+# transition is audited kind/key/version/hash/size only, per the audit
+# contract — this GET is the one deliberate exception: it returns the full
+# `raw_yaml`/`body` because it IS the admin review surface (the admin must
+# read the exact bytes before approving, D3.1) — not an audit row.
+# ---------------------------------------------------------------------------
+
+
+class OrgSkillVersionAdminRead(BaseModel):
+    """One ``org_skill_versions`` row, FULL content — the admin review view."""
+
+    id: _uuid_mod.UUID
+    slug: str
+    version_no: int
+    state: str
+    author_user_id: _uuid_mod.UUID | None
+    author_email: str | None
+    proposed_at: datetime
+    reviewed_by: _uuid_mod.UUID | None
+    reviewed_at: datetime | None
+    review_note: str | None
+    revoked_at: datetime | None
+    content_hash: str
+    size_bytes: int
+    raw_yaml: str
+    body: str
+
+
+class OrgSkillVersionsListResponse(BaseModel):
+    """``GET /admin/org-skills`` response — every version (optionally state-filtered)."""
+
+    versions: list[OrgSkillVersionAdminRead]
+
+
+class OrgSkillRejectRequest(BaseModel):
+    """``POST /admin/org-skills/{id}/reject`` body. ``extra='forbid'``.
+
+    ``note`` rides only this response/the row's ``review_note`` column — the audit row
+    carries ``has_note`` (a bool), never the text (the audit contract, CLAUDE.md)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note: str | None = Field(default=None, max_length=2000)
+
+
+async def _org_skill_author_email(db: AsyncSession, user_id: _uuid_mod.UUID | None) -> str | None:
+    if user_id is None:
+        return None
+    return (
+        await db.execute(select(UserORM.email).where(UserORM.id == user_id))
+    ).scalar_one_or_none()
+
+
+def _to_org_skill_admin_read(
+    version: OrgSkillVersion, *, author_email: str | None
+) -> OrgSkillVersionAdminRead:
+    return OrgSkillVersionAdminRead(
+        id=version.id,
+        slug=version.slug,
+        version_no=version.version_no,
+        state=version.state,
+        author_user_id=version.author_user_id,
+        author_email=author_email,
+        proposed_at=version.proposed_at,
+        reviewed_by=version.reviewed_by,
+        reviewed_at=version.reviewed_at,
+        review_note=version.review_note,
+        revoked_at=version.revoked_at,
+        content_hash=version.content_hash,
+        size_bytes=content_size_bytes(version.raw_yaml, version.body),
+        raw_yaml=version.raw_yaml,
+        body=version.body,
+    )
+
+
+# ADR-F064: the org-skills routes expose/govern TENANT-authored skill content, so the platform
+# operator (an is_admin superset) is excluded — separation of duties between platform ops and
+# the company's own legal material. The four handlers gate on tenant_admin_visibility below.
+_OPERATOR_EXCLUDED_MSG = (
+    "The platform operator is excluded from tenant-authored content (ADR-F064)."
+)
+
+
+async def _org_skill_version_for_transition(
+    db: AsyncSession, version_id: _uuid_mod.UUID, *, expected_state: str
+) -> OrgSkillVersion:
+    """Load an org-skill version FOR UPDATE and assert its state before a transition.
+
+    The shared skeleton behind approve/reject/revoke. The row-level lock closes the
+    check-then-write window so two concurrent transitions cannot both pass the state guard
+    (lost update): 404 for an unknown id, 409 unless the row is in ``expected_state``. The
+    caller owns the mutation + audit + response.
+    """
+    version = (
+        await db.execute(
+            select(OrgSkillVersion).where(OrgSkillVersion.id == version_id).with_for_update()
+        )
+    ).scalar_one_or_none()
+    if version is None:
+        raise NotFound("Org skill version not found.")
+    if version.state != expected_state:
+        raise Conflict(
+            f"Version is {version.state!r}, not {expected_state!r}.",
+            details={"state": version.state},
+        )
+    return version
+
+
+@router.get(
+    "/org-skills",
+    response_model=OrgSkillVersionsListResponse,
+    summary="The org-skills review queue — every version, optionally state-filtered (admin).",
+)
+async def list_org_skill_versions(
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    state: Literal["proposed", "approved", "rejected", "superseded", "revoked"] | None = Query(
+        default=None
+    ),
+) -> OrgSkillVersionsListResponse:
+    """GET /api/v1/admin/org-skills — every org-skill proposal/snapshot (ADR-F067 D2/D3),
+    newest-proposed first; ``state`` optionally narrows to one state (FastAPI 422s an
+    unrecognised value against the ``Literal``)."""
+    # ADR-F064: tenant-authored content — the platform operator is excluded (see note above).
+    if not tenant_admin_visibility(admin):
+        raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
+    stmt = select(OrgSkillVersion, UserORM.email).outerjoin(
+        UserORM, OrgSkillVersion.author_user_id == UserORM.id
+    )
+    if state is not None:
+        stmt = stmt.where(OrgSkillVersion.state == state)
+    stmt = stmt.order_by(OrgSkillVersion.proposed_at.desc(), OrgSkillVersion.id.desc())
+    rows = (await db.execute(stmt)).all()
+
+    return OrgSkillVersionsListResponse(
+        versions=[_to_org_skill_admin_read(v, author_email=email) for v, email in rows]
+    )
+
+
+@router.post(
+    "/org-skills/{version_id}/approve",
+    response_model=OrgSkillVersionAdminRead,
+    summary="Approve a proposal — pins the immutable snapshot (ADR-F067 D2/D3).",
+    responses={
+        404: {"description": "Version not found"},
+        409: {"description": "Version is not in 'proposed' state"},
+    },
+)
+async def approve_org_skill_version(
+    version_id: _uuid_mod.UUID,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> OrgSkillVersionAdminRead:
+    """POST /api/v1/admin/org-skills/{id}/approve
+
+    409 unless ``state == 'proposed'``. Supersedes any prior ``approved`` row of the same
+    slug in the SAME transaction as the flip (the ``ux_org_skill_versions_slug_approved``
+    partial-unique index would otherwise reject the insert-equivalent update) — the prior
+    row's ``reviewed_*`` fields are left untouched; only its ``state`` moves to
+    ``'superseded'``. Self-approval by the proposing admin is permitted (ADR-F067 D2 —
+    the audit row makes it visible).
+    """
+    if not tenant_admin_visibility(admin):  # ADR-F064: tenant-authored content
+        raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
+    version = await _org_skill_version_for_transition(db, version_id, expected_state="proposed")
+
+    # The partial unique index ux_org_skill_versions_slug_approved permits at most one
+    # 'approved' row per slug. SQLAlchemy flushes same-table UPDATEs in primary-key order, so
+    # demoting the prior approved row and THIS row in one flush could momentarily leave both
+    # 'approved' and trip the index. Lock + demote + FLUSH the prior row to 'superseded' first,
+    # THEN flip this row to 'approved' and flush — the two-step flush the constraint forces.
+    prior = (
+        await db.execute(
+            select(OrgSkillVersion)
+            .where(
+                OrgSkillVersion.slug == version.slug,
+                OrgSkillVersion.state == "approved",
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    superseded_version_no: int | None = None
+    if prior is not None:
+        prior.state = "superseded"
+        superseded_version_no = prior.version_no
+        await db.flush()
+
+    now = datetime.now(UTC)
+    version.state = "approved"
+    version.reviewed_by = admin.id
+    version.reviewed_at = now
+    await db.flush()
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="library.approve",
+        resource_type="org_skill_version",
+        resource_id=str(version.id),
+        request=request,
+        details={
+            "kind": "skill",
+            "key": version.slug,
+            "version": version.version_no,
+            "content_hash": version.content_hash,
+            "size_bytes": content_size_bytes(version.raw_yaml, version.body),
+            "superseded_version": superseded_version_no,
+        },
+    )
+    await db.commit()
+    await db.refresh(version)
+    author_email = await _org_skill_author_email(db, version.author_user_id)
+    return _to_org_skill_admin_read(version, author_email=author_email)
+
+
+@router.post(
+    "/org-skills/{version_id}/reject",
+    response_model=OrgSkillVersionAdminRead,
+    summary="Reject a proposal (ADR-F067 D2/D3).",
+    responses={
+        404: {"description": "Version not found"},
+        409: {"description": "Version is not in 'proposed' state"},
+    },
+)
+async def reject_org_skill_version(
+    version_id: _uuid_mod.UUID,
+    payload: OrgSkillRejectRequest,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> OrgSkillVersionAdminRead:
+    """POST /api/v1/admin/org-skills/{id}/reject — 409 unless ``state == 'proposed'``. The
+    audit row carries ``has_note`` only; the note text itself is never audited (CLAUDE.md's
+    content-free audit contract)."""
+    if not tenant_admin_visibility(admin):  # ADR-F064: tenant-authored content
+        raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
+    version = await _org_skill_version_for_transition(db, version_id, expected_state="proposed")
+
+    version.state = "rejected"
+    version.reviewed_by = admin.id
+    version.reviewed_at = datetime.now(UTC)
+    version.review_note = payload.note
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="library.reject",
+        resource_type="org_skill_version",
+        resource_id=str(version.id),
+        request=request,
+        details={
+            "kind": "skill",
+            "key": version.slug,
+            "version": version.version_no,
+            "content_hash": version.content_hash,
+            "size_bytes": content_size_bytes(version.raw_yaml, version.body),
+            "has_note": payload.note is not None,
+        },
+    )
+    await db.commit()
+    await db.refresh(version)
+    author_email = await _org_skill_author_email(db, version.author_user_id)
+    return _to_org_skill_admin_read(version, author_email=author_email)
+
+
+@router.post(
+    "/org-skills/{version_id}/revoke",
+    response_model=OrgSkillVersionAdminRead,
+    summary="Revoke an approved snapshot (ADR-F067 D3.8 fail-close).",
+    responses={
+        404: {"description": "Version not found"},
+        409: {"description": "Version is not in 'approved' state"},
+    },
+)
+async def revoke_org_skill_version(
+    version_id: _uuid_mod.UUID,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> OrgSkillVersionAdminRead:
+    """POST /api/v1/admin/org-skills/{id}/revoke
+
+    409 unless ``state == 'approved'``. Does NOT delete a matching ``org_library_entries``
+    row (ADR-F067 D3.8) — the runtime fail-closes at ``build_area_inventory`` (a structured
+    warning, not a 500) exactly as it does for a registry-drifted name, and the member
+    Library read shows the now-dangling entry rather than silently vanishing it.
+    """
+    if not tenant_admin_visibility(admin):  # ADR-F064: tenant-authored content
+        raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
+    version = await _org_skill_version_for_transition(db, version_id, expected_state="approved")
+
+    version.state = "revoked"
+    version.revoked_by = admin.id
+    version.revoked_at = datetime.now(UTC)
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="library.revoke",
+        resource_type="org_skill_version",
+        resource_id=str(version.id),
+        request=request,
+        details={
+            "kind": "skill",
+            "key": version.slug,
+            "version": version.version_no,
+            "content_hash": version.content_hash,
+            "size_bytes": content_size_bytes(version.raw_yaml, version.body),
+        },
+    )
+    await db.commit()
+    await db.refresh(version)
+    author_email = await _org_skill_author_email(db, version.author_user_id)
+    return _to_org_skill_admin_read(version, author_email=author_email)

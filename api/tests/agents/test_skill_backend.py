@@ -309,6 +309,113 @@ def test_wiring_registry_none_strips_all_skills() -> None:
     assert "skills" not in wiring.subagents[0]
 
 
+# --- org-authored skill files (ADR-F067 D2/D3) -----------------------------
+
+
+def _org_served_md(
+    slug: str,
+    *,
+    banner: str = "> Provenance: org-authored by a@x.io, approved by b@x.io on 2026-07-08 "
+    "— your company's own material, not LQ-shipped.",
+    body: str = "# Org clause\nUse our house wording.",
+) -> str:
+    """A served org SKILL.md (banner blockquote prefixed to the body) — the exact shape
+    ``served_skill_md`` produces, built directly here since the wiring treats it as opaque."""
+    return reconstruct_skill_md(f"name: {slug}\ndescription: Org skill.", f"{banner}\n\n{body}")
+
+
+def test_wiring_serves_org_file_verbatim_with_windowing() -> None:
+    """An org file (a slug the registry does NOT know) is served byte-for-byte through the
+    read-only backend, and the read_file windowing contract still holds."""
+    org_md = _org_served_md("house-nda")
+    wiring = build_area_skill_wiring(
+        _wiring_registry(),  # does not know house-nda
+        area_skill_names=["house-nda"],
+        subagents=[],  # type: ignore[arg-type]
+        org_skill_files={"house-nda": org_md},
+    )
+    assert wiring.backend is not None
+    assert wiring.main_sources == [SKILLS_ROOT]
+    path = f"{SKILLS_ROOT}/house-nda/SKILL.md"
+    full = wiring.backend.read(path).file_data["content"]  # type: ignore[index]
+    assert full == org_md  # served verbatim (banner + body, unmodified)
+    assert "Provenance: org-authored" in full
+    # Windowing intact: offset+limit slices lines exactly (the StateBackend contract).
+    lines = full.splitlines(keepends=True)
+    windowed = wiring.backend.read(path, offset=1, limit=2).file_data["content"]  # type: ignore[index]
+    assert windowed == "".join(lines[1:3])
+
+
+def test_wiring_subagent_gets_org_sourced_skill() -> None:
+    """A subagent whose declared skill resolves from an org file gets it in its OWN isolated
+    source (⊆ area), exactly as for a registry skill."""
+    org_md = _org_served_md("house-nda")
+    sub = {"name": "researcher", "description": "d", "system_prompt": "p", "skills": ["house-nda"]}
+    wiring = build_area_skill_wiring(
+        _wiring_registry(),
+        area_skill_names=["house-nda"],
+        subagents=[sub],  # type: ignore[arg-type]
+        org_skill_files={"house-nda": org_md},
+    )
+    src = subagent_source_path("researcher")
+    assert wiring.subagents[0]["skills"] == [src]
+    assert wiring.backend is not None
+    assert [e["path"] for e in (wiring.backend.ls(src).entries or [])] == [f"{src}/house-nda"]
+    assert wiring.backend.read(f"{src}/house-nda/SKILL.md").file_data["content"] == org_md  # type: ignore[index]
+
+
+def test_wiring_registry_wins_over_org_file_on_slug_collision() -> None:
+    """No shadowing (D2): if an org file and the registry both claim a slug, the registry
+    (shipped) text is served — the merge order guarantees it even though composition never
+    passes a colliding slug."""
+    registry = _wiring_registry()  # knows nda-review with body "b2"
+    org_md = _org_served_md("nda-review", body="# ORG OVERRIDE\nThis must NOT be served.")
+    wiring = build_area_skill_wiring(
+        registry,
+        area_skill_names=["nda-review"],
+        subagents=[],  # type: ignore[arg-type]
+        org_skill_files={"nda-review": org_md},
+    )
+    assert wiring.backend is not None
+    served = wiring.backend.read(f"{SKILLS_ROOT}/nda-review/SKILL.md").file_data["content"]  # type: ignore[index]
+    assert served == reconstruct_skill_md("name: nda-review\ndescription: d", "b2")
+    assert "ORG OVERRIDE" not in served
+
+
+def test_wiring_org_file_paths_are_read_only() -> None:
+    """The read-only RegistrySkillBackend posture applies identically to org files: every
+    mutation on an org-sourced path is refused."""
+    org_md = _org_served_md("house-nda")
+    wiring = build_area_skill_wiring(
+        _wiring_registry(),
+        area_skill_names=["house-nda"],
+        subagents=[],  # type: ignore[arg-type]
+        org_skill_files={"house-nda": org_md},
+    )
+    assert wiring.backend is not None
+    path = f"{SKILLS_ROOT}/house-nda/SKILL.md"
+    assert wiring.backend.write(path, "x").error == "skills library is read-only"
+    assert wiring.backend.edit(path, "Use", "Abuse").error == "skills library is read-only"
+    assert wiring.backend.upload_files([(path, b"x")])[0].error == "permission_denied"
+
+
+def test_wiring_org_file_only_bound_to_area_is_served() -> None:
+    """Only org files whose slug is area-bound ride the source — an org file for an unbound
+    slug is ignored (the composition seam only ever passes bound+enabled slugs)."""
+    wiring = build_area_skill_wiring(
+        _wiring_registry(),
+        area_skill_names=["house-nda"],
+        subagents=[],  # type: ignore[arg-type]
+        org_skill_files={
+            "house-nda": _org_served_md("house-nda"),
+            "not-bound": _org_served_md("not-bound"),
+        },
+    )
+    assert wiring.backend is not None
+    paths = sorted(e["path"] for e in (wiring.backend.ls(SKILLS_ROOT).entries or []))
+    assert paths == [f"{SKILLS_ROOT}/house-nda"]  # not-bound never enters the source
+
+
 def test_deepagents_loader_parses_our_backend() -> None:
     """deepagents' own skill loader (sync + async) accepts our backend —
     ls + download_files + frontmatter parse round-trip to name/description."""

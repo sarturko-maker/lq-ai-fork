@@ -50,6 +50,7 @@ from app.schemas.matter_capabilities import (
     CapabilityOverridesUpdate,
     CapabilitySectionRead,
 )
+from app.skills.org_proposal import load_approved_org_skill_versions
 from app.skills.registry import MutableSkillRegistry, SkillRegistry
 
 router = APIRouter(prefix="/matters", tags=["matter-capabilities"])
@@ -123,12 +124,18 @@ async def _resolve_inventory(
         .all()
     )
     library_entries = (await db.execute(select(OrgLibraryEntry))).scalars().all()
+    # ADR-F067 D2/D3: the panel must show adopted+bound org-authored skills too, so the
+    # cockpit toggles exactly what the agent gets. Load the APPROVED snapshots (immutable
+    # bytes) and feed them to the same chokepoint; a slug the registry also knows is
+    # shadowed (shipped wins) with a structured warning, never shown twice.
+    org_snapshots = await load_approved_org_skill_versions(db)
     inventory = build_area_inventory(
         bound_skill_names=bound_skill_names,
         registry=_registry_or_none(request),
         area_playbooks=area_playbooks,
         tool_group_keys=tool_group_keys,
         library_entries=library_entries,
+        org_skill_snapshots=org_snapshots,
     )
     return inventory, area.key, area.unit_label
 

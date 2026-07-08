@@ -80,6 +80,8 @@ _PARAM_VALUES: dict[str, str] = {
     "assessment_id": _DUMMY_UUID,
     # COMM C3-UM (fork) — matter-memory retire endpoints (ADR-F042 / F044)
     "entry_id": _DUMMY_UUID,
+    # B-2a (fork) — org-skills harness transitions (ADR-F067 D2/D3)
+    "version_id": _DUMMY_UUID,
 }
 
 
@@ -337,6 +339,14 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # STORE-2 (ADR-F065 D-B) — member-readable Org Library read model. Dedicated
     # coverage in tests/test_library_read_api.py.
     ("GET", "/api/v1/library"),
+    # B-2a (ADR-F067 D2/D3) — org-skills harness: propose + review queue + transitions.
+    # Dedicated coverage in tests/test_org_skill_harness_api.py.
+    ("POST", "/api/v1/user-skills/{skill_id}/propose"),
+    ("GET", "/api/v1/user-skills/{skill_id}/proposals"),
+    ("GET", "/api/v1/admin/org-skills"),
+    ("POST", "/api/v1/admin/org-skills/{version_id}/approve"),
+    ("POST", "/api/v1/admin/org-skills/{version_id}/reject"),
+    ("POST", "/api/v1/admin/org-skills/{version_id}/revoke"),
     # Wave D.2 — sandbox ensure, skills autocomplete, user-skill versions, KB files
     ("POST", "/api/v1/projects/sandbox/ensure"),
     ("GET", "/api/v1/skills/autocomplete"),

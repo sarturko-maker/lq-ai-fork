@@ -37,7 +37,9 @@ from app.api.dependencies import ActiveUser
 from app.db.session import get_db
 from app.models.playbook import Playbook as PlaybookORM
 from app.models.practice_area import OrgLibraryEntry
+from app.skills.org_proposal import load_approved_org_skill_versions
 from app.skills.registry import MutableSkillRegistry, SkillRegistry
+from app.skills.schema import humanise_skill_name
 
 router = APIRouter(prefix="/library", tags=["library"])
 
@@ -113,6 +115,11 @@ async def get_library(
     rows = (await db.execute(select(OrgLibraryEntry))).scalars().all()
     registry = _registry_or_none(request)
     playbooks_by_id = await _live_playbooks_by_id(db)
+    # The shared approved-snapshot reader (ADR-F067). This member-visible read deliberately
+    # exposes NO author identity: below, label/description/source come from the snapshot, but
+    # author/version stay None for an org skill (author IS shown on the admin catalog surface,
+    # already admin/audit territory).
+    org_snapshots_by_slug = await load_approved_org_skill_versions(db)
 
     entries: list[LibraryEntryRead] = []
     for row in rows:
@@ -138,6 +145,16 @@ async def get_library(
                 source = summary.source
                 author = summary.author
                 version = summary.version
+            else:
+                # ADR-F067 D2/D3 — the registry doesn't know this key; an approved
+                # org-skill snapshot might (shipped always wins when both do, so this
+                # branch only reaches an org key when the registry genuinely misses it).
+                # author/version stay None here — this member read exposes no author identity.
+                snap = org_snapshots_by_slug.get(key)
+                if snap is not None:
+                    label = snap.title or humanise_skill_name(key)
+                    description = snap.description
+                    source = "org"
         else:  # KIND_PLAYBOOK
             pb = playbooks_by_id.get(key)
             if pb is not None:

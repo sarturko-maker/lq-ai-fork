@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -376,6 +376,24 @@ class _LibraryEntry(Protocol):
     capability_key: str
 
 
+class _OrgSkillSnapshot(Protocol):
+    """Structural type for an approved ``org_skill_versions`` snapshot (ADR-F067 D2/D3).
+
+    Only the fields the availability chokepoint needs to build a panel entry — the slug
+    (the capability key) plus the display ``title`` / ``description`` helper properties
+    the ORM row exposes over its stored frontmatter. The served bytes (the SKILL.md
+    body + provenance banner) are resolved separately, at the ``build_area_skill_wiring``
+    seam; this protocol carries nothing model-facing."""
+
+    slug: str
+
+    @property
+    def title(self) -> str | None: ...
+
+    @property
+    def description(self) -> str | None: ...
+
+
 @dataclass(frozen=True)
 class CapabilityEntry:
     """One capability the panel can show — available/default/toggleable flags."""
@@ -491,8 +509,9 @@ def build_area_inventory(
     area_playbooks: Sequence[Playbook],
     tool_group_keys: Sequence[str],
     library_entries: Iterable[_LibraryEntry],
+    org_skill_snapshots: Mapping[str, _OrgSkillSnapshot] | None = None,
 ) -> CapabilityInventory:
-    """Compute the area's available capabilities (pure — no I/O). ADR-F054 + ADR-F065.
+    """Compute the area's available capabilities (pure — no I/O). ADR-F054 + ADR-F065 + ADR-F067.
 
     ``bound_skill_names`` are the area's ``practice_area_skills`` rows; a name the
     registry no longer knows is dropped (registry is source of truth — the same drift
@@ -514,10 +533,28 @@ def build_area_inventory(
     a call site that forgot the kwarg would fail CLOSED (nothing adopted ⇒ nothing
     available), but the kwarg is kept REQUIRED anyway so every call site is explicit —
     there is no production site that legitimately passes ``()``.
+
+    ``org_skill_snapshots`` are the org's APPROVED org-authored skill snapshots
+    (``org_skill_versions`` rows with ``state='approved'``), keyed by slug — the D2/D3
+    harness output (ADR-F067). Unlike ``library_entries`` this kwarg is OPTIONAL and
+    defaults to ``{}``: it can only ADD a skill an org authored + adopted + bound, never
+    open anything, so forgetting it fails CLOSED (org skills simply drop; nothing shipped
+    is affected). A bound+adopted skill resolves as an org snapshot ONLY when the
+    filesystem registry does NOT know its slug — the no-shadowing posture (D2): if BOTH
+    know the name the registry (shipped) wins and the org version is ignored with a
+    structured ``org_skill_shadowed_by_shipped`` warning (counts/keys only). A
+    bound+adopted skill the registry AND the snapshots both fail to resolve is dropped
+    fail-closed with a structured ``skill_unresolved_skipped`` warning — the F067 D3.8
+    revoke signal (an approved snapshot that was revoked / superseded is simply absent
+    from the map, so a still-bound revoked skill lands here). That warning also fires for
+    plain registry drift, which was silently dropped before this slice.
     """
     # ADR-F065: the set of (kind, key) the org ADOPTED into its Library. A binding resolves
     # only if it is a member — adopt-in, the inverse of the old disable-out toggle.
     adopted = {(e.capability_kind, e.capability_key) for e in library_entries}
+    # ADR-F067: the approved org-authored snapshots, keyed by slug. None ≡ {} — fail-closed
+    # (forgetting it only drops org skills; see the docstring).
+    snapshots = org_skill_snapshots or {}
 
     entries: list[CapabilityEntry] = []
 
@@ -538,25 +575,70 @@ def build_area_inventory(
             )
         )
 
-    # Skills — area-bound, adopted-into-Library, filtered to the registry's current set
-    # (adoption narrows first; registry drift still drops an adopted-but-gone name).
+    # Skills — area-bound, adopted-into-Library, resolved against the filesystem registry
+    # FIRST (shipped is source of truth), then the approved org snapshots (ADR-F067).
+    # Adoption narrows first; a resolved name still drops if it matches neither source.
+    shadowed_skills: list[str] = []
+    unresolved_skills: list[str] = []
     for name in bound_skill_names:
         if (KIND_SKILL, name) not in adopted:
             continue
+        # Skills resolve ONLY when the registry is live. registry is None ⇒ skills are off
+        # entirely (the UX-B-1/2 baseline); org skills ARE skills, so they fail closed with it
+        # (ADR-F067 — the feature being off never opens an org snapshot). Resolve the display
+        # label/description from whichever source wins, THEN append once (shipped or org share
+        # one entry shape).
         record = registry.get(name) if registry is not None else None
-        if record is None:
+        snapshot = snapshots.get(name) if registry is not None else None
+        if record is not None:
+            # No shadowing (D2): shipped wins on collision. If an org snapshot ALSO claims this
+            # slug the shipped entry is served and the org version is ignored — logged as a
+            # structured warning (never a silent swap).
+            if snapshot is not None:
+                shadowed_skills.append(name)
+            summary = record.summary()
+            label = summary.title or name
+            description = summary.description
+        elif snapshot is not None:
+            label = snapshot.title or name
+            description = snapshot.description
+        else:
+            # Adopted + bound but resolves NOWHERE — registry drift, a revoked/superseded org
+            # snapshot (absent from the map), or the whole skills subsystem being off (registry
+            # None). Fail-closed drop with a structured warning (F067 D3.8 revoke signal); the
+            # pre-slice code dropped registry drift silently.
+            unresolved_skills.append(name)
             continue
-        summary = record.summary()
         entries.append(
             CapabilityEntry(
                 kind=KIND_SKILL,
                 key=name,
-                label=summary.title or name,
-                description=summary.description,
+                label=label,
+                description=description,
                 available=True,
                 default_enabled=True,
                 toggleable=True,
             )
+        )
+
+    if shadowed_skills:
+        logger.warning(
+            "org skill slug collides with a shipped skill; shipped wins (org version ignored)",
+            extra={
+                "event": "org_skill_shadowed_by_shipped",
+                "count": len(shadowed_skills),
+                "keys": sorted(shadowed_skills),
+            },
+        )
+    if unresolved_skills:
+        logger.warning(
+            "adopted+bound skill resolves in neither the registry nor an approved org "
+            "snapshot; dropped from availability (fail-closed)",
+            extra={
+                "event": "skill_unresolved_skipped",
+                "count": len(unresolved_skills),
+                "keys": sorted(unresolved_skills),
+            },
         )
 
     # Tools — the area's rows ∩ registry, iterated in canonical REGISTRY order (D4), so the
