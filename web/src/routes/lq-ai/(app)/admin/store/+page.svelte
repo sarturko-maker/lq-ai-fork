@@ -2,7 +2,8 @@
 	/**
 	 * /lq-ai/admin/store — browse everything LQ.AI Oscar Edition ships
 	 * (STORE-2, ADR-F065). Read side of the Store/Library split: the Store is
-	 * the shipped catalog (skills/tools/playbooks), provenance-labelled,
+	 * the adoptable catalog (skills/tools/playbooks, plus the company's own
+	 * knowledge collections — B-3b, ADR-F067 D1), provenance-labelled,
 	 * read-only. The one write action here is "Add to Library" — removal
 	 * lives on the Library page (D-F confirm), never here.
 	 *
@@ -59,6 +60,9 @@
 	);
 	const playbookEntries = $derived(
 		flat.filter((e) => e.capability_kind === 'playbook' && matchesSearch(e, searchTerm))
+	);
+	const knowledgeEntries = $derived(
+		flat.filter((e) => e.capability_kind === 'knowledge' && matchesSearch(e, searchTerm))
 	);
 
 	function entryId(entry: DeploymentCapabilityRead): string {
@@ -144,7 +148,7 @@
 <PageShell size="wide" data-testid="lq-admin-store-page">
 	<SectionHeader
 		title="Store"
-		subtitle="Everything that ships with LQ.AI Oscar Edition. Add what your company uses to your Library."
+		subtitle="What ships with LQ.AI Oscar Edition, plus your company's own knowledge collections. Add what your company uses to your Library."
 	/>
 	<p class="mt-1 text-sm">
 		<a href="/lq-ai/admin/library" class="underline">Go to your Library</a>
@@ -217,7 +221,7 @@
 				/>
 			</label>
 
-			{#each [{ kind: 'tool', label: 'Tools', entries: toolEntries }, { kind: 'skill', label: 'Skills', entries: skillEntries }, { kind: 'playbook', label: 'Playbooks', entries: playbookEntries }] as section (section.kind)}
+			{#each [{ kind: 'tool', label: 'Tools', entries: toolEntries }, { kind: 'skill', label: 'Skills', entries: skillEntries }, { kind: 'playbook', label: 'Playbooks', entries: playbookEntries }, { kind: 'knowledge', label: 'Knowledge', entries: knowledgeEntries }] as section (section.kind)}
 				<section aria-label={section.label} data-testid={`lq-store-section-${section.kind}`}>
 					<SectionHeader size="section" title={section.label} class="mb-3" />
 					{#if section.entries.length === 0}

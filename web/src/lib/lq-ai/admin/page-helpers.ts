@@ -50,7 +50,7 @@ export interface CatalogOption {
  */
 export function catalogEntriesForKind(
 	catalog: DeploymentCapabilitiesResponse | null,
-	kind: 'skill' | 'tool' | 'playbook'
+	kind: 'skill' | 'tool' | 'playbook' | 'knowledge'
 ): CatalogOption[] {
 	if (!catalog) return [];
 	const section = catalog.sections.find((s) => s.kind === kind);

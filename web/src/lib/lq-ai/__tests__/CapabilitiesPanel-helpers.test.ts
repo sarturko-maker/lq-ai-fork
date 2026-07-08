@@ -76,6 +76,7 @@ describe('emptyCaption', () => {
 		expect(emptyCaption(section('playbook', []))).toMatch(/no playbooks/i);
 		expect(emptyCaption(section('skill', []))).toMatch(/no skills/i);
 		expect(emptyCaption(section('tool', []))).toMatch(/no tools/i);
+		expect(emptyCaption(section('knowledge', []))).toMatch(/no knowledge collections/i);
 	});
 	it('returns null for a populated non-mcp section', () => {
 		expect(emptyCaption(section('tool', [entry()]))).toBeNull();

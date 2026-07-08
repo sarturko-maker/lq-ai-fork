@@ -24,7 +24,7 @@ import { apiRequest } from './client';
  * the content.
  */
 export interface LibraryEntry {
-	kind: 'skill' | 'tool' | 'playbook';
+	kind: 'skill' | 'tool' | 'playbook' | 'knowledge';
 	key: string;
 	label: string | null;
 	description: string | null;

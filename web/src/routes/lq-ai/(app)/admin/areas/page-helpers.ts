@@ -45,14 +45,19 @@ function pluralize(count: number, noun: string): string {
 	return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
-/** "3 skills · 1 playbook · 2 groups" — a scannable bound-capability summary. */
+/** "3 skills · 1 playbook · 2 groups · 1 collection" — a scannable
+ *  bound-capability summary. */
 export function boundCountsLabel(
-	area: Pick<PracticeArea, 'bound_skills' | 'bound_playbooks' | 'bound_tool_groups'>
+	area: Pick<
+		PracticeArea,
+		'bound_skills' | 'bound_playbooks' | 'bound_tool_groups' | 'bound_knowledge_bases'
+	>
 ): string {
 	return [
 		pluralize(area.bound_skills.length, 'skill'),
 		pluralize(area.bound_playbooks.length, 'playbook'),
-		pluralize(area.bound_tool_groups.length, 'group')
+		pluralize(area.bound_tool_groups.length, 'group'),
+		pluralize(area.bound_knowledge_bases.length, 'collection')
 	].join(' · ');
 }
 

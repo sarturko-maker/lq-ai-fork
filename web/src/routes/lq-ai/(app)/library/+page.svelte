@@ -36,7 +36,8 @@
 	const SECTIONS = [
 		{ kind: 'tool' as const, label: 'Tools' },
 		{ kind: 'skill' as const, label: 'Skills' },
-		{ kind: 'playbook' as const, label: 'Playbooks' }
+		{ kind: 'playbook' as const, label: 'Playbooks' },
+		{ kind: 'knowledge' as const, label: 'Knowledge' }
 	];
 
 	let entries = $state<LibraryEntry[]>([]);
@@ -105,7 +106,9 @@
 											{#if entry.label === null}
 												<p class="text-sm font-medium text-foreground">{entry.key}</p>
 												<p class="mt-0.5 text-xs text-muted-foreground">
-													No longer in the shipped catalog.
+													{entry.kind === 'knowledge'
+														? 'This collection was archived by its owner — agents no longer search it.'
+														: 'No longer in the shipped catalog.'}
 												</p>
 											{:else}
 												{#if entry.kind === 'skill'}
