@@ -17,6 +17,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { auditLogApi } from '$lib/lq-ai/api';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import type { AuditLogEntry, AuditLogFilters } from '$lib/lq-ai/api/auditLog';
@@ -115,7 +116,7 @@
 </script>
 
 <svelte:head>
-	<title>Audit log — LQ.AI Oscar Edition admin</title>
+	<title>{$titleFor('Audit log', 'admin')}</title>
 </svelte:head>
 
 <div class="p-4 max-w-7xl mx-auto" data-testid="lq-ai-admin-audit-log">

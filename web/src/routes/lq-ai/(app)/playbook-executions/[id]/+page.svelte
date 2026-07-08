@@ -2,6 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { page } from '$app/stores';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { getPlaybook, getPlaybookExecution } from '$lib/lq-ai/api/playbooks';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import PlaybookDisclaimerBanner from '$lib/lq-ai/components/PlaybookDisclaimerBanner.svelte';
@@ -80,7 +81,7 @@
 </script>
 
 <svelte:head>
-	<title>Playbook execution · LQ.AI Oscar Edition</title>
+	<title>{$titleFor('Playbook execution', 'dot')}</title>
 </svelte:head>
 
 <section class="lq-pbx-page">

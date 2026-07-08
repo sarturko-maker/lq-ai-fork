@@ -2,7 +2,9 @@
 	import { goto } from '$app/navigation';
 
 	import { authApi, bootstrapApi } from '$lib/lq-ai/api';
+	import { logoUrl } from '$lib/lq-ai/api/branding';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
+	import { branding } from '$lib/lq-ai/branding/store';
 	import DualBrandingFooter from '$lib/lq-ai/components/DualBrandingFooter.svelte';
 
 	let email = '';
@@ -86,15 +88,33 @@
 			class="lq-form-card max-w-sm w-full space-y-3"
 			on:submit|preventDefault={submit}
 		>
+			<!-- BRAND-1b (ADR-F068): the hero is the first thing a white-labeled
+			     tenant sees — logo (or the name's initial) in the tile, the
+			     product name in the h1. Default install keeps the LQ tile and
+			     the "Sign in to LQ.AI" short mark (the #214 prose policy). -->
 			<div class="flex items-center gap-2">
-				<span
-					class="inline-flex items-center justify-center h-9 w-9 rounded bg-indigo-600 text-white font-semibold"
-				>
-					LQ
-				</span>
+				{#if $branding.logoVersion !== null}
+					<img
+						src={logoUrl($branding.logoVersion)}
+						alt=""
+						class="h-9 w-9 rounded object-contain"
+					/>
+				{:else}
+					<span
+						class="inline-flex items-center justify-center h-9 w-9 rounded bg-indigo-600 text-white font-semibold"
+					>
+						{$branding.customName ? $branding.productName.charAt(0).toUpperCase() : 'LQ'}
+					</span>
+				{/if}
 				<div>
-					<h1 class="lq-text-page-h">Sign in to LQ.AI</h1>
-					<p class="lq-text-caption" style="color: var(--lq-text-tertiary);">Open-Source Legal AI</p>
+					<h1 class="lq-text-page-h">
+						Sign in to {$branding.customName ? $branding.productName : 'LQ.AI'}
+					</h1>
+					{#if !$branding.customName}
+						<p class="lq-text-caption" style="color: var(--lq-text-tertiary);">
+							Open-Source Legal AI
+						</p>
+					{/if}
 				</div>
 			</div>
 

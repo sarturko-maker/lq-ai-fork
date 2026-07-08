@@ -17,6 +17,7 @@
 	import { afterNavigate, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { authApi } from '$lib/lq-ai/api';
 	import {
 		PASSWORD_MIN_LENGTH,
@@ -103,7 +104,7 @@
 </script>
 
 <svelte:head>
-	<title>Reset password — LQ.AI Oscar Edition</title>
+	<title>{$titleFor('Reset password')}</title>
 </svelte:head>
 
 <div

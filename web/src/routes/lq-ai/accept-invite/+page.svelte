@@ -15,6 +15,7 @@
 	import { afterNavigate, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { authApi } from '$lib/lq-ai/api';
 	import type { AcceptInviteResponse } from '$lib/lq-ai/types';
 	import {
@@ -83,7 +84,7 @@
 </script>
 
 <svelte:head>
-	<title>Accept invitation — LQ.AI Oscar Edition</title>
+	<title>{$titleFor('Accept invitation')}</title>
 </svelte:head>
 
 <div

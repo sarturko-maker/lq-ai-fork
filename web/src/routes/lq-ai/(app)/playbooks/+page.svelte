@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { listPlaybooks } from '$lib/lq-ai/api/playbooks';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import PlaybookDisclaimerBanner from '$lib/lq-ai/components/PlaybookDisclaimerBanner.svelte';
@@ -42,7 +43,7 @@
 </script>
 
 <svelte:head>
-	<title>Playbooks · LQ.AI Oscar Edition</title>
+	<title>{$titleFor('Playbooks', 'dot')}</title>
 </svelte:head>
 
 <PageShell size="wide" pad="compact">

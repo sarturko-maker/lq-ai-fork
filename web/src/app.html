@@ -37,6 +37,94 @@
 					if (localStorage.getItem('theme') === 'system') apply(event.matches);
 				});
 			})();
+			// BRAND-1b (ADR-F068) — paint the cached deployment branding before
+			// first paint, mirroring the theme pattern above: title, a dual-scope
+			// <style id="lq-branding"> tag (:root:root{} + :root.dark{} — the
+			// DOUBLED (0,2,0) specificity is load-bearing: this tag precedes the
+			// app stylesheet in <head>, and app.css's unlayered :root/.dark token
+			// blocks (0,1,0) would otherwise win the cascade by order and revert
+			// a cached palette to the shipped defaults on every warm load. NEVER
+			// inline custom properties on <html> either — they'd outrank the
+			// dark block and break theme switching), and the favicon when a
+			// raster logo is set. localStorage is attacker-influenceable
+			// (extension/other-XSS), so EVERY key/value is re-validated here
+			// against the closed 7-token allowlist and the #RRGGBB shape — keep
+			// in sync with `lib/lq-ai/branding/store.ts` (drift-guarded by
+			// `lib/lq-ai/branding/__tests__/store.test.ts`), which reconciles
+			// from the unauth GET /branding after mount. The very first visit
+			// has no cache and paints the default brand until that fetch
+			// returns (accepted — same class as the theme flash pattern).
+			(() => {
+				try {
+					const raw = localStorage.getItem('branding');
+					if (!raw) return;
+					const cached = JSON.parse(raw);
+					if (!cached || typeof cached !== 'object') return;
+					if (
+						typeof cached.name === 'string' &&
+						cached.name.length > 0 &&
+						cached.name.length <= 80 &&
+						// eslint-disable-next-line no-control-regex
+						!/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(cached.name)
+					) {
+						document.title = cached.name;
+					}
+					const TOKENS = {
+						brand: '--brand',
+						brand_foreground: '--brand-foreground',
+						ring: '--ring',
+						sidebar_ring: '--sidebar-ring',
+						status_running: '--status-running',
+						status_running_wash: '--status-running-wash',
+						chart_1: '--chart-1'
+					};
+					const HEX = /^#[0-9a-fA-F]{6}$/;
+					const decls = (theme) => {
+						const palette = cached.palette;
+						const src =
+							palette && typeof palette === 'object' && !Array.isArray(palette)
+								? palette[theme]
+								: null;
+						if (!src || typeof src !== 'object' || Array.isArray(src)) return '';
+						let out = '';
+						for (const key of Object.keys(TOKENS)) {
+							const value = src[key];
+							if (typeof value === 'string' && HEX.test(value)) {
+								out += TOKENS[key] + ':' + value + ';';
+							}
+						}
+						return out;
+					};
+					const light = decls('light');
+					const dark = decls('dark');
+					if (light || dark) {
+						const style = document.createElement('style');
+						style.id = 'lq-branding';
+						style.textContent = ':root:root{' + light + '}\n:root.dark{' + dark + '}';
+						document.head.appendChild(style);
+					}
+					if (
+						typeof cached.logoVersion === 'number' &&
+						Number.isInteger(cached.logoVersion) &&
+						cached.logoVersion > 0
+					) {
+						const link = document.querySelector('link[rel="icon"]');
+						if (link) {
+							// The server only ever stores sniffed PNG/JPEG/WEBP bytes —
+							// raster by construction, so pointing the icon at the unauth
+							// logo endpoint is safe. No logo ⇒ default favicon.svg stays.
+							link.href =
+								('%sveltekit.env.PUBLIC_LQ_AI_API_BASE_URL%' || '/api/v1') +
+								'/branding/logo?v=' +
+								encodeURIComponent(String(cached.logoVersion));
+							link.removeAttribute('type');
+						}
+					}
+				} catch {
+					// Corrupt cache — the default brand paints; refreshBranding()
+					// rewrites the cache after the GET /branding round-trip.
+				}
+			})();
 		</script>
 		%sveltekit.head%
 	</head>

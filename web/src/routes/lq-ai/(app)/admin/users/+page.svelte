@@ -21,6 +21,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { adminApi } from '$lib/lq-ai/api';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import type { AdminUserRow, InviteResponse, InviteRow, UserRole } from '$lib/lq-ai/types';
@@ -263,7 +264,7 @@
 </script>
 
 <svelte:head>
-	<title>Users — LQ.AI Oscar Edition admin</title>
+	<title>{$titleFor('Users', 'admin')}</title>
 </svelte:head>
 
 {#snippet acceptUrlPanel(invite: InviteResponse)}

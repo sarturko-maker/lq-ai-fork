@@ -11,6 +11,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { adminApi, libraryApi, practiceAreasApi } from '$lib/lq-ai/api';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import type { LibraryEntry } from '$lib/lq-ai/api/library';
@@ -107,7 +108,7 @@
 </script>
 
 <svelte:head>
-	<title>Library — LQ.AI Oscar Edition admin</title>
+	<title>{$titleFor('Library', 'admin')}</title>
 </svelte:head>
 
 <PageShell size="wide" data-testid="lq-admin-library-page">

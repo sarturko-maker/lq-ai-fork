@@ -15,6 +15,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { adminApi, practiceAreasApi } from '$lib/lq-ai/api';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import type { DeploymentCapabilitiesResponse } from '$lib/lq-ai/api/admin';
@@ -309,7 +310,7 @@
 </script>
 
 <svelte:head>
-	<title>{area ? `${area.name} — ` : ''}Practice area — LQ.AI Oscar Edition admin</title>
+	<title>{$titleFor(`${area ? `${area.name} — ` : ''}Practice area`, 'admin')}</title>
 </svelte:head>
 
 <PageShell size="wide" data-testid="lq-admin-area-page">

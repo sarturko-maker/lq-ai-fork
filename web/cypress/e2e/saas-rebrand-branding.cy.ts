@@ -6,6 +6,14 @@
  * header wordmark, DualBrandingFooter) plus one per-page title as the
  * pattern representative. Deliberately does NOT assert running-prose
  * mentions — bare "LQ.AI" is the retained short mark there by policy.
+ *
+ * BRAND-1b (ADR-F068): these DEFAULT-brand pins still hold on a fresh
+ * install — an unbranded deployment renders the identical strings (the
+ * $titleFor helper reproduces them byte-for-byte and the header/footer keep
+ * the default lockup when no custom name is set). CUSTOM-brand assertions
+ * are covered by the API-driven flow instead (PUT /api/v1/branding via the
+ * admin Branding page, then live verification of header/footer/title/login),
+ * not by this spec — a custom name here would break the fresh-install pins.
  */
 import { login } from '../support/lq-ai-helpers';
 

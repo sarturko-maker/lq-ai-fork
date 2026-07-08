@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
+	import { titleFor } from '$lib/lq-ai/branding/store';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import {
 		listKnowledgeBases,
@@ -267,7 +268,7 @@
 </script>
 
 <svelte:head>
-	<title>New Tabular Review · LQ.AI Oscar Edition</title>
+	<title>{$titleFor('New Tabular Review', 'dot')}</title>
 </svelte:head>
 
 <section class="lq-tabwiz">
