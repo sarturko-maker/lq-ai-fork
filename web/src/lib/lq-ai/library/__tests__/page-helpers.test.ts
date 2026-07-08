@@ -25,6 +25,7 @@ function entry(over: Partial<LibraryEntry> = {}): LibraryEntry {
 		source: 'built-in',
 		author: null,
 		version: null,
+		approver: null,
 		adopted_at: '2026-07-06T00:00:00Z',
 		...over
 	};
@@ -63,6 +64,37 @@ describe('provenanceBadge', () => {
 
 	it('falls back to the raw source string for an unmapped value', () => {
 		expect(provenanceBadge({ source: 'exotic', author: null, version: null })).toBe('exotic');
+	});
+
+	// B-2b (ADR-F067 D2/D3, D3.5 wire gap) — org-authored provenance badge.
+	it('renders "Org-authored · {author} · approved by {approver}" for an org skill', () => {
+		expect(
+			provenanceBadge({ source: 'org', author: 'Jamie Tso', approver: 'Alex Admin' })
+		).toBe('Org-authored · Jamie Tso · approved by Alex Admin');
+	});
+
+	it('omits the approved-by clause when approver is absent', () => {
+		expect(provenanceBadge({ source: 'org', author: 'Jamie Tso', approver: null })).toBe(
+			'Org-authored · Jamie Tso'
+		);
+	});
+
+	it('omits author when absent (the member Library read never carries org author)', () => {
+		expect(provenanceBadge({ source: 'org', author: null, approver: 'Alex Admin' })).toBe(
+			'Org-authored · approved by Alex Admin'
+		);
+	});
+
+	it('renders the bare source label when neither author nor approver is present', () => {
+		expect(provenanceBadge({ source: 'org', author: null, approver: null })).toBe(
+			'Org-authored'
+		);
+	});
+
+	it('never appends a version bit for an org skill even when version is present', () => {
+		expect(
+			provenanceBadge({ source: 'org', author: 'Jamie Tso', version: '1.0.0', approver: null })
+		).toBe('Org-authored · Jamie Tso');
 	});
 });
 

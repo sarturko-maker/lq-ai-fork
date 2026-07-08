@@ -16,6 +16,12 @@ import { apiRequest } from './client';
  * catalog) — render the bare key with an honest "no longer in the shipped
  * catalog" note rather than guessing a label. There is deliberately no
  * `adopted_by` field on this member-visible surface.
+ *
+ * `approver` (B-2b, D3.5 wire gap): for a `source === "org"` skill entry, the
+ * approving admin's email; `null` otherwise. `author` deliberately stays
+ * `null` for org skills here (unchanged from B-2a) — this member-visible read
+ * still exposes no AUTHOR identity, only that an admin reviewed and approved
+ * the content.
  */
 export interface LibraryEntry {
 	kind: 'skill' | 'tool' | 'playbook';
@@ -25,6 +31,7 @@ export interface LibraryEntry {
 	source: string | null;
 	author: string | null;
 	version: string | null;
+	approver: string | null;
 	adopted_at: string;
 }
 

@@ -21,23 +21,36 @@ const SOURCE_LABELS: Record<string, string> = {
 	'built-in': 'LQ built-in',
 	community: 'Community',
 	user: 'Your team',
-	team: 'Your team'
+	team: 'Your team',
+	// B-2b (ADR-F067 D2/D3): an approved org-authored skill snapshot.
+	org: 'Org-authored'
 };
 
 /**
  * A provenance badge string, e.g. "LQ built-in", "Community · Jamie Tso ·
- * v1.0.0" — `null` when there's nothing to show (no `source`, which is the
- * dangling-entry case AND the "playbooks carry no provenance field" case,
- * D-A). Author/version are appended only when present.
+ * v1.0.0", "Org-authored · Jamie Tso · approved by Alex Admin" — `null` when
+ * there's nothing to show (no `source`, which is the dangling-entry case AND
+ * the "playbooks carry no provenance field" case, D-A).
+ *
+ * `source === 'org'` (B-2b, D3.5) renders "Org-authored · {author} ·
+ * approved by {approver}" — author and the approver clause are each appended
+ * only when present (a member-visible Library row carries `approver` but not
+ * `author`, so it renders "Org-authored · approved by {approver}"). Every
+ * other source keeps the original author/version format.
  */
 export function provenanceBadge(entry: {
 	source?: string | null;
 	author?: string | null;
 	version?: string | null;
+	approver?: string | null;
 }): string | null {
 	if (!entry.source) return null;
 	const bits = [SOURCE_LABELS[entry.source] ?? entry.source];
 	if (entry.author) bits.push(entry.author);
+	if (entry.source === 'org') {
+		if (entry.approver) bits.push(`approved by ${entry.approver}`);
+		return bits.join(' · ');
+	}
 	// derive_summary never sends null for a resolvable skill — a versionless one
 	// arrives as the sentinel "unversioned" (D-E), which must not render as
 	// "vunversioned" (review fix, STORE-2).
