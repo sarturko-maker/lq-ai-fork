@@ -231,11 +231,18 @@ async def test_chat_completion_uses_deployment_scoped_url() -> None:
 
 @pytest.mark.unit
 async def test_chat_completion_strips_lq_ai_extension_keys() -> None:
-    """M2-E1: LQ.AI extension fields must not leak to Azure either.
+    """M2-E1 / GW-STRIP: LQ.AI-internal fields must not leak to Azure.
 
     Azure mirrors OpenAI's body validation — unknown fields produce a
     400. The strip happens in ``_to_openai_request`` which the Azure
     subclass reuses verbatim; this test pins that the path is exercised.
+
+    ``lq_ai_file_ids`` is the GW-STRIP regression: it was added to the
+    request schema but forgotten in the old exact-name blocklist, so a
+    chat request leaked it to Azure → ``Unknown parameter: 'lq_ai_file_ids'``
+    (HTTP 400). ``lq_ai_future_marker`` stands in for ANY not-yet-invented
+    ``lq_ai_*`` field — the prefix strip must drop it too, proving the
+    class is closed and a new field can never re-leak by omission.
     """
 
     payload = {
@@ -259,6 +266,8 @@ async def test_chat_completion_strips_lq_ai_extension_keys() -> None:
         skill_name="nda-review",
         lq_ai_skills=["nda-review"],
         lq_ai_chat_id="11111111-1111-1111-1111-111111111111",
+        lq_ai_file_ids=["doc-1", "doc-2"],
+        lq_ai_future_marker="not-yet-invented",
     )
     with respx.mock(base_url=AZURE_BASE) as router:
         route = router.post(AZURE_CHAT_PATH).mock(return_value=httpx.Response(200, json=payload))
@@ -280,8 +289,14 @@ async def test_chat_completion_strips_lq_ai_extension_keys() -> None:
         "skill_name",
         "lq_ai_skills",
         "lq_ai_chat_id",
+        "lq_ai_file_ids",
+        "lq_ai_future_marker",
     ):
         assert forbidden not in sent, f"LQ.AI extension {forbidden!r} leaked to Azure"
+    # No ``lq_ai_*`` key survives at all — the whole namespace is stripped.
+    assert not any(k.startswith("lq_ai_") for k in sent), (
+        f"an lq_ai_* key leaked to Azure: {sorted(k for k in sent if k.startswith('lq_ai_'))}"
+    )
     # Body still carries the provider-native deployment-id under "model".
     assert sent["model"] == AZURE_DEPLOYMENT
 
