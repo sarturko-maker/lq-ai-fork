@@ -147,17 +147,76 @@ providers:
     base_url: https://${AZURE_OPENAI_RESOURCE:-disabled}.openai.azure.com
     api_key_env: AZURE_OPENAI_API_KEY
     # api_version pins which Azure-side features are available (Azure rolls
-    # capabilities in/out per version). Bump to a newer GA version
-    # ('2024-10-21' or later) for current chat-completion features.
-    api_version: '2024-08-01-preview'
+    # capabilities in/out per version). '2024-10-21' is the documented GA
+    # data-plane version for the classic deployments route (see the Azure
+    # OpenAI api-version lifecycle page:
+    # https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle).
+    api_version: '2024-10-21'
     tier: 3  # Azure OpenAI under enterprise agreement (ZDR + BAA)
     # CRITICAL: each entry is the Azure DEPLOYMENT-ID (operator-named in
     # the Azure portal), NOT the underlying model name. Many operators
     # run multiple deployments of the same model with different SKUs;
     # the gateway routes by deployment-id via the alias map below.
+    # GPT deployments are agent-capable today: the azure_openai adapter
+    # forwards tools / tool_calls with full OpenAI wire parity.
     models:
       - gpt-4-turbo-prod       # e.g., a deployment of gpt-4-turbo
       - gpt-4o-prod            # e.g., a deployment of gpt-4o
+
+  - name: azure-claude
+    type: anthropic
+    # AZ-CONFIG (docs/fork/plans/AZURE-FOUNDRY-phase1.md §b): Claude on
+    # Azure AI Foundry speaks the NATIVE Anthropic Messages API at
+    #   https://<your-resource>.services.ai.azure.com/anthropic/v1/messages
+    # so the existing `anthropic` adapter works unchanged for chat — it
+    # appends /v1/messages to base_url and already sends the x-api-key and
+    # anthropic-version: 2023-06-01 headers Foundry expects.
+    #
+    # REGION: the Foundry resource must live in East US2 or Sweden Central
+    # (Claude's region restriction — the binding one across model families).
+    #
+    # TEXT-ONLY for now: the anthropic adapter does not forward `tools`
+    # (tool-call translation lands in slice AZ-2b). Do NOT point an
+    # agent-facing alias at this provider until AZ-2b ships; chat aliases
+    # are fine.
+    #
+    # `:-` default lets the gateway load without a Foundry resource
+    # configured; operators set AZURE_ANTHROPIC_RESOURCE in their .env.
+    base_url: https://${AZURE_ANTHROPIC_RESOURCE:-disabled}.services.ai.azure.com/anthropic
+    api_key_env: AZURE_ANTHROPIC_API_KEY
+    tier: 3  # routes through the customer's Azure tenant (enterprise posture)
+    # Model entries are Azure DEPLOYMENT names. A Foundry deployment name
+    # DEFAULTS to the Anthropic model id (as below) but is operator-
+    # customizable — list whatever you named your deployments.
+    models:
+      - claude-sonnet-5
+      - claude-opus-4-8
+
+  - name: azure-mistral
+    type: azure_openai
+    # AZ-CONFIG (docs/fork/plans/AZURE-FOUNDRY-phase1.md §c): Azure AI
+    # Foundry serves non-OpenAI "Foundry Models" (Mistral, DeepSeek, ...)
+    # on the classic AOAI deployments route of the services.ai.azure.com
+    # host —
+    #   https://<your-resource>.services.ai.azure.com/openai/deployments/
+    #     <deployment>/chat/completions?api-version=...
+    # — which the azure_openai adapter already speaks byte-for-byte
+    # (deployment-scoped path + ?api-version= + api-key header).
+    #
+    # The legacy /models Model-Inference route is deliberately NOT used:
+    # its SDK retires 2026-08-26 and Microsoft's migration guide moves
+    # everything to the OpenAI-compatible routes.
+    #
+    # TOOL CALLING: of the Mistral family on Azure, Large-3 is the
+    # agent-capable flagship pick; mistral-medium-3-5 and Codestral-2501
+    # have NO tool calling there (per MS Learn, even though Mistral's own
+    # platform has function calling) — only Large-3 backs an agent alias.
+    base_url: https://${AZURE_FOUNDRY_RESOURCE:-disabled}.services.ai.azure.com
+    api_key_env: AZURE_FOUNDRY_API_KEY
+    api_version: '2024-10-21'  # same classic GA data-plane version as azure-openai
+    tier: 3  # routes through the customer's Azure tenant (enterprise posture)
+    models:
+      - Mistral-Large-3        # Azure DEPLOYMENT name (case-sensitive)
 
   # --- Local providers (Tier 1) ---
 
@@ -261,6 +320,33 @@ model_aliases:
       model: qwen3.5:9b
     fallback: []
 
+  # --- Azure AI Foundry aliases (AZ-CONFIG) — commented out so the shipped
+  # example resolves every alias to a reachable-by-default provider. A live
+  # alias to a ${VAR:-disabled} provider DOES parse and boot (the gateway
+  # skips key-less providers with a warning and 503s requests routed to
+  # them), but it would also surface in every fresh deployment's model
+  # picker; uncomment after setting the AZURE_* env vars instead.
+  #
+  # azure-smart:
+  #   primary:
+  #     provider: azure-openai
+  #     model: gpt-4o-prod            # your GPT deployment name
+  #   fallback: []
+  #
+  # azure-mistral-large:
+  #   primary:
+  #     provider: azure-mistral
+  #     model: Mistral-Large-3        # has tool calling on Azure — agent-capable
+  #   fallback: []
+  #
+  # azure-claude-chat:
+  #   primary:
+  #     provider: azure-claude
+  #     model: claude-sonnet-5        # your Claude deployment name
+  #   fallback: []
+  #   # WARNING: chat only — the anthropic adapter is TEXT-ONLY until
+  #   # slice AZ-2b adds tool translation. Do not use as an agent model.
+
   # The 'embedding' alias is the alias the backend's KB layer (C6)
   # asks the gateway to dispatch. Per ADR 0008 the default points at
   # OpenAI's text-embedding-3-small (1536-dim — matches the
@@ -274,6 +360,21 @@ model_aliases:
       provider: openai-prod
       model: text-embedding-3-small
     fallback: []
+
+  # Azure-managed embeddings variant (AZ-CONFIG; AZ-4 is PARKED — the
+  # in-process local embedder stays the deployment default, so this is
+  # reference-only). Operators who want gateway "Door B" embeddings
+  # (EMBEDDING_PROVIDER=gateway) served from their Azure tenant repoint
+  # the 'embedding' alias at an azure-openai text-embedding-3 DEPLOYMENT;
+  # the azure_openai adapter already speaks the embeddings route and
+  # forwards the `dimensions` parameter, which must match the pgvector
+  # column dimension (EMBEDDING_DIM; see .env.example).
+  #
+  # embedding:
+  #   primary:
+  #     provider: azure-openai
+  #     model: text-embedding-3-small-prod   # your embedding deployment name
+  #   fallback: []
 
 # ============================================================
 # INFERENCE TIERS — derivation overrides (PRD §1.5.2 / §3.13)
@@ -309,9 +410,17 @@ inference_tiers:
     ollama: 1            # fully local — Mode 2 (air-gap-capable)
     vllm: 1              # fully local
     openai_compatible: 1 # local inference servers (vLLM, llama.cpp wrappers)
-  # overrides:
-  #   anthropic-prod/claude-opus-4-7: 3  # if operator has a ZDR addendum
-  #
+  overrides:
+    # azure-claude is anthropic-TYPE, so ``defaults.anthropic: 4`` above
+    # would shadow the provider entry's ``tier: 3`` (resolution step 3
+    # beats step 4). This provider-name override (step 2) keeps the real
+    # posture: Claude-on-Foundry routes through the customer's Azure
+    # tenant — Tier 3, same as azure-openai / azure-mistral (whose
+    # ``defaults.azure_openai: 3`` already agrees). Inert until the
+    # AZURE_ANTHROPIC_* env vars enable the provider.
+    azure-claude: 3
+    # anthropic-prod/claude-opus-4-7: 3  # if operator has a ZDR addendum
+
   # Tier-1 placement for the Mode-2 aliases is inherited from
   # ``defaults.ollama: 1`` above — no override needed. The PRD §1.5.2
   # framing for Tier 1 ("Local-only inference (air-gap-capable). No
@@ -522,6 +631,20 @@ cost_tracking:
     'openai-prod/text-embedding-3-large':
       input_per_mtok: 0.13
       output_per_mtok: 0.0
+    # Azure AI Foundry rates (AZ-CONFIG) — keys are '<provider>/<DEPLOYMENT
+    # name>', so they must match YOUR deployment names above. Azure prices
+    # per-region/per-SKU; fill in the rates from your Azure price sheet.
+    # Rates are optional per model: a missing row means cost_estimate is
+    # NULL for that model (no crash).
+    # 'azure-openai/gpt-4o-prod':
+    #   input_per_mtok: 0.00   # fill from your Azure price sheet
+    #   output_per_mtok: 0.00
+    # 'azure-claude/claude-sonnet-5':
+    #   input_per_mtok: 0.00
+    #   output_per_mtok: 0.00
+    # 'azure-mistral/Mistral-Large-3':
+    #   input_per_mtok: 0.00
+    #   output_per_mtok: 0.00
 
   # Optional: budget alerts
   budget_alerts:

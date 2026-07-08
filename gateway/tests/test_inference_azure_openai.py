@@ -31,7 +31,7 @@ EXAMPLE_CONFIG = REPO_ROOT / "gateway.yaml.example"
 
 # Must match gateway.yaml.example's azure-openai provider entry.
 AZURE_RESOURCE = "test-openai"
-AZURE_API_VERSION = "2024-08-01-preview"
+AZURE_API_VERSION = "2024-10-21"
 AZURE_DEPLOYMENT = "gpt-4o-prod"
 AZURE_UPSTREAM_URL = (
     f"https://{AZURE_RESOURCE}.openai.azure.com"

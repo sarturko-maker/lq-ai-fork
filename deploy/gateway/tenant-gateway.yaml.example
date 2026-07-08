@@ -61,6 +61,47 @@ providers:
       - claude-sonnet-4-6
       - claude-haiku-4-5
 
+  # ----------------------------------------------------------
+  # Azure AI Foundry — uncomment to enable (AZ-CONFIG).
+  # ----------------------------------------------------------
+  # Full commentary lives in the repo-root gateway.yaml.example. Model
+  # entries are Azure DEPLOYMENT names; the AZURE_* env vars come from the
+  # node's .env.prod via compose (never inline here). tier: 3 = routes
+  # through the customer's Azure tenant (enterprise posture).
+  #
+  # - name: azure-openai
+  #   type: azure_openai
+  #   base_url: https://${AZURE_OPENAI_RESOURCE:-disabled}.openai.azure.com
+  #   api_key_env: AZURE_OPENAI_API_KEY
+  #   api_version: '2024-10-21'  # classic GA data-plane version
+  #   tier: 3
+  #   models:
+  #     - gpt-4o-prod            # your GPT deployment name (agent-capable)
+  #
+  # # Claude via Foundry — native Anthropic Messages route. Resource region
+  # # must be East US2 or Sweden Central. TEXT-ONLY until slice AZ-2b adds
+  # # tool translation — do not alias as an agent model.
+  # - name: azure-claude
+  #   type: anthropic
+  #   base_url: https://${AZURE_ANTHROPIC_RESOURCE:-disabled}.services.ai.azure.com/anthropic
+  #   api_key_env: AZURE_ANTHROPIC_API_KEY
+  #   tier: 3
+  #   models:
+  #     - claude-sonnet-5        # deployment name (defaults to the Anthropic model id)
+  #
+  # # Non-OpenAI Foundry Models on the classic deployments route (the legacy
+  # # /models Model-Inference route is deliberately not used — SDK retires
+  # # 2026-08-26). Large-3 is the agent-capable Mistral pick on Azure
+  # # (medium-3-5 and Codestral-2501 lack tool calling there).
+  # - name: azure-mistral
+  #   type: azure_openai
+  #   base_url: https://${AZURE_FOUNDRY_RESOURCE:-disabled}.services.ai.azure.com
+  #   api_key_env: AZURE_FOUNDRY_API_KEY
+  #   api_version: '2024-10-21'
+  #   tier: 3
+  #   models:
+  #     - Mistral-Large-3        # deployment name (case-sensitive)
+
 # ============================================================
 # MODEL ALIASES — friendly names the skills + chat UI reference.
 # ============================================================
