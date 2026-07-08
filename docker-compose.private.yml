@@ -1,0 +1,103 @@
+# LQ.AI — private-profile compose OVERLAY (P-1, ADR-F070)
+#
+# The restricted-egress posture of self-host mode (ADR-F058): the SAME pinned
+# prod images with NO public URL and NO external S3 — on-box MinIO for object
+# storage, Caddy serving internal TLS on loopback, access via SSH tunnel.
+# For locked-down environments where external integrations are signoff-gated.
+#
+# This file is an ADDITIVE overlay on docker-compose.prod.yml (which stays
+# byte-identical for the public-VPS path). Compose it on top:
+#
+#   docker compose -p lq-ai \
+#     -f docker-compose.prod.yml -f docker-compose.private.yml \
+#     --env-file .env.private up -d --wait
+#
+# Use .env.private.example as the env-file template (NOT .env.prod.example):
+# it points S3_* at the in-stack MinIO and carries inert placeholders for the
+# public-edge vars the prod file interpolates at parse time (LQ_AI_PUBLIC_HOST
+# etc. — never used at runtime in this profile; see the env example's comments).
+#
+# What changes vs the public path (runbook: azure-vm-sandbox.md §8):
+#   - NEW `minio` service (pinned release tag, named volume, healthcheck, NO
+#     host ports — services reach it as http://minio:9000 on the compose
+#     network). The bucket itself is created by the api's startup lifespan
+#     (`ensure_bucket()`, api/app/storage.py) — the same mechanism the dev
+#     compose relies on; no mc init sidecar needed.
+#   - `caddy` serves Caddy's INTERNAL TLS (local CA) on :8443 instead of
+#     public ACME on 80/443: the private Caddyfile is mounted over the baked-in
+#     one (the image inherits the caddy:2 base CMD `caddy run --config
+#     /etc/caddy/Caddyfile`, so the mount alone switches the config), and the
+#     port publishes are REPLACED (!override) with a single loopback binding.
+#   - api / ingest-worker / arq-worker additionally wait on minio health so
+#     first boot cannot race object storage.
+
+services:
+  minio:
+    # Pinned dated release (never :latest — same "deploy = one pinned artifact"
+    # contract as every other image in the prod file). Single-node, on-box:
+    # durability is the VM's disk — see the runbook's MinIO durability note
+    # (backups matter MORE here, not less).
+    # Newest published release; lead-verified 2026-07-08 on Docker Hub (tag
+    # exists, image ships curl for the healthcheck).
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    # Object storage for one tenant stack — modest, bounded footprint (prod
+    # file's mem_limit convention).
+    mem_limit: 512m
+    mem_reservation: 256m
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required (gen-secrets.sh --private)}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required (gen-secrets.sh --private)}
+      # Kill MinIO's periodic update checks — restricted-egress hygiene (§8.4).
+      MINIO_UPDATE: "off"
+    volumes:
+      - miniodata:/data
+    # NO ports: — the API/workers reach minio:9000 over the compose network;
+    # the console (:9001) is deliberately unreachable from the host.
+    healthcheck:
+      # Mirrors the dev compose's minio healthcheck.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  api:
+    depends_on:
+      # Additive merge with the prod file's postgres/redis/gateway conditions
+      # (compose merges long-form depends_on maps across files). The api's
+      # startup lifespan creates the S3 bucket (ensure_bucket), so it must not
+      # boot before MinIO answers.
+      minio:
+        condition: service_healthy
+
+  ingest-worker:
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  arq-worker:
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  caddy:
+    # REPLACE (not append) the public 80/443 publishes with one loopback-only
+    # HTTPS port. The !override tag is load-bearing: without it compose MERGES
+    # port lists across files and the 80/443 publishes would survive.
+    ports: !override
+      - "127.0.0.1:${LQ_AI_PRIVATE_PORT:-8443}:8443"
+    volumes:
+      # Mount the internal-TLS Caddyfile over the image's baked-in public one.
+      # deploy/caddy/Caddyfile.private uses `tls internal` (Caddy's local CA)
+      # and no DNS modules, so it parses in this image unconditionally; a parse
+      # error still fails startup loudly (caddy run validates on load).
+      # Path is relative to THIS file — keep the deploy/caddy/ layout when
+      # copying the compose files onto the box (runbook §8).
+      - ./deploy/caddy/Caddyfile.private:/etc/caddy/Caddyfile:ro
+      # caddy-data / caddy-config named volumes are inherited from the prod
+      # file — /data persists the local CA across restarts, so the one-time
+      # browser trust (or exported CA root) stays stable.
+
+volumes:
+  miniodata:
