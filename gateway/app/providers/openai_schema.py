@@ -48,11 +48,11 @@ from pydantic import BaseModel, ConfigDict, Field
 ChatRole = Literal["system", "user", "assistant", "tool"]
 """OpenAI chat-completion role values.
 
-The gateway accepts the four standard roles. Assistant-with-tool-calls and
-tool-result messages pass through; B3's Anthropic adapter handles the
-common case (system / user / assistant text). Tool-call translation gets
-expanded as part of skills work (PRD §7) — see ``app.providers.anthropic``
-for current coverage.
+The gateway accepts the four standard roles. Assistant-with-tool-calls
+and tool-result messages pass through to OpenAI-compatible providers
+verbatim; the Anthropic adapter translates them to/from ``tool_use`` /
+``tool_result`` content blocks (AZ-2b) — see ``app.providers.anthropic``
+for the mapping.
 """
 
 
@@ -160,8 +160,9 @@ class ChatCompletionRequest(BaseModel):
     model: str = Field(min_length=1)
     # F0-S2: tool-calling fields, previously riding ``extra="allow"``.
     # Typed so the OpenAPI contract names them; forwarded verbatim to
-    # OpenAI-compatible providers (Anthropic translation is later S2/S3
-    # work; Ollama forwards them already).
+    # OpenAI-compatible providers (Ollama included) and translated to
+    # Anthropic Messages ``tools``/``tool_choice`` by the Anthropic
+    # adapter (AZ-2b).
     tools: list[dict[str, Any]] | None = None
     tool_choice: str | dict[str, Any] | None = None
     messages: list[ChatCompletionMessage]

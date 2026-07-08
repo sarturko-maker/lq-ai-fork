@@ -79,8 +79,8 @@ providers:
   #     - gpt-4o-prod            # your GPT deployment name (agent-capable)
   #
   # # Claude via Foundry — native Anthropic Messages route. Resource region
-  # # must be East US2 or Sweden Central. TEXT-ONLY until slice AZ-2b adds
-  # # tool translation — do not alias as an agent model.
+  # # must be East US2 or Sweden Central. Tool-capable since slice AZ-2b
+  # # (adapter translates tools/tool_calls) — may back agent aliases.
   # - name: azure-claude
   #   type: anthropic
   #   base_url: https://${AZURE_ANTHROPIC_RESOURCE:-disabled}.services.ai.azure.com/anthropic
