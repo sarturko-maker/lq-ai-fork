@@ -60,8 +60,9 @@ def test_tools_and_tool_choice_forward_verbatim() -> None:
     assert all(not key.startswith("lq_ai_") for key in body)
 
 
-def test_anthropic_adapter_reads_block_content_as_empty() -> None:
-    """B3 text-only posture: block content is not translated (S2)."""
+def test_anthropic_adapter_extracts_block_content_text() -> None:
+    """AZ-2b: block-form content translates to its text parts (the B3
+    posture collapsed it to ``""``, which dropped langchain 1.x prompts)."""
     from app.providers.anthropic import _to_anthropic_request
 
     request = ChatCompletionRequest(
@@ -72,9 +73,8 @@ def test_anthropic_adapter_reads_block_content_as_empty() -> None:
         ],
     )
     body = _to_anthropic_request(request, model="claude-x", stream=False)
-    contents = [m["content"] for m in body["messages"]]
-    assert any("real text" in str(c) for c in contents)
-    assert not any("liability" in str(c) for c in contents)
+    assert body["messages"][0]["content"] == "real text"
+    assert body["messages"][1]["content"] == "What is the liability cap?"
 
 
 def test_ollama_adapter_reads_block_content_as_empty() -> None:

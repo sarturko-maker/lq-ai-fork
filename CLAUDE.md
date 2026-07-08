@@ -64,10 +64,9 @@ the orchestration; we keep the substrate (gateway, brakes, audit, citations, ski
 
 1. `api/pyproject.toml` pins `langgraph>=0.2.76,<0.3`; `langchain` is absent; no checkpointer or
    BaseStore is used anywhere. deepagents needs langgraph 1.x plus both. The upgrade is its own phase.
-2. The gateway's Anthropic adapter is text-only — it never forwards `tools`
-   (`gateway/app/providers/anthropic.py`, `_to_anthropic_request`);
-   nothing in the codebase sets `tools` or executes a returned tool call. Tool calling through the
-   gateway is prerequisite #1.
+2. RESOLVED (AZ-2b, 2026-07-08): the Anthropic adapter now translates OpenAI-shape
+   tools/tool_choice/tool_calls to and from Messages-API tool_use/tool_result blocks, unary and
+   streaming (`gateway/app/providers/anthropic.py`) — Claude is agent-capable direct and on Foundry.
 3. Chat sends single-turn requests — the model never sees prior turns (`api/app/api/chats.py:1370`).
 4. The SSE protocol has only start/delta/complete/error frames (`web/src/lib/lq-ai/sse/parser.ts`).
    The Claude-Code-like UX needs tool-call/subagent/plan frame types end-to-end.

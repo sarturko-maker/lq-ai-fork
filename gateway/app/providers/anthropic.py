@@ -2,7 +2,9 @@
 
 Translates between the gateway's OpenAI-compatible surface and the
 Anthropic Messages API (``POST /v1/messages``). B3 covers the chat
-completion path, both streaming and non-streaming. Embeddings raise
+completion path, both streaming and non-streaming; AZ-2b adds full
+tool-calling translation (tools / tool_choice / tool_use / tool_result,
+unary and streaming). Embeddings raise
 :class:`ProviderUnsupportedError` because Anthropic has no embeddings
 endpoint as of 2026-05-07.
 
@@ -25,6 +27,16 @@ Wire-format differences worth knowing
   ``content_block_stop``, ``message_delta``, ``message_stop``,
   plus heartbeat ``ping`` events). The adapter consumes those and emits
   OpenAI-shaped chunks.
+* Tool calling (AZ-2b): OpenAI function tools become Anthropic ``tools``
+  entries (``input_schema`` from ``function.parameters``); ``tool_choice``
+  maps ``auto``/``required``/``none``/named-function to
+  ``auto``/``any``/``none``/``tool``; assistant ``tool_calls`` become
+  ``tool_use`` content blocks (JSON-string ``arguments`` parsed to
+  ``input``); consecutive ``role: "tool"`` messages merge into ONE user
+  message of ``tool_result`` blocks (Anthropic requires all results for
+  a parallel tool_use turn in the single next user message). Responses
+  translate ``tool_use`` blocks back to OpenAI ``tool_calls`` with
+  ``arguments`` re-serialized as a JSON string.
 
 We deliberately do not depend on the ``anthropic`` Python SDK. PRD §4
 calls for ~3,000 lines of hand-rolled gateway code in lieu of LLM-SDK
@@ -335,6 +347,150 @@ class AnthropicAdapter(ProviderAdapter):
 # --- Translation: OpenAI -> Anthropic -----------------------------------------
 
 
+def _extract_text(content: str | list[dict[str, Any]] | None) -> str:
+    """Extract plain text from OpenAI-shaped message content.
+
+    OpenAI content is a string, ``None``, or a list of typed blocks —
+    langchain 1.x clients (the fork's deep agents) emit the block form,
+    so collapsing it to ``""`` (the pre-AZ-2b behavior) silently dropped
+    their prompts. Text blocks concatenate in order; non-text blocks
+    (images, etc.) are ignored defensively — Anthropic-side rich content
+    is out of scope for this adapter.
+    """
+
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text", "")))
+    return "".join(parts)
+
+
+def _translate_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Translate OpenAI function tools to Anthropic ``tools`` entries.
+
+    OpenAI shape: ``{"type": "function", "function": {"name", "description",
+    "parameters"}}``. Anthropic shape: ``{"name", "description",
+    "input_schema"}``. Non-dict / non-function entries are skipped
+    defensively; a missing ``parameters`` becomes the minimal
+    ``{"type": "object"}`` schema Anthropic requires.
+    """
+
+    translated: list[dict[str, Any]] = []
+    for entry in tools:
+        if not isinstance(entry, dict) or entry.get("type") != "function":
+            continue
+        function = entry.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        tool: dict[str, Any] = {"name": name}
+        description = function.get("description")
+        if isinstance(description, str):
+            tool["description"] = description
+        parameters = function.get("parameters")
+        if not isinstance(parameters, dict) or not parameters:
+            parameters = {"type": "object"}
+        tool["input_schema"] = parameters
+        translated.append(tool)
+    return translated
+
+
+def _translate_tool_choice(
+    tool_choice: str | dict[str, Any] | None,
+    *,
+    disable_parallel: bool,
+) -> dict[str, Any] | None:
+    """Translate OpenAI ``tool_choice`` to Anthropic's ``tool_choice``.
+
+    ``"auto"`` -> ``{"type": "auto"}``; ``"required"`` -> ``{"type": "any"}``;
+    ``"none"`` -> ``{"type": "none"}``; ``{"type": "function", "function":
+    {"name": N}}`` -> ``{"type": "tool", "name": N}``. Anything else is
+    omitted (Anthropic defaults to auto). ``disable_parallel`` carries
+    OpenAI's ``parallel_tool_calls: false`` — it sets
+    ``disable_parallel_tool_use: true`` on the choice object (never on
+    ``none``), materializing an explicit ``auto`` when the caller omitted
+    ``tool_choice`` so the flag has somewhere to live.
+    """
+
+    choice: dict[str, Any] | None = None
+    if tool_choice == "auto":
+        choice = {"type": "auto"}
+    elif tool_choice == "required":
+        choice = {"type": "any"}
+    elif tool_choice == "none":
+        choice = {"type": "none"}
+    elif isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+        function = tool_choice.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+            if isinstance(name, str) and name:
+                choice = {"type": "tool", "name": name}
+    if choice is None and disable_parallel:
+        choice = {"type": "auto"}
+    if choice is not None and disable_parallel and choice["type"] != "none":
+        choice["disable_parallel_tool_use"] = True
+    return choice
+
+
+def _translate_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Translate OpenAI assistant ``tool_calls`` to ``tool_use`` blocks.
+
+    ``function.arguments`` is a JSON *string* on the OpenAI side; it
+    parses to Anthropic's ``input`` object. Empty or malformed arguments
+    become ``{}`` (the model asked for a no-arg call or a provider
+    emitted junk — either way Anthropic requires an object). Entries
+    without a ``function.name`` are skipped defensively. A missing id is
+    synthesized with the same ``call_lqgw_`` prefix as the OpenAI
+    adapter's F0-S9 stream-id synthesis.
+    """
+
+    blocks: list[dict[str, Any]] = []
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            continue
+        function = call.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        call_id = call.get("id")
+        if not isinstance(call_id, str) or not call_id:
+            call_id = f"call_lqgw_{uuid.uuid4().hex[:12]}"
+        arguments_raw = function.get("arguments")
+        tool_input: dict[str, Any] = {}
+        if isinstance(arguments_raw, str) and arguments_raw:
+            try:
+                parsed_args = json.loads(arguments_raw)
+            except (json.JSONDecodeError, RecursionError):
+                # RecursionError: json's scanner recurses per nesting level,
+                # so model-generated arguments like "[" * 3000 blow the stack
+                # instead of raising JSONDecodeError. Degrade to {} the same
+                # way — arguments is untrusted model output.
+                parsed_args = None
+            if isinstance(parsed_args, dict):
+                tool_input = parsed_args
+        blocks.append({"type": "tool_use", "id": call_id, "name": name, "input": tool_input})
+    return blocks
+
+
+def _is_tool_result_user_message(message: dict[str, Any]) -> bool:
+    """True when ``message`` is a user message of only ``tool_result`` blocks."""
+
+    if message.get("role") != "user":
+        return False
+    content = message.get("content")
+    if not isinstance(content, list):
+        return False
+    return all(isinstance(block, dict) and block.get("type") == "tool_result" for block in content)
+
+
 def _to_anthropic_request(
     request: ChatCompletionRequest,
     *,
@@ -347,49 +503,62 @@ def _to_anthropic_request(
 
     * ``messages[role=system]`` are pulled out and concatenated into the
       top-level ``system`` string.
-    * ``messages[role=user|assistant]`` keep their order. Tool messages
-      are passed through as ``role="user"`` with content blocks shaped
-      ``{"type": "tool_result", ...}``; tool-call assistant messages are
-      currently passed through as text only (see DE note below).
+    * ``messages[role=user|assistant]`` keep their order. Block-form
+      content (list of typed blocks) is collapsed to its text parts via
+      :func:`_extract_text` — langchain 1.x clients emit the block form.
+    * Tool messages become ``role="user"`` messages with ``tool_result``
+      content blocks; CONSECUTIVE tool messages merge into ONE user
+      message (Anthropic requires all tool_results answering one
+      assistant tool_use turn to arrive in the single next user message —
+      parallel fan-out breaks without the merge).
+    * Assistant messages with ``tool_calls`` become content-block form:
+      a text block (when non-empty) followed by one ``tool_use`` block
+      per call (:func:`_translate_tool_calls`). Assistant messages
+      without tool_calls keep the plain-string passthrough.
+    * ``tools`` / ``tool_choice`` translate via :func:`_translate_tools`
+      / :func:`_translate_tool_choice` (AZ-2b — retires CLAUDE.md
+      blocker #2).
     * ``max_tokens`` is required by Anthropic; we substitute
       :data:`DEFAULT_MAX_TOKENS` if the caller omits it.
     * ``temperature`` and ``top_p`` are forwarded if set; otherwise
       Anthropic uses its defaults.
     * ``stop`` (OpenAI) becomes ``stop_sequences`` (Anthropic, list-only).
-
-    Tool calls (DE-XXX, future): full OpenAI tool-call/tool-result bridging
-    requires translating to Anthropic's ``tool_use``/``tool_result``
-    content blocks. B3 ships text-only translation; tool-call coverage
-    arrives with the skills work in M1 Phase C.
     """
 
     system_chunks: list[str] = []
     chat_messages: list[dict[str, Any]] = []
     for msg in request.messages:
-        # B3 text-only posture: block-form content (list) is not yet
-        # translated to Anthropic content blocks; it reads as empty (S2).
-        content = msg.content if isinstance(msg.content, str) else ""
+        content = _extract_text(msg.content)
         if msg.role == "system":
             if content:
                 system_chunks.append(content)
             continue
         if msg.role == "tool":
-            # Translate to a user message with a tool_result content block
-            # so Anthropic accepts it as conversation context.
-            chat_messages.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": msg.tool_call_id or "",
-                            "content": content,
-                        }
-                    ],
-                }
-            )
+            # Translate to a tool_result content block. Merge into the
+            # previous message when it is already a tool_result-only user
+            # message (consecutive OpenAI tool messages = one Anthropic
+            # user turn); otherwise start a new user message.
+            result_block = {
+                "type": "tool_result",
+                "tool_use_id": msg.tool_call_id or "",
+                "content": content,
+            }
+            if chat_messages and _is_tool_result_user_message(chat_messages[-1]):
+                chat_messages[-1]["content"].append(result_block)
+            else:
+                chat_messages.append({"role": "user", "content": [result_block]})
             continue
-        # user / assistant
+        if msg.role == "assistant" and msg.tool_calls:
+            tool_use_blocks = _translate_tool_calls(msg.tool_calls)
+            if tool_use_blocks:
+                blocks: list[dict[str, Any]] = []
+                if content:
+                    blocks.append({"type": "text", "text": content})
+                blocks.extend(tool_use_blocks)
+                chat_messages.append({"role": "assistant", "content": blocks})
+                continue
+            # All entries malformed -> fall through to string passthrough.
+        # user / assistant (no tool calls)
         chat_messages.append({"role": msg.role, "content": content})
 
     body: dict[str, Any] = {
@@ -408,6 +577,22 @@ def _to_anthropic_request(
         body["stop_sequences"] = (
             [request.stop] if isinstance(request.stop, str) else list(request.stop)
         )
+    if request.tools:
+        anthropic_tools = _translate_tools(request.tools)
+        if anthropic_tools:
+            body["tools"] = anthropic_tools
+            # ``parallel_tool_calls`` is an OpenAI extension field the
+            # schema doesn't type; read it via extra="allow" storage.
+            # Only an explicit ``false`` maps to Anthropic's
+            # ``disable_parallel_tool_use`` (the default is parallel-on
+            # on both sides).
+            parallel_tool_calls = (request.model_extra or {}).get("parallel_tool_calls")
+            tool_choice = _translate_tool_choice(
+                request.tool_choice,
+                disable_parallel=parallel_tool_calls is False,
+            )
+            if tool_choice is not None:
+                body["tool_choice"] = tool_choice
     return body
 
 
@@ -419,13 +604,34 @@ def _from_anthropic_response(
     *,
     requested_model: str,
 ) -> ChatCompletionResponse:
-    """Translate an Anthropic ``message`` response into the OpenAI shape."""
+    """Translate an Anthropic ``message`` response into the OpenAI shape.
+
+    ``text`` blocks join into ``message.content``; ``tool_use`` blocks
+    become OpenAI ``tool_calls`` entries with ``input`` re-serialized as
+    the JSON-string ``arguments``. Per OpenAI convention, ``content`` is
+    ``None`` when the response is tool-calls-only (and stays ``""`` for
+    a text-empty response with no tool calls — the pre-AZ-2b behavior).
+    """
 
     blocks = payload.get("content") or []
     text_parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
     for block in blocks:
-        if isinstance(block, dict) and block.get("type") == "text":
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
             text_parts.append(str(block.get("text", "")))
+        elif block.get("type") == "tool_use":
+            tool_calls.append(
+                {
+                    "id": str(block.get("id") or ""),
+                    "type": "function",
+                    "function": {
+                        "name": str(block.get("name") or ""),
+                        "arguments": json.dumps(block.get("input") or {}),
+                    },
+                }
+            )
     text = "".join(text_parts)
 
     stop_reason_raw = payload.get("stop_reason")
@@ -445,6 +651,16 @@ def _from_anthropic_response(
     # when present so downstream consumers see what actually ran.
     response_model = str(payload.get("model") or requested_model)
 
+    # OpenAI convention: content is None on a tool-calls-only message;
+    # a text-empty message with no tool calls keeps "".
+    message_content: str | None
+    if text_parts:
+        message_content = text
+    elif tool_calls:
+        message_content = None
+    else:
+        message_content = ""
+
     return ChatCompletionResponse(
         id=response_id,
         created=int(time.time()),
@@ -452,7 +668,11 @@ def _from_anthropic_response(
         choices=[
             ChatCompletionChoice(
                 index=0,
-                message=ChatCompletionMessage(role="assistant", content=text),
+                message=ChatCompletionMessage(
+                    role="assistant",
+                    content=message_content,
+                    tool_calls=tool_calls or None,
+                ),
                 finish_reason=finish_reason,
             )
         ],
@@ -505,6 +725,13 @@ async def _anthropic_stream_iter(
 
     * One initial chunk with ``delta.role = "assistant"``.
     * One chunk per text delta with ``delta.content = "<text piece>"``.
+    * Tool calls as ``delta.tool_calls`` entries: an OPENING delta with
+      ``index``/``id``/``type``/``function.name`` + empty ``arguments``
+      (from Anthropic's ``content_block_start``), then continuation
+      deltas carrying ``function.arguments`` fragments (from
+      ``input_json_delta``). The OpenAI ``index`` is the 0-based ordinal
+      over TOOL CALLS ONLY — NOT Anthropic's content-block index, which
+      also counts text blocks; ``tool_ordinals`` maps between the two.
     * One final chunk with ``finish_reason`` set, ``delta`` empty, and
       a ``usage`` block.
 
@@ -520,6 +747,10 @@ async def _anthropic_stream_iter(
     prompt_tokens = 0
     completion_tokens = 0
     role_emitted = False
+    # Anthropic content-block index -> OpenAI tool-call ordinal. Assigned
+    # at content_block_start(tool_use); input_json_delta events look the
+    # ordinal up by block index.
+    tool_ordinals: dict[int, int] = {}
 
     try:
         async with client.stream("POST", "/v1/messages", json=body, headers=headers) as response:
@@ -562,6 +793,37 @@ async def _anthropic_stream_iter(
                         )
                     continue
 
+                if kind == "content_block_start":
+                    content_block = parsed.get("content_block") or {}
+                    block_index = parsed.get("index")
+                    if content_block.get("type") == "tool_use" and isinstance(block_index, int):
+                        ordinal = len(tool_ordinals)
+                        tool_ordinals[block_index] = ordinal
+                        # Anthropic supplies real tool_use ids in
+                        # content_block_start, so the F0-S9 opening-id
+                        # guarantee (see openai.py
+                        # _ensure_stream_tool_call_ids) holds BY
+                        # CONSTRUCTION here — no synthesis needed.
+                        yield _make_chunk(
+                            response_id=response_id,
+                            created=created,
+                            model=response_model,
+                            delta=ChatCompletionDelta(
+                                tool_calls=[
+                                    {
+                                        "index": ordinal,
+                                        "id": str(content_block.get("id") or ""),
+                                        "type": "function",
+                                        "function": {
+                                            "name": str(content_block.get("name") or ""),
+                                            "arguments": "",
+                                        },
+                                    }
+                                ]
+                            ),
+                        )
+                    continue
+
                 if kind == "content_block_delta":
                     delta_block = parsed.get("delta") or {}
                     if delta_block.get("type") == "text_delta":
@@ -572,6 +834,25 @@ async def _anthropic_stream_iter(
                                 created=created,
                                 model=response_model,
                                 delta=ChatCompletionDelta(content=text),
+                            )
+                    elif delta_block.get("type") == "input_json_delta":
+                        block_index = parsed.get("index")
+                        tool_ordinal: int | None = (
+                            tool_ordinals.get(block_index) if isinstance(block_index, int) else None
+                        )
+                        partial = delta_block.get("partial_json", "")
+                        # Unknown block index -> ignore defensively (a
+                        # tool_use block we never saw open).
+                        if tool_ordinal is not None and isinstance(partial, str) and partial:
+                            yield _make_chunk(
+                                response_id=response_id,
+                                created=created,
+                                model=response_model,
+                                delta=ChatCompletionDelta(
+                                    tool_calls=[
+                                        {"index": tool_ordinal, "function": {"arguments": partial}}
+                                    ]
+                                ),
                             )
                     continue
 

@@ -175,10 +175,10 @@ providers:
     # REGION: the Foundry resource must live in East US2 or Sweden Central
     # (Claude's region restriction — the binding one across model families).
     #
-    # TEXT-ONLY for now: the anthropic adapter does not forward `tools`
-    # (tool-call translation lands in slice AZ-2b). Do NOT point an
-    # agent-facing alias at this provider until AZ-2b ships; chat aliases
-    # are fine.
+    # TOOL-CAPABLE (AZ-2b shipped): the anthropic adapter translates
+    # OpenAI-shape tools / tool_choice / tool_calls to and from the
+    # Messages API's tool_use / tool_result blocks, unary and streaming.
+    # azure-claude may back agent-facing aliases as well as chat aliases.
     #
     # `:-` default lets the gateway load without a Foundry resource
     # configured; operators set AZURE_ANTHROPIC_RESOURCE in their .env.
@@ -344,8 +344,8 @@ model_aliases:
   #     provider: azure-claude
   #     model: claude-sonnet-5        # your Claude deployment name
   #   fallback: []
-  #   # WARNING: chat only — the anthropic adapter is TEXT-ONLY until
-  #   # slice AZ-2b adds tool translation. Do not use as an agent model.
+  #   # Tool-capable since slice AZ-2b (anthropic adapter translates
+  #   # tools/tool_calls) — fine as a chat OR agent model alias.
 
   # The 'embedding' alias is the alias the backend's KB layer (C6)
   # asks the gateway to dispatch. Per ADR 0008 the default points at

@@ -53,14 +53,25 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   Models page (hot-apply proven in ONBOARD-0) — GPT + Mistral-Large-3 agent-capable with ZERO code;
 >   Claude joins after AZ-2b. REMEMBER the `gateway-config` NAMED-VOLUME trap: the example seeds
 >   FIRST boot only; existing stacks edit the live gateway.yaml/admin API.
-> - **NEXT ▶ AZ-2b — Anthropic adapter tool-calling (the one real gateway slice; retires fork blocker #2).**
->   `gateway/app/providers/anthropic.py`: request side — forward `tools`/`tool_choice`, translate
->   assistant `tool_calls`→`tool_use` blocks + `role:"tool"`→`tool_result` (exists), stop collapsing
->   block content to `""`; response side — `tool_use` blocks → OpenAI-shape `tool_calls` +
->   `finish_reason:"tool_calls"`; streaming — named-event deltas → OpenAI-style tool-call deltas
->   (mirror `_ensure_stream_tool_call_ids` conformance). mypy --strict; respx tests mirroring
->   `test_anthropic_adapter.py`. Live verify vs a real key (direct Anthropic or the Foundry sandbox once
->   it exists — if neither, respx-only and defer live proof to the AZ-5 smoke, ON RECORD).
+> - **AZ-2b ✓ SHIPPED — Anthropic adapter tool-calling (RETIRES fork blocker #2; Claude agent-capable
+>   direct AND on Foundry).** `gateway/app/providers/anthropic.py`: request — `_translate_tools`
+>   (function→input_schema), `_translate_tool_choice` (auto/required/none/named + parallel_tool_calls
+>   false→disable_parallel_tool_use), assistant `tool_calls`→`tool_use` blocks (JSON-string args
+>   parsed; ""/malformed/**RecursionError from deep nesting — security-review catch**→`{}`; missing id
+>   synthesized `call_lqgw_`), CONSECUTIVE tool messages MERGE into one user turn of `tool_result`
+>   blocks (parallel fan-out breaks without it), `_extract_text` ends the block-content-collapses-to-""
+>   behavior (langchain 1.x block form now translates); response — `tool_use`→OpenAI `tool_calls`
+>   (args re-serialized), content None only when tool-calls-only; streaming — `content_block_start`
+>   opening delta (real Anthropic id ⇒ F0-S9 by construction) + `input_json_delta` continuations,
+>   OpenAI index = ordinal over TOOL CALLS ONLY (not Anthropic's block index). Doc flips:
+>   CLAUDE.md blocker #2 RESOLVED, example TEXT-ONLY comments → tool-capable, schema docstrings.
+>   Gate: gateway suite **616 passed / 2 skipped** (baseline 596; wire-format reviewer: zero findings;
+>   conformance reviewer independently re-ran the suite), ruff + mypy --strict clean. Live smoke vs a
+>   real Anthropic/Foundry key DEFERRED to AZ-5 on record (no key on this box; respx route-level tests
+>   prove tools survive app+middleware unary+streaming).
+> - **NEXT ▶ AZ-5 — Azure VM sandbox runbook** (draft exists: reviewed, stashed in session scratchpad
+>   `azure-vm-sandbox.md`; land as `docs/fork/runbooks/azure-vm-sandbox.md` with the Claude sections
+>   updated to post-AZ-2b tool-capable reality + §5.4 gaining an azure-claude tool smoke).
 > - **AZ-5 — Azure VM sandbox runbook** (compose on an Azure VM; secrets via env; per-provider
 >   synthetic smoke commands from the maintainer's brief; region: **Sweden Central or East US2** —
 >   Claude's restriction binds; builds on `docs/fork/runbooks/staging-bringup.md` patterns). AZ-4b

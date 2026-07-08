@@ -358,3 +358,158 @@ async def test_chat_completions_rejects_unknown_provider_in_raw_form(
     body = response.json()
     assert body["error"]["code"] == "invalid_model"
     assert "definitely-not-a-provider" in body["error"]["message"]
+
+
+# --- AZ-2b: tool calling through the full route --------------------------------
+
+
+_ROUTE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read_clause",
+            "description": "Return the clause covering a topic.",
+            "parameters": {
+                "type": "object",
+                "properties": {"topic": {"type": "string"}},
+                "required": ["topic"],
+            },
+        },
+    }
+]
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_chat_completions_translates_tools_end_to_end(
+    anthropic_client: AsyncClient,
+) -> None:
+    """Tools survive the full route (app + middleware + adapter): the
+    upstream body carries Anthropic-shape ``tools`` and the OpenAI-shaped
+    response carries ``tool_calls`` + ``finish_reason: "tool_calls"``."""
+
+    upstream = respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "msg_tools_e2e",
+                "model": "claude-opus-4-7",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_e2e",
+                        "name": "read_clause",
+                        "input": {"topic": "liability"},
+                    }
+                ],
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 30, "output_tokens": 12},
+            },
+        )
+    )
+
+    response = await anthropic_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "smart",
+            "messages": [{"role": "user", "content": "what is the liability cap?"}],
+            "tools": _ROUTE_TOOLS,
+            "tool_choice": "auto",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    choice = body["choices"][0]
+    assert choice["finish_reason"] == "tool_calls"
+    assert choice["message"]["tool_calls"] == [
+        {
+            "id": "toolu_e2e",
+            "type": "function",
+            "function": {"name": "read_clause", "arguments": '{"topic": "liability"}'},
+        }
+    ]
+
+    # The upstream request carried the translated Anthropic tool shapes —
+    # proof the route and middleware did not strip them.
+    assert upstream.called
+    sent = json.loads(upstream.calls[-1].request.content)
+    assert sent["tools"] == [
+        {
+            "name": "read_clause",
+            "description": "Return the clause covering a topic.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"topic": {"type": "string"}},
+                "required": ["topic"],
+            },
+        }
+    ]
+    assert sent["tool_choice"] == {"type": "auto"}
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_chat_completions_streams_tool_call_delta_frames(
+    anthropic_client: AsyncClient,
+) -> None:
+    """A streamed tool_use block surfaces as an OpenAI tool-call delta
+    frame in the SSE output, with ``finish_reason: "tool_calls"``."""
+
+    sse_body = (
+        "event: message_start\n"
+        'data: {"type":"message_start","message":{"id":"msg_tool_sse","model":"claude-opus-4-7",'
+        '"usage":{"input_tokens":6,"output_tokens":0}}}\n\n'
+        "event: content_block_start\n"
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use",'
+        '"id":"toolu_sse_1","name":"read_clause","input":{}}}\n\n'
+        "event: content_block_delta\n"
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta",'
+        '"partial_json":"{\\"topic\\": \\"cap\\"}"}}\n\n'
+        "event: content_block_stop\n"
+        'data: {"type":"content_block_stop","index":0}\n\n'
+        "event: message_delta\n"
+        'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},'
+        '"usage":{"output_tokens":5}}\n\n'
+        "event: message_stop\n"
+        'data: {"type":"message_stop"}\n\n'
+    )
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=httpx.Response(
+            200, text=sse_body, headers={"content-type": "text/event-stream"}
+        )
+    )
+
+    response = await anthropic_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "smart",
+            "messages": [{"role": "user", "content": "cap?"}],
+            "tools": _ROUTE_TOOLS,
+            "stream": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    frames = [line for line in response.text.split("\n\n") if line.strip()]
+    assert frames[-1].strip() == "data: [DONE]"
+    data_frames = [f.removeprefix("data: ") for f in frames if f.startswith("data: ")]
+    parsed_chunks = [json.loads(f) for f in data_frames if f.strip() != "[DONE]"]
+
+    tool_deltas = [
+        c["choices"][0]["delta"]["tool_calls"]
+        for c in parsed_chunks
+        if c["choices"][0]["delta"].get("tool_calls")
+    ]
+    assert tool_deltas, "no tool-call delta frame appeared in the SSE output"
+    opening = tool_deltas[0][0]
+    assert opening["index"] == 0
+    assert opening["id"] == "toolu_sse_1"
+    assert opening["function"]["name"] == "read_clause"
+    arguments = "".join(
+        entry[0]["function"]["arguments"] for entry in tool_deltas if entry[0].get("function")
+    )
+    assert json.loads(arguments) == {"topic": "cap"}
+    assert parsed_chunks[-1]["choices"][0]["finish_reason"] == "tool_calls"
