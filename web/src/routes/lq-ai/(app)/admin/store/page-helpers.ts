@@ -14,10 +14,10 @@ export { provenanceBadge } from '$lib/lq-ai/library/page-helpers';
 
 /** One catalog entry, flattened out of its section (carries its kind). */
 export interface FlatCapability extends DeploymentCapabilityRead {
-	capability_kind: 'skill' | 'tool' | 'playbook';
+	capability_kind: 'skill' | 'tool' | 'playbook' | 'knowledge';
 }
 
-/** Flatten the three sections into one list — used by search + the rail. */
+/** Flatten the four sections into one list — used by search + the rail. */
 export function flattenCapabilities(catalog: DeploymentCapabilitiesResponse): FlatCapability[] {
 	return catalog.sections.flatMap((s) =>
 		s.entries.map((e) => ({ ...e, capability_kind: s.kind as FlatCapability['capability_kind'] }))
@@ -40,7 +40,7 @@ export function matchesSearch(entry: DeploymentCapabilityRead, term: string): bo
 
 /** One chip in a "Recommended for {area}" rail. */
 export interface RecommendedChip {
-	kind: 'skill' | 'tool' | 'playbook';
+	kind: 'skill' | 'tool' | 'playbook' | 'knowledge';
 	key: string;
 	label: string;
 	inLibrary: boolean;
@@ -107,6 +107,6 @@ export function buildRecommendedRails(
 /** The `(kind, key)` pairs "Add all" must POST — the rail's not-yet-adopted entries. */
 export function missingEntries(
 	rail: RecommendedRail
-): { kind: 'skill' | 'tool' | 'playbook'; key: string }[] {
+): { kind: 'skill' | 'tool' | 'playbook' | 'knowledge'; key: string }[] {
 	return rail.entries.filter((e) => !e.inLibrary).map((e) => ({ kind: e.kind, key: e.key }));
 }

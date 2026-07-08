@@ -5,7 +5,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { DeploymentCapabilitiesResponse, DeploymentCapabilityRead } from '$lib/lq-ai/api/admin';
 import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
-import { buildRecommendedRails, matchesSearch, missingEntries } from '../page-helpers';
+import {
+	buildRecommendedRails,
+	flattenCapabilities,
+	matchesSearch,
+	missingEntries
+} from '../page-helpers';
 
 function capEntry(over: Partial<DeploymentCapabilityRead> = {}): DeploymentCapabilityRead {
 	return {
@@ -39,6 +44,7 @@ function area(over: Partial<PracticeArea> = {}): PracticeArea {
 		bound_skills: [],
 		bound_tool_groups: [],
 		bound_playbooks: [],
+		bound_knowledge_bases: [],
 		created_at: '2026-01-01T00:00:00Z',
 		updated_at: '2026-01-01T00:00:00Z',
 		...over
@@ -116,7 +122,23 @@ describe('buildRecommendedRails', () => {
 					})
 				]
 			},
-			{ kind: 'playbook', label: 'Playbooks', entries: [] }
+			{ kind: 'playbook', label: 'Playbooks', entries: [] },
+			{
+				kind: 'knowledge',
+				label: 'Knowledge',
+				entries: [
+					capEntry({
+						capability_kind: 'knowledge',
+						capability_key: 'kb-1',
+						label: 'Precedent bank',
+						source: null,
+						in_library: false,
+						// Knowledge is never in a recommended set (RECOMMENDED_LIBRARY_SETS
+						// only has tool/skill keys server-side) — recommended_for is always [].
+						recommended_for: []
+					})
+				]
+			}
 		]
 	};
 
@@ -182,6 +204,44 @@ describe('buildRecommendedRails', () => {
 		};
 		expect(buildRecommendedRails(empty, [])).toEqual([]);
 	});
+
+	it('a knowledge entry never generates a rail (recommended_for is always [])', () => {
+		const areas = [area({ key: 'commercial', name: 'Commercial' })];
+		const rails = buildRecommendedRails(catalog, areas);
+		for (const rail of rails) {
+			expect(rail.entries.some((e) => e.kind === 'knowledge')).toBe(false);
+		}
+	});
+});
+
+describe('flattenCapabilities', () => {
+	it('flattens all four sections, preserving the knowledge kind', () => {
+		const catalog: DeploymentCapabilitiesResponse = {
+			sections: [
+				{ kind: 'tool', label: 'Tools', entries: [] },
+				{ kind: 'skill', label: 'Skills', entries: [] },
+				{ kind: 'playbook', label: 'Playbooks', entries: [] },
+				{
+					kind: 'knowledge',
+					label: 'Knowledge',
+					entries: [
+						capEntry({
+							capability_kind: 'knowledge',
+							capability_key: 'kb-1',
+							label: 'Precedent bank',
+							source: null,
+							in_library: false,
+							recommended_for: []
+						})
+					]
+				}
+			]
+		};
+		const flat = flattenCapabilities(catalog);
+		const knowledgeEntries = flat.filter((e) => e.capability_kind === 'knowledge');
+		expect(knowledgeEntries.map((e) => e.capability_key)).toEqual(['kb-1']);
+		expect(knowledgeEntries[0].label).toBe('Precedent bank');
+	});
 });
 
 describe('missingEntries', () => {
@@ -196,6 +256,18 @@ describe('missingEntries', () => {
 			missingCount: 1
 		};
 		expect(missingEntries(rail)).toEqual([{ kind: 'skill', key: 'nda-review' }]);
+	});
+
+	it('handles a knowledge chip (type-level — knowledge never actually appears in a rail)', () => {
+		const rail = {
+			areaKey: 'commercial',
+			areaLabel: 'Commercial',
+			entries: [
+				{ kind: 'knowledge' as const, key: 'kb-1', label: 'Precedent bank', inLibrary: false }
+			],
+			missingCount: 1
+		};
+		expect(missingEntries(rail)).toEqual([{ kind: 'knowledge', key: 'kb-1' }]);
 	});
 
 	it('returns [] when everything is already adopted', () => {

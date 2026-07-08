@@ -16,6 +16,13 @@ export interface BoundPlaybook {
 	name: string;
 }
 
+/** One knowledge collection bound to an area — join summary (B-3, ADR-F067 D1),
+ *  mirrors `BoundPlaybook`. */
+export interface BoundKnowledgeBase {
+	id: string;
+	name: string;
+}
+
 export interface PracticeArea {
 	id: string;
 	/** Stable machine key ('commercial', 'privacy', …) — cockpit URL state. */
@@ -42,6 +49,8 @@ export interface PracticeArea {
 	bound_tool_groups: string[];
 	/** Bound (non-deleted) playbooks. */
 	bound_playbooks: BoundPlaybook[];
+	/** Bound (non-archived) knowledge collections (B-3, ADR-F067 D1). */
+	bound_knowledge_bases: BoundKnowledgeBase[];
 	created_at: string;
 	updated_at: string;
 }
@@ -164,6 +173,24 @@ export async function attachToolGroup(key: string, groupKey: string): Promise<vo
 export async function detachToolGroup(key: string, groupKey: string): Promise<void> {
 	return apiRequest<void>(
 		`/practice-areas/${encodeURIComponent(key)}/tool-groups/${encodeURIComponent(groupKey)}`,
+		{ method: 'DELETE' }
+	);
+}
+
+/** POST /api/v1/practice-areas/{key}/knowledge-bases — attach a knowledge collection
+ *  (admin, B-3, ADR-F067 D1). Unknown/archived collection 404; not yet adopted into
+ *  the Library 422 (ADR-F065 D4); re-attach 409. */
+export async function attachKnowledgeBase(key: string, knowledgeBaseId: string): Promise<void> {
+	return apiRequest<void>(`/practice-areas/${encodeURIComponent(key)}/knowledge-bases`, {
+		method: 'POST',
+		body: { knowledge_base_id: knowledgeBaseId }
+	});
+}
+
+/** DELETE /api/v1/practice-areas/{key}/knowledge-bases/{kb_id} — idempotent detach. */
+export async function detachKnowledgeBase(key: string, knowledgeBaseId: string): Promise<void> {
+	return apiRequest<void>(
+		`/practice-areas/${encodeURIComponent(key)}/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}`,
 		{ method: 'DELETE' }
 	);
 }

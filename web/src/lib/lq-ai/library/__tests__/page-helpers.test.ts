@@ -99,22 +99,24 @@ describe('provenanceBadge', () => {
 });
 
 describe('groupLibraryEntries', () => {
-	it('splits a flat list into tool/skill/playbook buckets, preserving order', () => {
+	it('splits a flat list into tool/skill/playbook/knowledge buckets, preserving order', () => {
 		const entries = [
 			entry({ kind: 'tool', key: 'tabular' }),
 			entry({ kind: 'skill', key: 'alpha' }),
 			entry({ kind: 'tool', key: 'redlining' }),
 			entry({ kind: 'playbook', key: 'pb-1' }),
-			entry({ kind: 'skill', key: 'beta' })
+			entry({ kind: 'skill', key: 'beta' }),
+			entry({ kind: 'knowledge', key: 'kb-1' })
 		];
 		const grouped = groupLibraryEntries(entries);
 		expect(grouped.tool.map((e) => e.key)).toEqual(['tabular', 'redlining']);
 		expect(grouped.skill.map((e) => e.key)).toEqual(['alpha', 'beta']);
 		expect(grouped.playbook.map((e) => e.key)).toEqual(['pb-1']);
+		expect(grouped.knowledge.map((e) => e.key)).toEqual(['kb-1']);
 	});
 
 	it('returns empty buckets for an empty list', () => {
-		expect(groupLibraryEntries([])).toEqual({ tool: [], skill: [], playbook: [] });
+		expect(groupLibraryEntries([])).toEqual({ tool: [], skill: [], playbook: [], knowledge: [] });
 	});
 });
 
@@ -133,6 +135,7 @@ function area(over: Partial<PracticeArea> = {}): PracticeArea {
 		bound_skills: [],
 		bound_tool_groups: [],
 		bound_playbooks: [],
+		bound_knowledge_bases: [],
 		created_at: '2026-01-01T00:00:00Z',
 		updated_at: '2026-01-01T00:00:00Z',
 		...over
@@ -140,21 +143,23 @@ function area(over: Partial<PracticeArea> = {}): PracticeArea {
 }
 
 describe('buildWhereUsedMap + whereUsedFor', () => {
-	it('maps skills, tool groups, and playbooks (id-as-string!) per area', () => {
+	it('maps skills, tool groups, playbooks, and knowledge bases (id-as-string!) per area', () => {
 		const areas = [
 			area({
 				key: 'commercial',
 				name: 'Commercial',
 				bound_skills: ['nda-review'],
 				bound_tool_groups: ['redlining'],
-				bound_playbooks: [{ id: 'pb-1', name: 'NDA playbook' }]
+				bound_playbooks: [{ id: 'pb-1', name: 'NDA playbook' }],
+				bound_knowledge_bases: [{ id: 'kb-1', name: 'Precedent bank' }]
 			}),
 			area({
 				key: 'privacy',
 				name: 'Privacy',
 				bound_skills: ['nda-review'],
 				bound_tool_groups: [],
-				bound_playbooks: []
+				bound_playbooks: [],
+				bound_knowledge_bases: []
 			})
 		];
 		const map = buildWhereUsedMap(areas);
@@ -165,6 +170,8 @@ describe('buildWhereUsedMap + whereUsedFor', () => {
 		expect(whereUsedFor(map, { kind: 'tool', key: 'redlining' })).toEqual(['Commercial']);
 		// Playbook id must match AS A STRING (Library keys playbooks by str(id)).
 		expect(whereUsedFor(map, { kind: 'playbook', key: 'pb-1' })).toEqual(['Commercial']);
+		// Knowledge id must match AS A STRING too (same convention, ADR-F067 D1).
+		expect(whereUsedFor(map, { kind: 'knowledge', key: 'kb-1' })).toEqual(['Commercial']);
 	});
 
 	it('returns [] for a key bound nowhere', () => {

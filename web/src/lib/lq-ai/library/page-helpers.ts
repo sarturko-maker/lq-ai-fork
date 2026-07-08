@@ -15,7 +15,7 @@
 import type { LibraryEntry } from '$lib/lq-ai/api/library';
 import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 
-export type LibraryKind = 'tool' | 'skill' | 'playbook';
+export type LibraryKind = 'tool' | 'skill' | 'playbook' | 'knowledge';
 
 const SOURCE_LABELS: Record<string, string> = {
 	'built-in': 'LQ built-in',
@@ -64,7 +64,8 @@ export function groupLibraryEntries(entries: LibraryEntry[]): Record<LibraryKind
 	return {
 		tool: entries.filter((e) => e.kind === 'tool'),
 		skill: entries.filter((e) => e.kind === 'skill'),
-		playbook: entries.filter((e) => e.kind === 'playbook')
+		playbook: entries.filter((e) => e.kind === 'playbook'),
+		knowledge: entries.filter((e) => e.kind === 'knowledge')
 	};
 }
 
@@ -73,12 +74,14 @@ export type WhereUsedMap = Record<LibraryKind, Record<string, string[]>>;
 /**
  * Build the (kind, key) -> [area names...] map from `GET /practice-areas`
  * (already ActiveUser, already returns `bound_skills` + `bound_tool_groups` +
- * `bound_playbooks` per area — no backend read model needed for where-used,
- * STORE-2 recon). Playbook keys match `bound_playbooks[].id` AS A STRING (the
- * Library keys playbooks by `str(playbook_id)`).
+ * `bound_playbooks` + `bound_knowledge_bases` per area — no backend read model
+ * needed for where-used, STORE-2 recon). Playbook keys match
+ * `bound_playbooks[].id` AS A STRING (the Library keys playbooks by
+ * `str(playbook_id)`); knowledge keys match `bound_knowledge_bases[].id` the
+ * same way (B-3, ADR-F067 D1).
  */
 export function buildWhereUsedMap(areas: PracticeArea[]): WhereUsedMap {
-	const map: WhereUsedMap = { tool: {}, skill: {}, playbook: {} };
+	const map: WhereUsedMap = { tool: {}, skill: {}, playbook: {}, knowledge: {} };
 	for (const area of areas) {
 		for (const skillName of area.bound_skills) {
 			(map.skill[skillName] ??= []).push(area.name);
@@ -88,6 +91,9 @@ export function buildWhereUsedMap(areas: PracticeArea[]): WhereUsedMap {
 		}
 		for (const pb of area.bound_playbooks) {
 			(map.playbook[pb.id] ??= []).push(area.name);
+		}
+		for (const kb of area.bound_knowledge_bases) {
+			(map.knowledge[String(kb.id)] ??= []).push(area.name);
 		}
 	}
 	return map;

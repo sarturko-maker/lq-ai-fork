@@ -178,32 +178,45 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   runbook §4b, four NON-secret env vars. Gate: gateway 627/2, mypy --strict 0/40, ruff clean.
 >   HONEST: SIGHUP does NOT rebuild adapters ⇒ rotation needs gateway recreate. LIVE proof = the
 >   maintainer's VM session (runbook §4b two-step + §5.3/§5.4; §5.4 azure-claude = AZ-2b proof).
-> - **B-3 = THIS PR (task #485, branch `b3-knowledge-tool-group`):** knowledge-collection Library
->   kind + `search_knowledge` tool group (F067 D1; contract = session scratchpad `b3-contract.md`).
->   Key rulings now IN CODE: mig 0092 (join table + org-library CHECK widened + matter-toggles
->   CHECK widened); NO separate tool-group adoption — the group is COMPOSITION-ONLY
->   (`COMPOSITION_ONLY_GROUP_KEYS` fences it out of the tool catalog/adopt/bind/inventory/read
->   surfaces; composition injects it iff ≥1 enabled kind='knowledge' entry resolves);
+> - **B-3 ✓ MERGED (PR #240 `9cf026b0`, task #485, branch `b3-knowledge-tool-group`):**
+>   knowledge-collection Library kind + `search_knowledge` tool group (F067 D1; contract = session
+>   scratchpad `b3-contract.md`). Key rulings IN CODE: mig 0092 (join table + org-library CHECK
+>   widened + matter-toggles CHECK widened); NO separate tool-group adoption — the group is
+>   COMPOSITION-ONLY (`COMPOSITION_ONLY_GROUP_KEYS` fences it out of the tool catalog/adopt/bind/
+>   inventory/read surfaces; composition injects it iff ≥1 enabled kind='knowledge' entry resolves);
 >   `GroupBuildContext.knowledge_base_ids`; query embeds via GATEWAY (1536, matches KB ingest —
 >   deliberately NOT the 768 matter embedder), FTS-only degradation, embed skipped when every
->   bound collection is alpha=1.0; fenced RETRIEVED-DATA render; F067 B-3 addendum. **Web surfaces
->   (Store/Library sections + area bind card for the kind) DEFERRED to B-3b on record** — B-2b
->   edits those exact files in parallel; bind/adopt is API-only until B-3b.
-> - **B-2b ✓ BUILT+REVIEWED (task #484, worktree `/home/sarturko/LQ_AI_Fork-b2b`, branch
->   `b2b-propose-review-ui`, contract = scratchpad `b2b-contract.md`):** propose action on skills
->   LIST+EDIT pages (proposals section scope-gated to user rows), review queue ON the admin
->   Library page (full-content expand + full content_hash receipt; revoke behind a ModalShell
->   confirm with D3.8-truthful copy; operator 403 hides the section silently, ADR-F064), org
->   provenance badges via shared SOURCE_LABELS/provenanceBadge, ONE api touch = additive
->   approver_email/approver fields (deliberate: member /library now shows the approving admin's
->   email — F067 D3.5, record in PR). Remaining: web+api gates, live cypress loop, PR; whichever
->   of B-2b/B-3 merges second rebases (both touch admin.py/library.py).
-> - **P-1 IN FLIGHT (task #486, worktree `/home/sarturko/LQ_AI_Fork-priv`, branch
->   `pp1-private-profile`, contract = scratchpad `p1-contract.md`):** private profile /
->   restricted-egress posture — additive `docker-compose.private.yml` overlay (on-box MinIO, Caddy
->   `tls internal` loopback :8443, SSH-tunnel access, Tailscale = signoff-gated alternative),
->   `.env.private.example`, runbook §8 with the egress-inventory table, ADR-F070 proposed. Public
->   path must stay byte-identical; generic framing only.
+>   bound collection is alpha=1.0; fenced RETRIEVED-DATA render; F067 B-3 addendum. Web surfaces
+>   (Store/Library sections + area bind card for the kind) were DEFERRED to B-3b on record —
+>   B-2b edited those exact files in parallel; bind/adopt was API-only until B-3b (below).
+> - **B-2b ✓ MERGED (PR #246 `7b482ed7`, task #484, branch `b2b-propose-review-ui`, contract =
+>   scratchpad `b2b-contract.md`):** propose action on skills LIST+EDIT pages (proposals section
+>   scope-gated to user rows), review queue ON the admin Library page (full-content expand + full
+>   content_hash receipt; revoke behind a ModalShell confirm with D3.8-truthful copy; operator 403
+>   hides the section silently, ADR-F064), org provenance badges via shared
+>   SOURCE_LABELS/provenanceBadge, ONE api touch = additive approver_email/approver fields
+>   (deliberate: member /library now shows the approving admin's email — F067 D3.5). Merged second
+>   of the B-2b/B-3 pair — the admin.py/library.py rebase is already reconciled (HEAD 7b482ed7).
+> - **P-1 ✓ MERGED (PR #241 `4634450b`, task #486, branch `pp1-private-profile`, contract =
+>   scratchpad `p1-contract.md`):** private profile / restricted-egress posture — additive
+>   `docker-compose.private.yml` overlay (on-box MinIO, Caddy `tls internal` loopback :8443,
+>   SSH-tunnel access, Tailscale = signoff-gated alternative), `.env.private.example`, runbook §8
+>   with the egress-inventory table, ADR-F070 proposed. Public path stays byte-identical; generic
+>   framing only.
+> - **B-3b THIS PR (branch `b3b-knowledge-web`, contract = scratchpad `b3b-contract.md`):** the
+>   web surfaces B-3 deferred — Store page + admin/member Library pages get a 4th "Knowledge"
+>   section; area-detail page gets a Knowledge collections bind card (mirrors the Playbooks card);
+>   matter-panel `CapabilityKind`/`CapabilityToggleInput` TS unions + `emptyCaption` gain the
+>   'knowledge' case. Web-only + docs, ZERO `api/` changes (every wire shape shipped in B-3). Every
+>   stale 3-kind union (`admin.ts` ×4, `library.ts`, `LibraryKind`/`groupLibraryEntries`/
+>   `buildWhereUsedMap`, `FlatCapability`/`RecommendedChip`/`missingEntries`,
+>   `catalogEntriesForKind`, area-list `boundCountsLabel`) widened to include 'knowledge'; new
+>   `BoundKnowledgeBase` type + `attachKnowledgeBase`/`detachKnowledgeBase` clients mirroring
+>   `attachPlaybook`/`detachPlaybook`. Copy: "knowledge collection(s)" in every new user-facing
+>   string; "knowledge base" survives as the live noun on the owner `/lq-ai/knowledge` page PLUS
+>   the tabular wizard, the autonomous surfaces, settings/autonomous and both learn pages — a
+>   follow-up noun sweep is a real slice, not a one-page touch-up (deferred on record). Gate: svelte-check 0 errors; vitest 112 files /
+>   1265 tests, all green.
 > - Slice traps (recur): FIVE drift guards trip on new routes (test_endpoints _PARAM_VALUES +
 >   IMPLEMENTED_ROUTES; test_mutation_rbac ×3 pins now 135/184/69; test_openapi EXPECTED_PATHS +
 >   the SECOND len(actual) pin ~:419 now 184); api CI runs `mypy app` (containerized pytest gate

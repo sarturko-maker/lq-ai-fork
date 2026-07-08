@@ -36,6 +36,7 @@ function area(over: Partial<PracticeArea> = {}): PracticeArea {
 		bound_skills: [],
 		bound_tool_groups: [],
 		bound_playbooks: [],
+		bound_knowledge_bases: [],
 		created_at: '2026-01-01T00:00:00Z',
 		updated_at: '2026-01-01T00:00:00Z',
 		...over
@@ -250,6 +251,16 @@ describe('unboundOptions', () => {
 	it('returns [] when everything is bound', () => {
 		expect(unboundOptions(options, ['redlining', 'tabular', 'ropa'])).toEqual([]);
 	});
+
+	it('works with knowledge-style UUID keys (B-3b) — the helper is generic', () => {
+		const knowledgeOptions = [
+			{ key: '11111111-1111-1111-1111-111111111111', label: 'Precedent bank', description: null, in_library: true },
+			{ key: '22222222-2222-2222-2222-222222222222', label: 'Deal room', description: null, in_library: true }
+		];
+		expect(unboundOptions(knowledgeOptions, ['11111111-1111-1111-1111-111111111111'])).toEqual([
+			{ key: '22222222-2222-2222-2222-222222222222', label: 'Deal room', description: null, in_library: true }
+		]);
+	});
 });
 
 describe('degradedBindingKeys (G13(a))', () => {
@@ -294,6 +305,23 @@ describe('degradedBindingKeys (G13(a))', () => {
 		expect(degradedBindingKeys([], ['redlining', 'nda-review'])).toEqual(
 			new Set(['redlining', 'nda-review'])
 		);
+	});
+
+	it('works with knowledge-style UUID keys (B-3b) — the helper is generic', () => {
+		const kbCatalog = [
+			{
+				key: '11111111-1111-1111-1111-111111111111',
+				label: 'Precedent bank',
+				description: null,
+				in_library: true
+			}
+		];
+		expect(degradedBindingKeys(kbCatalog, ['11111111-1111-1111-1111-111111111111'])).toEqual(
+			new Set()
+		);
+		expect(
+			degradedBindingKeys(kbCatalog, ['22222222-2222-2222-2222-222222222222'])
+		).toEqual(new Set(['22222222-2222-2222-2222-222222222222']));
 	});
 });
 

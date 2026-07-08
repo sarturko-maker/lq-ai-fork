@@ -214,13 +214,15 @@ export async function enableUser(userId: string): Promise<UserDisableResponse> {
  *  avoids churning every unrelated test's literal. Skill entries carry real
  *  `source`/`author`/`version`/`tags`; tool entries get `source: "built-in"` only;
  *  playbook entries get `source: null` (no provenance field exists for them yet).
+ *  Knowledge entries (B-3, ADR-F067 D1) likewise get `source: null` — adoption +
+ *  binding IS the control, not provenance review.
  *
  *  `approver` (B-2b, D3.5 wire gap): additive, optional — for `source === "org"`
  *  skill entries, the approving admin's email (the snapshot's `reviewed_by`
  *  resolved to an email, mirroring `author`'s resolution); `undefined`/`null` for
  *  every other entry. */
 export interface DeploymentCapabilityRead {
-	capability_kind: 'skill' | 'tool' | 'playbook';
+	capability_kind: 'skill' | 'tool' | 'playbook' | 'knowledge';
 	capability_key: string;
 	label: string;
 	description: string | null;
@@ -234,9 +236,9 @@ export interface DeploymentCapabilityRead {
 	recommended_for?: string[];
 }
 
-/** A kind-grouped section (Tools / Skills / Playbooks) of the deployment inventory. */
+/** A kind-grouped section (Tools / Skills / Playbooks / Knowledge) of the deployment inventory. */
 export interface DeploymentCapabilitySection {
-	kind: 'skill' | 'tool' | 'playbook';
+	kind: 'skill' | 'tool' | 'playbook' | 'knowledge';
 	label: string;
 	entries: DeploymentCapabilityRead[];
 }
@@ -267,7 +269,7 @@ export async function getDeploymentCapabilities(): Promise<DeploymentCapabilitie
 
 /** POST /admin/library body — adopt one catalog capability. */
 export interface LibraryEntryInput {
-	kind: 'skill' | 'tool' | 'playbook';
+	kind: 'skill' | 'tool' | 'playbook' | 'knowledge';
 	key: string;
 }
 
@@ -286,7 +288,10 @@ export async function adoptLibraryEntry(body: LibraryEntryInput): Promise<void> 
  * Library (Library page's Remove, after the D-F confirm). Idempotent (204
  * even if not adopted).
  */
-export async function removeLibraryEntry(kind: 'skill' | 'tool' | 'playbook', key: string): Promise<void> {
+export async function removeLibraryEntry(
+	kind: 'skill' | 'tool' | 'playbook' | 'knowledge',
+	key: string
+): Promise<void> {
 	await apiRequest<void>(
 		`/admin/library/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`,
 		{ method: 'DELETE' }

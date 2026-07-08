@@ -148,6 +148,8 @@ fenced results carry citations.
 - **B-3b deferral (recorded at B-3 ship time):** the web surfaces (Store/Library sections for
   kind `knowledge` + the area-page bind card) are deferred to B-3b — B-2b concurrently edits
   those exact files; backend endpoints and panel sections shipped in B-3.
+  **B-3b SHIPPED 2026-07-08** — Store/Library knowledge sections, area-detail bind card, matter-
+  panel TS type honesty; web-only, no `api/` changes.
 
 ## B-4 — org-authored playbooks through the same harness
 

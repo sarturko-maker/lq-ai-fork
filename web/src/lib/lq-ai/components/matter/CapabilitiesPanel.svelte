@@ -39,6 +39,8 @@
 					return 'No skills bound to this practice area yet.';
 				case 'tool':
 					return 'No tools available for this practice area.';
+				case 'knowledge':
+					return 'No knowledge collections bound to this practice area yet.';
 			}
 		}
 		return null;

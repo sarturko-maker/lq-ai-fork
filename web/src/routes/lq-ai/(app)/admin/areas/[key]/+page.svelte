@@ -76,6 +76,7 @@
 	const skillCatalogAll = $derived(catalogEntriesForKind(catalog, 'skill'));
 	const toolCatalogAll = $derived(catalogEntriesForKind(catalog, 'tool'));
 	const playbookCatalogAll = $derived(catalogEntriesForKind(catalog, 'playbook'));
+	const knowledgeCatalogAll = $derived(catalogEntriesForKind(catalog, 'knowledge'));
 
 	// B-2b (decision 5) — org-authored skill provenance, keyed by skill key. Reads the
 	// FULL catalog response directly (skillCatalogAll's CatalogOption projection strips
@@ -85,6 +86,7 @@
 	const skillCatalog = $derived(libraryOnly(skillCatalogAll));
 	const toolCatalog = $derived(libraryOnly(toolCatalogAll));
 	const playbookCatalog = $derived(libraryOnly(playbookCatalogAll));
+	const knowledgeCatalog = $derived(libraryOnly(knowledgeCatalogAll));
 
 	// G13(a) — bound keys whose catalog entry isn't Library-adopted (or is
 	// missing entirely). `build_area_inventory` fail-closes on these server-
@@ -105,6 +107,14 @@
 				)
 			: new Set<string>()
 	);
+	const degradedKnowledgeKeys = $derived(
+		area
+			? degradedBindingKeys(
+					knowledgeCatalogAll,
+					area.bound_knowledge_bases.map((kb) => String(kb.id))
+				)
+			: new Set<string>()
+	);
 
 	// Attach `<select>` option sets — computed here (not `{@const}`, which must be
 	// an IMMEDIATE child of an {#if}/{:else}/etc., not nested inside a <section>).
@@ -112,6 +122,9 @@
 	const skillOptions = $derived(area ? unboundOptions(skillCatalog, area.bound_skills) : []);
 	const playbookOptions = $derived(
 		area ? unboundOptions(playbookCatalog, area.bound_playbooks.map((pb) => pb.id)) : []
+	);
+	const knowledgeOptions = $derived(
+		area ? unboundOptions(knowledgeCatalog, area.bound_knowledge_bases.map((kb) => kb.id)) : []
 	);
 
 	async function load() {
@@ -223,6 +236,10 @@
 	let playbookError = $state<string | null>(null);
 	let playbookSelection = $state('');
 
+	let knowledgeBusy = $state(false);
+	let knowledgeError = $state<string | null>(null);
+	let knowledgeSelection = $state('');
+
 	async function attachGroup() {
 		if (!area || !groupSelection) return;
 		groupBusy = true;
@@ -307,6 +324,35 @@
 			playbookError = describeMutationError(e, 'Failed to detach the playbook.');
 		} finally {
 			playbookBusy = false;
+		}
+	}
+
+	async function attachKnowledgeBinding() {
+		if (!area || !knowledgeSelection) return;
+		knowledgeBusy = true;
+		knowledgeError = null;
+		try {
+			await practiceAreasApi.attachKnowledgeBase(area.key, knowledgeSelection);
+			knowledgeSelection = '';
+			await load();
+		} catch (e) {
+			knowledgeError = describeMutationError(e, 'Failed to attach the knowledge collection.');
+		} finally {
+			knowledgeBusy = false;
+		}
+	}
+
+	async function detachKnowledgeBinding(id: string) {
+		if (!area) return;
+		knowledgeBusy = true;
+		knowledgeError = null;
+		try {
+			await practiceAreasApi.detachKnowledgeBase(area.key, id);
+			await load();
+		} catch (e) {
+			knowledgeError = describeMutationError(e, 'Failed to detach the knowledge collection.');
+		} finally {
+			knowledgeBusy = false;
 		}
 	}
 
@@ -696,6 +742,75 @@
 				</p>
 			{:else if pickerEmptyState(playbookCatalog, playbookOptions) === 'all-attached'}
 				<p class="text-xs text-muted-foreground" data-testid="lq-admin-area-playbooks-empty">
+					Everything in your library is already attached.
+				</p>
+			{/if}
+		</section>
+
+		<!-- ----- Knowledge collections ----- -->
+		<section
+			class="mt-6 space-y-3 rounded-lg border border-border p-4"
+			aria-label="Knowledge collections"
+		>
+			<SectionHeader size="section" title="Knowledge collections" />
+			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-knowledge-list">
+				{#each area.bound_knowledge_bases as kb (kb.id)}
+					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+						<span class="flex flex-wrap items-center gap-2">
+							<span class="text-sm text-foreground">{kb.name}</span>
+							{@render degradedBindingChip(
+								degradedKnowledgeKeys.has(String(kb.id)),
+								`lq-admin-area-knowledge-degraded-${kb.id}`
+							)}
+						</span>
+						<Button
+							type="button"
+							size="sm"
+							variant="outline"
+							disabled={knowledgeBusy}
+							onclick={() => detachKnowledgeBinding(kb.id)}
+							data-testid={`lq-admin-area-knowledge-detach-${kb.id}`}
+						>
+							Detach
+						</Button>
+					</li>
+				{:else}
+					<li class="text-xs text-muted-foreground">No knowledge collections bound.</li>
+				{/each}
+			</ul>
+			{#if knowledgeError}
+				<Alert intent="error">{knowledgeError}</Alert>
+			{/if}
+			{#if knowledgeOptions.length > 0}
+				<div class="flex items-end gap-2">
+					<select
+						class={SELECT_CLASS}
+						bind:value={knowledgeSelection}
+						disabled={knowledgeBusy}
+						data-testid="lq-admin-area-knowledge-attach-select"
+					>
+						<option value="">Choose a knowledge collection…</option>
+						{#each knowledgeOptions as opt (opt.key)}
+							<option value={opt.key}>{opt.label}</option>
+						{/each}
+					</select>
+					<Button
+						type="button"
+						variant="outline"
+						disabled={knowledgeBusy || !knowledgeSelection}
+						onclick={attachKnowledgeBinding}
+						data-testid="lq-admin-area-knowledge-attach"
+					>
+						Attach
+					</Button>
+				</div>
+			{:else if pickerEmptyState(knowledgeCatalog, knowledgeOptions) === 'library-empty'}
+				<p class="text-xs text-muted-foreground" data-testid="lq-admin-area-knowledge-empty">
+					Your library has no knowledge collections yet —
+					<a href="/lq-ai/admin/store" class="underline">browse the Store</a>.
+				</p>
+			{:else if pickerEmptyState(knowledgeCatalog, knowledgeOptions) === 'all-attached'}
+				<p class="text-xs text-muted-foreground" data-testid="lq-admin-area-knowledge-empty">
 					Everything in your library is already attached.
 				</p>
 			{/if}

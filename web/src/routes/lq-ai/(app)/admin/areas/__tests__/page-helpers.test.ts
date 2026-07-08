@@ -64,15 +64,21 @@ describe('moveKey', () => {
 describe('boundCountsLabel', () => {
 	it('pluralizes each count independently', () => {
 		expect(
-			boundCountsLabel({ bound_skills: [], bound_playbooks: [], bound_tool_groups: [] })
-		).toBe('0 skills · 0 playbooks · 0 groups');
+			boundCountsLabel({
+				bound_skills: [],
+				bound_playbooks: [],
+				bound_tool_groups: [],
+				bound_knowledge_bases: []
+			})
+		).toBe('0 skills · 0 playbooks · 0 groups · 0 collections');
 		expect(
 			boundCountsLabel({
 				bound_skills: ['a'],
 				bound_playbooks: [{ id: '1', name: 'x' }],
-				bound_tool_groups: ['redlining', 'tabular']
+				bound_tool_groups: ['redlining', 'tabular'],
+				bound_knowledge_bases: [{ id: 'kb-1', name: 'Precedent bank' }]
 			})
-		).toBe('1 skill · 1 playbook · 2 groups');
+		).toBe('1 skill · 1 playbook · 2 groups · 1 collection');
 	});
 });
 

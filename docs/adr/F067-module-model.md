@@ -326,3 +326,5 @@ worth recording, all within the D1 envelope:
    to avoid a cross-slice merge tangle, not descoped. The backend endpoints
    (`POST/DELETE /practice-areas/{key}/knowledge-bases`, the `knowledge` sections in the admin
    catalog / member Library / matter panel) shipped in B-3.
+   **B-3b shipped 2026-07-08 (PR TBD):** the Store/Library knowledge sections, the area-detail
+   bind card, and the matter-panel TS type honesty landed — web-only, no `api/` changes.
