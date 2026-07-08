@@ -31,10 +31,18 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.capabilities import KIND_PLAYBOOK, KIND_SKILL, KIND_TOOL, TOOL_GROUP_REGISTRY
+from app.agents.capabilities import (
+    COMPOSITION_ONLY_GROUP_KEYS,
+    KIND_KNOWLEDGE,
+    KIND_PLAYBOOK,
+    KIND_SKILL,
+    KIND_TOOL,
+    TOOL_GROUP_REGISTRY,
+)
 from app.api.admin import playbook_display_label
 from app.api.dependencies import ActiveUser
 from app.db.session import get_db
+from app.models.knowledge import KnowledgeBase
 from app.models.playbook import Playbook as PlaybookORM
 from app.models.practice_area import OrgLibraryEntry
 from app.skills.org_proposal import load_approved_org_skill_versions
@@ -44,8 +52,13 @@ from app.skills.schema import humanise_skill_name
 router = APIRouter(prefix="/library", tags=["library"])
 
 # Canonical kind order for the response — mirrors `DeploymentCapabilitiesResponse`'s
-# section order (tool, skill, playbook) in `app.api.admin`.
-_KIND_ORDER: dict[str, int] = {KIND_TOOL: 0, KIND_SKILL: 1, KIND_PLAYBOOK: 2}
+# section order (tool, skill, playbook, knowledge) in `app.api.admin`.
+_KIND_ORDER: dict[str, int] = {
+    KIND_TOOL: 0,
+    KIND_SKILL: 1,
+    KIND_PLAYBOOK: 2,
+    KIND_KNOWLEDGE: 3,
+}
 
 
 class LibraryEntryRead(BaseModel):
@@ -95,6 +108,17 @@ async def _live_playbooks_by_id(db: AsyncSession) -> dict[str, PlaybookORM]:
     return {str(pb.id): pb for pb in rows}
 
 
+async def _live_knowledge_bases_by_id(db: AsyncSession) -> dict[str, KnowledgeBase]:
+    """Non-archived knowledge collections keyed by ``str(id)`` — mirrors
+    :func:`_live_playbooks_by_id` (ADR-F067 D1, B-3)."""
+    rows = (
+        (await db.execute(select(KnowledgeBase).where(KnowledgeBase.archived_at.is_(None))))
+        .scalars()
+        .all()
+    )
+    return {str(kb.id): kb for kb in rows}
+
+
 @router.get(
     "",
     response_model=LibraryResponse,
@@ -108,13 +132,14 @@ async def get_library(
     """GET /api/v1/library — every capability the org has adopted, for any active user.
 
     See the module docstring for the transparency rationale and the dangling-entry
-    contract. Ordering: kind in canonical order (tool -> skill -> playbook), then
-    label (case-insensitive, ``None`` last), then key — stable and legible for a
-    card list grouped by kind.
+    contract. Ordering: kind in canonical order (tool -> skill -> playbook ->
+    knowledge), then label (case-insensitive, ``None`` last), then key — stable and
+    legible for a card list grouped by kind.
     """
     rows = (await db.execute(select(OrgLibraryEntry))).scalars().all()
     registry = _registry_or_none(request)
     playbooks_by_id = await _live_playbooks_by_id(db)
+    knowledge_bases_by_id = await _live_knowledge_bases_by_id(db)
     # The shared approved-snapshot reader (ADR-F067). This member-visible read deliberately
     # exposes NO author identity: below, label/description/source come from the snapshot, but
     # author/version stay None for an org skill (author IS shown on the admin catalog surface,
@@ -131,7 +156,9 @@ async def get_library(
         version: str | None = None
 
         if kind == KIND_TOOL:
-            tdef = TOOL_GROUP_REGISTRY.get(key)
+            # Composition-only keys (F067 B-3) can never be adopted as tools —
+            # a forged/legacy row renders as dangling, mirroring the grant fence.
+            tdef = TOOL_GROUP_REGISTRY.get(key) if key not in COMPOSITION_ONLY_GROUP_KEYS else None
             if tdef is not None:
                 label = tdef.spec.label
                 description = tdef.spec.description
@@ -155,12 +182,20 @@ async def get_library(
                     label = snap.title or humanise_skill_name(key)
                     description = snap.description
                     source = "org"
-        else:  # KIND_PLAYBOOK
+        elif kind == KIND_PLAYBOOK:
             pb = playbooks_by_id.get(key)
             if pb is not None:
                 label = playbook_display_label(pb)
                 description = pb.description or None
                 # source stays None: playbooks carry no provenance field today (D-A).
+        else:  # KIND_KNOWLEDGE
+            kb = knowledge_bases_by_id.get(key)
+            if kb is not None:
+                label = kb.name
+                description = kb.description or None
+                # source stays None: knowledge collections carry no provenance field
+                # either (mirrors playbooks, D-A) — adoption + binding IS the control
+                # (ADR-F067 D1).
 
         entries.append(
             LibraryEntryRead(

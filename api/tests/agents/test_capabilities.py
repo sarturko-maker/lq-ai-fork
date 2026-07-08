@@ -16,6 +16,7 @@ import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -69,6 +70,13 @@ def _playbook(name: str, *, contract_type: str = "NDA", description: str = "") -
     )
 
 
+def _kb(name: str, *, archived: bool = False) -> SimpleNamespace:
+    """One bound knowledge collection (structural — id/name/archived_at), ADR-F067 D1."""
+    return SimpleNamespace(
+        id=uuid.uuid4(), name=name, archived_at=(datetime.now(UTC) if archived else None)
+    )
+
+
 def _registry() -> _FakeRegistry:
     return _FakeRegistry(
         {
@@ -83,12 +91,14 @@ def _adopt_all(
     tool_group_keys: Sequence[str],
     bound_skill_names: Sequence[str],
     area_playbooks: Sequence[Any],
+    area_knowledge_bases: Sequence[Any] = (),
 ) -> list[SimpleNamespace]:
     """Library entries adopting every fixture capability — the common 'all adopted' case."""
     return (
         [_lib("tool", k) for k in tool_group_keys]
         + [_lib("skill", n) for n in bound_skill_names]
         + [_lib("playbook", str(pb.id)) for pb in area_playbooks]
+        + [_lib("knowledge", str(kb.id)) for kb in area_knowledge_bases]
     )
 
 
@@ -98,17 +108,21 @@ def _inv(
     bound_skill_names: Sequence[str] = (),
     registry: Any = None,
     area_playbooks: Sequence[Any] = (),
+    area_knowledge_bases: Sequence[Any] = (),
     library_entries: Sequence[Any] | None = None,
     org_skill_snapshots: Any = None,
 ) -> cap.CapabilityInventory:
     """``build_area_inventory`` with adopt-in defaults: unless ``library_entries`` is given
     explicitly, every fixture capability is adopted (so it is available). ``org_skill_snapshots``
-    (ADR-F067) threads straight through — default None ≡ the pre-slice registry-only path."""
+    (ADR-F067) threads straight through — default None ≡ the pre-slice registry-only path.
+    ``area_knowledge_bases`` (ADR-F067 D1, B-3) likewise threads through — default () ≡ no
+    bound collections."""
     if library_entries is None:
         library_entries = _adopt_all(
             tool_group_keys=tool_group_keys,
             bound_skill_names=bound_skill_names,
             area_playbooks=area_playbooks,
+            area_knowledge_bases=area_knowledge_bases,
         )
     return build_area_inventory(
         tool_group_keys=list(tool_group_keys),
@@ -117,6 +131,7 @@ def _inv(
         area_playbooks=list(area_playbooks),
         library_entries=list(library_entries),
         org_skill_snapshots=org_skill_snapshots,
+        area_knowledge_bases=list(area_knowledge_bases),
     )
 
 
@@ -130,7 +145,16 @@ def test_commercial_inventory_lists_skills_tools_playbooks_and_mcp() -> None:
         area_playbooks=[pb],
     )
     sections = {s.kind: s for s in inv.sections()}
-    assert [s.kind for s in inv.sections()] == ["playbook", "skill", "tool", "mcp"]
+    # Section order (ADR-F067 D1, B-3): knowledge sits right after playbooks; the section
+    # is always present (empty here — no bound collections).
+    assert [s.kind for s in inv.sections()] == [
+        "playbook",
+        "knowledge",
+        "skill",
+        "tool",
+        "mcp",
+    ]
+    assert sections["knowledge"].entries == ()
     assert [e.key for e in sections["playbook"].entries] == [str(pb.id)]
     assert {e.key for e in sections["skill"].entries} == {"nda-review", "msa-review-saas"}
     # Commercial offers the redlining + tabular (Grids) tool groups (ADR-F055).
@@ -336,35 +360,41 @@ def test_org_and_shipped_skills_coexist_in_inventory_order() -> None:
 def test_adopted_and_bound_resolves_for_every_kind() -> None:
     """adopted + bound ⇒ the capability resolves (is an available entry)."""
     pb = _playbook("NDA playbook")
+    kb = _kb("House templates KB")
     inv = _inv(
         tool_group_keys=["redlining"],
         bound_skill_names=["nda-review"],
         registry=_registry(),
         area_playbooks=[pb],
+        area_knowledge_bases=[kb],
         library_entries=[
             _lib("tool", "redlining"),
             _lib("skill", "nda-review"),
             _lib("playbook", str(pb.id)),
+            _lib("knowledge", str(kb.id)),
         ],
     )
     assert ("tool", "redlining") in {(e.kind, e.key) for e in inv.entries}
     assert ("skill", "nda-review") in {(e.kind, e.key) for e in inv.entries}
     assert ("playbook", str(pb.id)) in {(e.kind, e.key) for e in inv.entries}
+    assert ("knowledge", str(kb.id)) in {(e.kind, e.key) for e in inv.entries}
 
 
 def test_not_adopted_but_bound_is_narrowed_for_every_kind() -> None:
     """not-adopted + bound ⇒ narrowed (absent from the inventory) — the single off-state."""
     pb = _playbook("NDA playbook")
+    kb = _kb("House templates KB")
     inv = _inv(
         tool_group_keys=["redlining"],
         bound_skill_names=["nda-review"],
         registry=_registry(),
         area_playbooks=[pb],
+        area_knowledge_bases=[kb],
         library_entries=[],  # nothing adopted
     )
     kinds = {e.kind for e in inv.entries}
     assert kinds == {"mcp"}  # only the placeholder survives
-    assert all(e.kind not in {"tool", "skill", "playbook"} for e in inv.entries)
+    assert all(e.kind not in {"tool", "skill", "playbook", "knowledge"} for e in inv.entries)
 
 
 def test_not_adopted_and_not_bound_is_absent_for_every_kind() -> None:
@@ -374,6 +404,7 @@ def test_not_adopted_and_not_bound_is_absent_for_every_kind() -> None:
         bound_skill_names=[],
         registry=_registry(),
         area_playbooks=[],
+        area_knowledge_bases=[],
         library_entries=[],
     )
     assert [e.kind for e in inv.entries] == ["mcp"]
@@ -392,6 +423,72 @@ def test_partial_adoption_narrows_only_the_unadopted() -> None:
     skills = {s.kind: s for s in inv.sections()}["skill"]
     assert [e.key for e in tools.entries] == ["redlining"]  # tabular not adopted → narrowed
     assert [e.key for e in skills.entries] == ["msa-review-saas"]  # nda-review not adopted
+
+
+# --- knowledge collections (ADR-F067 D1, B-3) --------------------------------
+def test_knowledge_section_lists_bound_adopted_collections() -> None:
+    """A bound + adopted collection becomes an available knowledge entry labelled from its
+    name, in the knowledge section."""
+    kb = _kb("House templates")
+    inv = _inv(area_knowledge_bases=[kb], registry=_registry())
+    section = {s.kind: s for s in inv.sections()}["knowledge"]
+    (entry,) = section.entries
+    assert entry.key == str(kb.id)
+    assert entry.label == "House templates"
+    assert entry.description is None  # structural protocol carries no description
+    assert entry.available and entry.toggleable and entry.default_enabled
+
+
+def test_knowledge_collection_not_adopted_is_narrowed() -> None:
+    """Bound but not adopted ⇒ the collection never becomes an entry (adopt-in off-state)."""
+    kb = _kb("House templates")
+    inv = _inv(
+        area_knowledge_bases=[kb],
+        registry=_registry(),
+        library_entries=[],  # nothing adopted
+    )
+    assert all(e.kind != "knowledge" for e in inv.entries)
+
+
+def test_archived_knowledge_collection_is_skipped_even_when_adopted() -> None:
+    """A soft-deleted (archived) collection is dropped at resolve time (drift-drop posture),
+    even if still adopted + bound."""
+    kb = _kb("Retired KB", archived=True)
+    inv = _inv(
+        area_knowledge_bases=[kb],
+        registry=_registry(),
+        library_entries=[_lib("knowledge", str(kb.id))],  # adopted, but archived
+    )
+    assert all(e.kind != "knowledge" for e in inv.entries)
+
+
+def test_enabled_keys_knowledge_all_on_by_default_and_off_override() -> None:
+    kb_a = _kb("KB alpha")
+    kb_b = _kb("KB bravo")
+    inv = _inv(area_knowledge_bases=[kb_a, kb_b], registry=_registry())
+    assert set(inv.enabled_keys("knowledge", [])) == {str(kb_a.id), str(kb_b.id)}
+    toggles = [
+        SimpleNamespace(capability_kind="knowledge", capability_key=str(kb_a.id), enabled=False)
+    ]
+    assert inv.enabled_keys("knowledge", toggles) == [str(kb_b.id)]
+
+
+def test_is_toggleable_covers_knowledge() -> None:
+    kb = _kb("House templates")
+    inv = _inv(area_knowledge_bases=[kb], registry=_registry())
+    assert inv.is_toggleable("knowledge", str(kb.id)) is True
+    assert inv.is_toggleable("knowledge", str(uuid.uuid4())) is False  # unknown id
+
+
+def test_bound_composition_only_group_row_is_skipped() -> None:
+    """F067 B-3 (defense in depth): a stray practice_area_tool_groups row naming the
+    composition-only knowledge group never becomes a ('tool', 'knowledge') entry — every
+    write surface rejects the key, so a row here is forged/stale data and is dropped
+    fail-closed (like an unregistered group)."""
+    inv = _inv(tool_group_keys=["redlining", "knowledge"], registry=_registry())
+    keys = {(e.kind, e.key) for e in inv.entries}
+    assert ("tool", "redlining") in keys
+    assert ("tool", "knowledge") not in keys
 
 
 # --- toggle resolution -------------------------------------------------------
@@ -491,8 +588,17 @@ def test_tool_group_registry_order_is_canonical() -> None:
     # {redlining, tabular}, privacy → {ropa, assessment}) is pinned by the migration
     # round-trip (tests/test_migrations.py) + the seed-idempotency test
     # (tests/test_practice_areas.py); the parity gate (tests/agents/test_registry_parity.py)
-    # pins that this order reproduces the pre-slice per-area grants exactly.
-    assert list(cap.TOOL_GROUP_REGISTRY) == ["redlining", "tabular", "ropa", "assessment"]
+    # pins that this order reproduces the pre-slice per-area grants exactly. B-3 (ADR-F067
+    # D1) appends the knowledge group LAST — it is never attached via a
+    # practice_area_tool_groups row (composition injects its key when a run has enabled
+    # collections), so it perturbs no seeded area's grant order.
+    assert list(cap.TOOL_GROUP_REGISTRY) == [
+        "redlining",
+        "tabular",
+        "ropa",
+        "assessment",
+        "knowledge",
+    ]
 
 
 # --- RECOMMENDED_LIBRARY_SETS drift guard (STORE-2 D-C) ----------------------

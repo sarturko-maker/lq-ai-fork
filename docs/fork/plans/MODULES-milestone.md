@@ -145,6 +145,9 @@ fenced results carry citations.
   upload → adopt → bind → agent answers a question only the KB can answer, with citations.
 - **Dependencies:** F067 accepted. Touches `capabilities.py` alongside B-2a — rebase-coordinate,
   or run after B-2a merges; otherwise independent.
+- **B-3b deferral (recorded at B-3 ship time):** the web surfaces (Store/Library sections for
+  kind `knowledge` + the area-page bind card) are deferred to B-3b — B-2b concurrently edits
+  those exact files; backend endpoints and panel sections shipped in B-3.
 
 ## B-4 — org-authored playbooks through the same harness
 

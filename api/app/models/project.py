@@ -539,7 +539,7 @@ class MatterCapabilityToggle(Base):
             name="pk_matter_capability_toggles",
         ),
         CheckConstraint(
-            "capability_kind IN ('skill', 'tool', 'playbook')",
+            "capability_kind IN ('skill', 'tool', 'playbook', 'knowledge')",
             name="chk_matter_capability_toggles_kind",
         ),
         CheckConstraint(

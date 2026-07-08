@@ -126,7 +126,9 @@ def _ctx(envelope: BudgetEnvelope = _TEST_ENVELOPE) -> GroupBuildContext:
 # --- registry shape ----------------------------------------------------------------------
 def test_registry_order_is_canonical() -> None:
     # Insertion order IS the canonical group order — the parity gate depends on it (D4).
-    assert list(TOOL_GROUP_REGISTRY) == ["redlining", "tabular", "ropa", "assessment"]
+    # B-3 (ADR-F067 D1): the composition-only knowledge group sits LAST, so it perturbs
+    # no seeded area's grant order (mirrors the pin in tests/agents/test_capabilities.py).
+    assert list(TOOL_GROUP_REGISTRY) == ["redlining", "tabular", "ropa", "assessment", "knowledge"]
     assert TOOL_GROUP_REGISTRY["redlining"].spec is REDLINING_GROUP
     assert TOOL_GROUP_REGISTRY["tabular"].spec is TABULAR_GROUP
     assert TOOL_GROUP_REGISTRY["ropa"].spec is ROPA_GROUP

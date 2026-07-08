@@ -38,6 +38,8 @@ from sqlalchemy.orm import selectinload
 from app.agents.area_agent import AreaAgentSpec, combine_tier_floors, render_area_agent
 from app.agents.budget import resolve_envelope
 from app.agents.capabilities import (
+    KIND_KNOWLEDGE,
+    KNOWLEDGE_GROUP,
     TABULAR_GROUP,
     GroupBuildContext,
     build_area_inventory,
@@ -76,12 +78,14 @@ from app.agents.tools import MatterBinding, build_matter_tools
 from app.config import get_settings
 from app.db.session import get_session_factory
 from app.models.agent_run import AgentRun
+from app.models.knowledge import KnowledgeBase
 from app.models.org_skill import OrgSkillVersion
 from app.models.organization_profile import OrganizationProfile
 from app.models.playbook import Playbook
 from app.models.practice_area import (
     OrgLibraryEntry,
     PracticeArea,
+    PracticeAreaKnowledgeBase,
     PracticeAreaPlaybook,
     PracticeAreaSkill,
     PracticeAreaToolGroup,
@@ -541,6 +545,10 @@ async def compose_and_execute_run(
         # tool/skill/prompt assembly is byte-identical to the pre-slice path.
         enabled_skills: list[str] = []
         enabled_tool_groups: set[str] = set()
+        # ADR-F067 D1 (B-3): the run's ENABLED knowledge collections (bound ∩ adopted ∩
+        # matter-toggled), resolved in the area block below. Empty default ⇒ the knowledge
+        # tool group is never built (no bound/enabled collection) — the pre-slice path.
+        enabled_knowledge_base_ids: tuple[uuid.UUID, ...] = ()
         # ADR-F067 D2/D3: the approved org-authored skill snapshots the runtime serves this
         # run — resolved to their FULL served SKILL.md text (provenance banner prefixed at
         # serve time) inside the area block below, captured here so it survives the session
@@ -718,6 +726,29 @@ async def compose_and_execute_run(
                             library_entries = (
                                 (await db.execute(select(OrgLibraryEntry))).scalars().all()
                             )
+                            # ADR-F067 D1 (B-3): the area's bound knowledge collections
+                            # (practice_area_knowledge_bases ⋈ knowledge_bases). The Org
+                            # Library then narrows availability to what the org adopted
+                            # (kind 'knowledge'); the inventory skips any archived
+                            # collection at resolve time. Fed to the same chokepoint.
+                            area_knowledge_bases = (
+                                (
+                                    await db.execute(
+                                        select(KnowledgeBase)
+                                        .join(
+                                            PracticeAreaKnowledgeBase,
+                                            PracticeAreaKnowledgeBase.knowledge_base_id
+                                            == KnowledgeBase.id,
+                                        )
+                                        .where(
+                                            PracticeAreaKnowledgeBase.practice_area_id == area.id
+                                        )
+                                        .order_by(KnowledgeBase.name, KnowledgeBase.id)
+                                    )
+                                )
+                                .scalars()
+                                .all()
+                            )
                             # ADR-F067 D2/D3: load the APPROVED org-authored skill snapshots
                             # (immutable bytes) ONCE, beside the Org Library. The runtime reads
                             # ONLY state='approved' rows — never the live, mutable user_skills
@@ -733,9 +764,17 @@ async def compose_and_execute_run(
                                 tool_group_keys=area_tool_group_keys,
                                 library_entries=library_entries,
                                 org_skill_snapshots=org_snapshots,
+                                area_knowledge_bases=area_knowledge_bases,
                             )
                             enabled_skills = inventory.enabled_keys("skill", toggles)
                             enabled_tool_groups = set(inventory.enabled_keys("tool", toggles))
+                            # ADR-F067 D1 (B-3): the enabled knowledge collections (keys are
+                            # knowledge_bases.id::text) drive whether the knowledge tool group
+                            # is built for this run (below).
+                            enabled_knowledge_base_ids = tuple(
+                                uuid.UUID(key)
+                                for key in inventory.enabled_keys(KIND_KNOWLEDGE, toggles)
+                            )
                             enabled_playbook_keys = set(inventory.enabled_keys("playbook", toggles))
                             enabled_playbooks = [
                                 pb for pb in area_playbooks if str(pb.id) in enabled_playbook_keys
@@ -868,6 +907,14 @@ async def compose_and_execute_run(
         envelope = resolve_envelope(run_budget_profile, get_settings())
         change_ledger: ChangeLedger | None = None
         if binding is not None:
+            # ADR-F067 D1 (B-3): the knowledge group is not a practice_area_tool_groups row —
+            # inject its key here iff the run has ≥1 enabled knowledge collection, so the
+            # guarded search_knowledge tool is built (and its name granted) only then. The
+            # collections were already resolved through the Library/binding/toggle chokepoint;
+            # this is downstream composition, not a second resolution path.
+            build_group_keys = set(enabled_tool_groups)
+            if enabled_knowledge_base_ids:
+                build_group_keys.add(KNOWLEDGE_GROUP.key)
             domain_tools, change_ledger = build_area_tool_groups(
                 GroupBuildContext(
                     session_factory=session_factory,
@@ -875,8 +922,9 @@ async def compose_and_execute_run(
                     binding=binding,
                     envelope=envelope,
                     redline_service_provider=redline_service_provider,
+                    knowledge_base_ids=enabled_knowledge_base_ids,
                 ),
-                enabled_tool_groups,
+                build_group_keys,
             )
             tools = tools + domain_tools
 

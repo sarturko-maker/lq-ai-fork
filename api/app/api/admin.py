@@ -45,6 +45,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.capabilities import (
+    COMPOSITION_ONLY_GROUP_KEYS,
+    KIND_KNOWLEDGE,
     KIND_PLAYBOOK,
     KIND_SKILL,
     KIND_TOOL,
@@ -60,6 +62,7 @@ from app.errors import Conflict, Forbidden, NotFound
 from app.models.audit import AuditLog
 from app.models.document import Document as DocumentORM
 from app.models.file import File as FileORM
+from app.models.knowledge import KnowledgeBase
 from app.models.org_skill import OrgSkillVersion
 from app.models.playbook import Playbook as PlaybookORM
 from app.models.practice_area import OrgLibraryEntry
@@ -1472,7 +1475,7 @@ class DeploymentToggleInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["skill", "tool", "playbook"]
+    kind: Literal["skill", "tool", "playbook", "knowledge"]
     key: str = Field(min_length=1, max_length=200)
     enabled: bool
 
@@ -1491,7 +1494,7 @@ class LibraryEntryInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["skill", "tool", "playbook"]
+    kind: Literal["skill", "tool", "playbook", "knowledge"]
     key: str = Field(min_length=1, max_length=200)
 
 
@@ -1559,17 +1562,35 @@ async def _live_playbooks(db: AsyncSession) -> list[PlaybookORM]:
     )
 
 
+async def _live_knowledge_bases(db: AsyncSession) -> list[KnowledgeBase]:
+    """Non-archived knowledge collections, name order — mirrors :func:`_live_playbooks`
+    (ADR-F067 D1, B-3)."""
+    return list(
+        (
+            await db.execute(
+                select(KnowledgeBase)
+                .where(KnowledgeBase.archived_at.is_(None))
+                .order_by(KnowledgeBase.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 async def _validate_catalog_key(db: AsyncSession, request: Request, kind: str, key: str) -> None:
     """Reject a (kind, key) absent from its catalog (422 — reject, don't sanitize).
 
     Shared by the adopt endpoint and the PATCH shim so the validation cannot drift: a tool
     group in the code registry, a skill in the skill registry OR an approved org-skill
-    snapshot (ADR-F067 D2/D3 — either catalog counts as "exists"), a non-deleted playbook id.
-    A literal HTTPException(422) (NOT a domain ValidationError, which maps to 400) — no dead
-    row lands.
+    snapshot (ADR-F067 D2/D3 — either catalog counts as "exists"), a non-deleted playbook id,
+    a non-archived knowledge collection id (ADR-F067 D1, B-3). A literal HTTPException(422)
+    (NOT a domain ValidationError, which maps to 400) — no dead row lands.
     """
     if kind == KIND_TOOL:
-        if key not in TOOL_GROUP_REGISTRY:
+        # F067 B-3: a composition-only group (knowledge) is not adoptable as a tool —
+        # treat it exactly like an unknown key.
+        if key not in TOOL_GROUP_REGISTRY or key in COMPOSITION_ONLY_GROUP_KEYS:
             raise HTTPException(
                 status_code=422, detail=f"Tool group {key!r} is not in the registry."
             )
@@ -1579,11 +1600,18 @@ async def _validate_catalog_key(db: AsyncSession, request: Request, kind: str, k
             await _approved_org_skill_slugs(db)
         ):
             raise HTTPException(status_code=422, detail=f"Skill {key!r} is not in the registry.")
-    else:  # KIND_PLAYBOOK
+    elif kind == KIND_PLAYBOOK:
         live_ids = {str(pb.id) for pb in await _live_playbooks(db)}
         if key not in live_ids:
             raise HTTPException(
                 status_code=422, detail=f"Playbook {key!r} is not an available playbook."
+            )
+    else:  # KIND_KNOWLEDGE
+        live_kb_ids = {str(kb.id) for kb in await _live_knowledge_bases(db)}
+        if key not in live_kb_ids:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Knowledge collection {key!r} is not an available collection.",
             )
 
 
@@ -1635,6 +1663,8 @@ async def _deployment_inventory(
             recommended_for=recommended_for.get((kind, key), []),
         )
 
+    # F067 B-3: composition-only groups (knowledge) never appear as tool cards — the
+    # adopted unit is the kind='knowledge' entry; the group is derived at composition.
     tool_entries = [
         _read(
             KIND_TOOL,
@@ -1644,6 +1674,7 @@ async def _deployment_inventory(
             source="built-in",
         )
         for group_key, tdef in TOOL_GROUP_REGISTRY.items()
+        if group_key not in COMPOSITION_ONLY_GROUP_KEYS
     ]
 
     skill_entries: list[DeploymentCapabilityRead] = []
@@ -1696,12 +1727,27 @@ async def _deployment_inventory(
         for pb in await _live_playbooks(db)
     ]
 
+    knowledge_entries = [
+        _read(
+            KIND_KNOWLEDGE,
+            str(kb.id),
+            kb.name,
+            kb.description or None,
+            # source=None: knowledge collections carry no provenance field either (mirrors
+            # playbooks, D-A) — adoption + binding IS the control (ADR-F067 D1).
+        )
+        for kb in await _live_knowledge_bases(db)
+    ]
+
     return DeploymentCapabilitiesResponse(
         sections=[
             DeploymentCapabilitySection(kind=KIND_TOOL, label="Tools", entries=tool_entries),
             DeploymentCapabilitySection(kind=KIND_SKILL, label="Skills", entries=skill_entries),
             DeploymentCapabilitySection(
                 kind=KIND_PLAYBOOK, label="Playbooks", entries=playbook_entries
+            ),
+            DeploymentCapabilitySection(
+                kind=KIND_KNOWLEDGE, label="Knowledge", entries=knowledge_entries
             ),
         ]
     )
@@ -1721,10 +1767,11 @@ async def adopt_library_entry(
 ) -> Response:
     """POST /api/v1/admin/library — adopt one catalog capability into the Library (ADR-F065).
 
-    ``kind`` is bounded by the schema (skill|tool|playbook); ``key`` is validated against the
-    matching catalog (tool group in the code registry, skill in the skill registry, non-deleted
-    playbook id) — unknown ⇒ 422. Re-adopting an already-adopted capability ⇒ 409 (the house
-    attach pattern). Records ``adopted_by``. Audited with kind/key only.
+    ``kind`` is bounded by the schema (skill|tool|playbook|knowledge); ``key`` is validated
+    against the matching catalog (tool group in the code registry, skill in the skill registry,
+    non-deleted playbook id, non-archived knowledge collection id) — unknown ⇒ 422. Re-adopting
+    an already-adopted capability ⇒ 409 (the house attach pattern). Records ``adopted_by``.
+    Audited with kind/key only.
     """
     await _validate_catalog_key(db, request, payload.kind, payload.key)
     db.add(
@@ -1761,7 +1808,7 @@ async def adopt_library_entry(
     summary="Remove a capability from the Org Library (admin).",
 )
 async def remove_library_entry(
-    kind: Literal["skill", "tool", "playbook"],
+    kind: Literal["skill", "tool", "playbook", "knowledge"],
     key: str,
     admin: AdminUser,
     db: Annotated[AsyncSession, Depends(get_db)],

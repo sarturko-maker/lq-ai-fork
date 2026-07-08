@@ -172,23 +172,43 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   suite 3516/1/42 where the 1 = the openapi count pin (176→182), fixed + module re-run 74/1 ⇒
 >   effective 3517/42/0; LIVE probe PASS — author→propose→approve→adopt→bind→run, agent quoted the
 >   banner verbatim from the transcript (evidence `docs/fork/evidence/b2a-org-skills/`).
-> - **KV-1 IN FLIGHT (worktree `/home/sarturko/LQ_AI_Fork-kv1`, branch `kv1-gateway-keyvault`):**
->   optional Azure Key Vault sourcing for the three AZURE_* provider keys via the VM's managed
->   identity (maintainer-approved plan): stdlib-only `gateway/app/keyvault.py` (IMDS+KV REST, no
->   azure SDKs), overlay threaded through `build_adapter(env=)` (DI, wins over stale plaintext),
->   ADR-F069 proposed, runbook §4b, four NON-secret env vars. HONEST caveat found in code: SIGHUP
->   does NOT rebuild adapters ⇒ rotation needs gateway recreate. Remaining: lead security read
->   (keyvault.py+main.py DONE, clean), gateway suite + mypy --strict in-container, SHOW THE
->   MAINTAINER THE FULL DIFF before push (their explicit constraint), PR + merge; then the VM
->   staging ladder (merge → Images sha → runbook §4b + §5 smokes; §5.4 azure-claude = AZ-2b proof).
-> - **NEXT ▶ B-2b (propose/review/provenance UI) ∥ B-3 (knowledge tool group)** — both unblocked by
->   B-2a; spec in MODULES-milestone. Other parallel candidates: B-5 roster UI, B-6 HITL spike→ADR
->   (report in the 2026-07-08 scratchpad `hitl-spike-report.md`). Traps for the next slice: the
->   endpoint sweep (`test_endpoints.py` `_PARAM_VALUES` + `IMPLEMENTED_ROUTES`) and THREE count
->   pins (`test_mutation_rbac.py` ×3, `test_openapi.py` EXPECTED_PATHS + the SECOND `len(actual)`
->   pin at ~:419) all trip on new routes — update them in the same commit; practice-area DELETE
->   refuses while an archived matter references it (probe teardown needs SQL sweep); matters 400
->   on an area without `profile_md` (inert-area guard).
+> - **KV-1 ✓ MERGED (PR #239 `e57500bc`; image `sha-e57500bcc69e` published):** optional Azure Key
+>   Vault sourcing for the three AZURE_* provider keys via managed identity — stdlib
+>   `gateway/app/keyvault.py` (IMDS+KV REST), overlay via `build_adapter(env=)`, ADR-F069 proposed,
+>   runbook §4b, four NON-secret env vars. Gate: gateway 627/2, mypy --strict 0/40, ruff clean.
+>   HONEST: SIGHUP does NOT rebuild adapters ⇒ rotation needs gateway recreate. LIVE proof = the
+>   maintainer's VM session (runbook §4b two-step + §5.3/§5.4; §5.4 azure-claude = AZ-2b proof).
+> - **B-3 = THIS PR (task #485, branch `b3-knowledge-tool-group`):** knowledge-collection Library
+>   kind + `search_knowledge` tool group (F067 D1; contract = session scratchpad `b3-contract.md`).
+>   Key rulings now IN CODE: mig 0092 (join table + org-library CHECK widened + matter-toggles
+>   CHECK widened); NO separate tool-group adoption — the group is COMPOSITION-ONLY
+>   (`COMPOSITION_ONLY_GROUP_KEYS` fences it out of the tool catalog/adopt/bind/inventory/read
+>   surfaces; composition injects it iff ≥1 enabled kind='knowledge' entry resolves);
+>   `GroupBuildContext.knowledge_base_ids`; query embeds via GATEWAY (1536, matches KB ingest —
+>   deliberately NOT the 768 matter embedder), FTS-only degradation, embed skipped when every
+>   bound collection is alpha=1.0; fenced RETRIEVED-DATA render; F067 B-3 addendum. **Web surfaces
+>   (Store/Library sections + area bind card for the kind) DEFERRED to B-3b on record** — B-2b
+>   edits those exact files in parallel; bind/adopt is API-only until B-3b.
+> - **B-2b ✓ BUILT+REVIEWED (task #484, worktree `/home/sarturko/LQ_AI_Fork-b2b`, branch
+>   `b2b-propose-review-ui`, contract = scratchpad `b2b-contract.md`):** propose action on skills
+>   LIST+EDIT pages (proposals section scope-gated to user rows), review queue ON the admin
+>   Library page (full-content expand + full content_hash receipt; revoke behind a ModalShell
+>   confirm with D3.8-truthful copy; operator 403 hides the section silently, ADR-F064), org
+>   provenance badges via shared SOURCE_LABELS/provenanceBadge, ONE api touch = additive
+>   approver_email/approver fields (deliberate: member /library now shows the approving admin's
+>   email — F067 D3.5, record in PR). Remaining: web+api gates, live cypress loop, PR; whichever
+>   of B-2b/B-3 merges second rebases (both touch admin.py/library.py).
+> - **P-1 IN FLIGHT (task #486, worktree `/home/sarturko/LQ_AI_Fork-priv`, branch
+>   `pp1-private-profile`, contract = scratchpad `p1-contract.md`):** private profile /
+>   restricted-egress posture — additive `docker-compose.private.yml` overlay (on-box MinIO, Caddy
+>   `tls internal` loopback :8443, SSH-tunnel access, Tailscale = signoff-gated alternative),
+>   `.env.private.example`, runbook §8 with the egress-inventory table, ADR-F070 proposed. Public
+>   path must stay byte-identical; generic framing only.
+> - Slice traps (recur): FIVE drift guards trip on new routes (test_endpoints _PARAM_VALUES +
+>   IMPLEMENTED_ROUTES; test_mutation_rbac ×3 pins now 135/184/69; test_openapi EXPECTED_PATHS +
+>   the SECOND len(actual) pin ~:419 now 184); api CI runs `mypy app` (containerized pytest gate
+>   does NOT); area DELETE refuses while an archived matter references it (SQL sweep); matters 400
+>   on an area without profile_md; docker-exec python needs PYTHONPATH=/app.
 > - **MAINTAINER GATES STILL OPEN:** edit/accept ADR-F068 (branding — shipped + live-verified,
 >   proposed); execute `docs/fork/runbooks/azure-vm-sandbox.md` (§5.4 azure-claude tool smoke =
 >   AZ-2b's deferred live proof).

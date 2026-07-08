@@ -21,7 +21,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditLog, User
+from app.models import AuditLog, KnowledgeBase, User
 
 
 @pytest.mark.integration
@@ -1122,7 +1122,7 @@ async def test_org_library_entries_table_exists(db_session: AsyncSession) -> Non
 
 @pytest.mark.integration
 async def test_org_library_entries_kind_check(db_session: AsyncSession) -> None:
-    """capability_kind is constrained to skill|tool|playbook (0088 CHECK)."""
+    """capability_kind is CHECK-constrained (0088; widened to admit 'knowledge' in 0092)."""
     await db_session.execute(
         text(
             "INSERT INTO org_library_entries (capability_kind, capability_key) "
@@ -1445,4 +1445,213 @@ async def test_org_skill_versions_user_fks_set_null_on_user_delete(
     assert row.author_user_id is None
     assert row.reviewed_by is None
     assert row.revoked_by is None
+    await db_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# practice_area_knowledge_bases + org_library_entries 'knowledge' kind
+# (0092, ADR-F067 D1, B-3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_practice_area_knowledge_bases_table_exists(db_session: AsyncSession) -> None:
+    """0092 (ADR-F067 D1): practice_area_knowledge_bases exists with the expected columns
+    and a composite PK of (practice_area_id, knowledge_base_id) — mirrors
+    test_practice_area_tool_groups_table_and_seed's shape for practice_area_playbooks'
+    sibling join table."""
+    cols = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'practice_area_knowledge_bases'"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {"practice_area_id", "knowledge_base_id", "attached_at"}.issubset(set(cols))
+    pk = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT a.attname FROM pg_index i "
+                    "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+                    "WHERE i.indrelid = 'practice_area_knowledge_bases'::regclass "
+                    "AND i.indisprimary"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert set(pk) == {"practice_area_id", "knowledge_base_id"}
+
+
+@pytest.mark.integration
+async def test_practice_area_knowledge_bases_cascade_on_area_delete(
+    db_session: AsyncSession,
+) -> None:
+    """Deleting a practice area CASCADE-drops its knowledge-base bindings (FK ON DELETE
+    CASCADE) — mirrors test_practice_area_tool_groups_cascade_on_area_delete."""
+    owner = User(
+        email=f"kb-area-cascade-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="x",
+    )
+    db_session.add(owner)
+    await db_session.flush()
+    kb = KnowledgeBase(owner_id=owner.id, name="area-cascade-kb")
+    db_session.add(kb)
+    await db_session.flush()
+
+    await db_session.execute(
+        text(
+            "INSERT INTO practice_areas (key, name, unit_label, position) "
+            "VALUES ('kb-area-cascade-test', 'KB Area Cascade', 'Matter', 999)"
+        )
+    )
+    area_id = (
+        await db_session.execute(
+            text("SELECT id FROM practice_areas WHERE key = 'kb-area-cascade-test'")
+        )
+    ).scalar_one()
+    await db_session.execute(
+        text(
+            "INSERT INTO practice_area_knowledge_bases (practice_area_id, knowledge_base_id) "
+            "VALUES (:aid, :kid)"
+        ),
+        {"aid": area_id, "kid": kb.id},
+    )
+    await db_session.flush()
+    await db_session.execute(text("DELETE FROM practice_areas WHERE id = :aid"), {"aid": area_id})
+    await db_session.flush()
+    remaining = (
+        await db_session.execute(
+            text(
+                "SELECT count(*) FROM practice_area_knowledge_bases WHERE practice_area_id = :aid"
+            ),
+            {"aid": area_id},
+        )
+    ).scalar_one()
+    assert remaining == 0
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_practice_area_knowledge_bases_cascade_on_kb_delete(
+    db_session: AsyncSession,
+) -> None:
+    """Deleting a knowledge base CASCADE-drops its area bindings (FK ON DELETE CASCADE) —
+    the join table's other FK, not exercised by the area-delete cascade test above."""
+    owner = User(
+        email=f"kb-kb-cascade-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="x",
+    )
+    db_session.add(owner)
+    await db_session.flush()
+    kb = KnowledgeBase(owner_id=owner.id, name="kb-cascade-kb")
+    db_session.add(kb)
+    await db_session.flush()
+
+    await db_session.execute(
+        text(
+            "INSERT INTO practice_areas (key, name, unit_label, position) "
+            "VALUES ('kb-kb-cascade-test', 'KB KB Cascade', 'Matter', 999)"
+        )
+    )
+    area_id = (
+        await db_session.execute(
+            text("SELECT id FROM practice_areas WHERE key = 'kb-kb-cascade-test'")
+        )
+    ).scalar_one()
+    await db_session.execute(
+        text(
+            "INSERT INTO practice_area_knowledge_bases (practice_area_id, knowledge_base_id) "
+            "VALUES (:aid, :kid)"
+        ),
+        {"aid": area_id, "kid": kb.id},
+    )
+    await db_session.flush()
+    await db_session.execute(text("DELETE FROM knowledge_bases WHERE id = :kid"), {"kid": kb.id})
+    await db_session.flush()
+    remaining = (
+        await db_session.execute(
+            text(
+                "SELECT count(*) FROM practice_area_knowledge_bases WHERE knowledge_base_id = :kid"
+            ),
+            {"kid": kb.id},
+        )
+    ).scalar_one()
+    assert remaining == 0
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_org_library_entries_kind_check_admits_knowledge(
+    db_session: AsyncSession,
+) -> None:
+    """0092 widens chk_org_library_entries_kind to admit 'knowledge' (ADR-F067 D1) while
+    still rejecting an unknown kind — mirrors test_org_library_entries_kind_check for the
+    post-0092 CHECK definition."""
+    from sqlalchemy.exc import IntegrityError
+
+    await db_session.execute(
+        text(
+            "INSERT INTO org_library_entries (capability_kind, capability_key) "
+            "VALUES ('knowledge', 'chk-probe-knowledge')"
+        )
+    )
+    await db_session.flush()  # 'knowledge' must NOT raise post-0092
+    with pytest.raises(IntegrityError):
+        await db_session.execute(
+            text(
+                "INSERT INTO org_library_entries (capability_kind, capability_key) "
+                "VALUES ('bogus', 'chk-probe-bogus-2')"
+            )
+        )
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_matter_capability_toggles_kind_check_admits_knowledge(
+    db_session: AsyncSession,
+) -> None:
+    """0092 widens chk_matter_capability_toggles_kind to admit 'knowledge' (ADR-F067 D1,
+    B-3 — the lawyer's per-matter panel toggles the new kind) while still rejecting an
+    unknown kind — mirrors test_org_library_entries_kind_check_admits_knowledge."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import Project
+
+    user = User(email=f"kb-toggle-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
+    db_session.add(user)
+    await db_session.flush()
+    project = Project(
+        owner_id=user.id, name="kb-toggle-chk-probe", slug=f"kbtog-{uuid.uuid4().hex[:6]}"
+    )
+    db_session.add(project)
+    await db_session.flush()
+    project_id = project.id
+    await db_session.execute(
+        text(
+            "INSERT INTO matter_capability_toggles "
+            "(project_id, capability_kind, capability_key, enabled) "
+            "VALUES (:pid, 'knowledge', 'chk-probe-knowledge', true)"
+        ),
+        {"pid": project_id},
+    )
+    await db_session.flush()  # 'knowledge' must NOT raise post-0092
+    with pytest.raises(IntegrityError):
+        await db_session.execute(
+            text(
+                "INSERT INTO matter_capability_toggles "
+                "(project_id, capability_kind, capability_key, enabled) "
+                "VALUES (:pid, 'bogus', 'chk-probe-bogus', true)"
+            ),
+            {"pid": project_id},
+        )
+        await db_session.flush()
     await db_session.rollback()

@@ -7,7 +7,7 @@ POST /admin/library adopts one catalog capability into the org's Library; DELETE
 * adopting a valid capability is 204 and records ``adopted_by``,
 * re-adopting an already-adopted capability is 409 (the house attach pattern),
 * removing is idempotent (a not-adopted capability is a no-op 204),
-* an unknown (kind, key) is rejected 422 per kind (tool/skill/playbook),
+* an unknown (kind, key) is rejected 422 per kind (tool/skill/playbook/knowledge),
 * the audit rows (``library.adopt`` / ``library.remove``) carry kind/key only.
 """
 
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.main import app
 from app.models.audit import AuditLog
+from app.models.knowledge import KnowledgeBase
 from app.models.playbook import Playbook
 from app.models.practice_area import OrgLibraryEntry
 from app.models.user import User
@@ -66,6 +68,13 @@ async def _make_playbook(db: AsyncSession) -> Playbook:
     db.add(pb)
     await db.flush()
     return pb
+
+
+async def _make_kb(db: AsyncSession, owner: User) -> KnowledgeBase:
+    kb = KnowledgeBase(owner_id=owner.id, name="Lib knowledge collection", description="")
+    db.add(kb)
+    await db.flush()
+    return kb
 
 
 # --- adopt -------------------------------------------------------------------
@@ -136,9 +145,59 @@ async def test_adopt_unknown_tool_group_is_422(client: AsyncClient, admin: User)
     assert resp.status_code == 422
 
 
+async def test_adopt_composition_only_group_as_tool_is_422(
+    client: AsyncClient, admin: User
+) -> None:
+    """F067 B-3: the derived knowledge group is composition-only — it is registered so
+    composition can build it, but it is NOT a kind='tool' catalog entry, so adopting it
+    as a tool is rejected exactly like an unknown key."""
+    resp = await client.post(
+        _URL, headers=_bearer(admin), json={"kind": "tool", "key": "knowledge"}
+    )
+    assert resp.status_code == 422
+
+
 async def test_adopt_unknown_playbook_is_422(client: AsyncClient, admin: User) -> None:
     resp = await client.post(
         _URL, headers=_bearer(admin), json={"kind": "playbook", "key": str(uuid.uuid4())}
+    )
+    assert resp.status_code == 422
+
+
+async def test_adopt_knowledge_base_204_records_admin(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    kb = await _make_kb(db_session, admin)
+    resp = await client.post(
+        _URL, headers=_bearer(admin), json={"kind": "knowledge", "key": str(kb.id)}
+    )
+    assert resp.status_code == 204
+    row = (
+        await db_session.execute(
+            select(OrgLibraryEntry).where(
+                OrgLibraryEntry.capability_kind == "knowledge",
+                OrgLibraryEntry.capability_key == str(kb.id),
+            )
+        )
+    ).scalar_one()
+    assert row.adopted_by == admin.id
+
+
+async def test_adopt_unknown_knowledge_base_is_422(client: AsyncClient, admin: User) -> None:
+    resp = await client.post(
+        _URL, headers=_bearer(admin), json={"kind": "knowledge", "key": str(uuid.uuid4())}
+    )
+    assert resp.status_code == 422
+
+
+async def test_adopt_archived_knowledge_base_is_422(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    kb = await _make_kb(db_session, admin)
+    kb.archived_at = datetime.now(UTC)
+    await db_session.flush()
+    resp = await client.post(
+        _URL, headers=_bearer(admin), json={"kind": "knowledge", "key": str(kb.id)}
     )
     assert resp.status_code == 422
 
@@ -160,7 +219,7 @@ async def test_adopt_skill_without_registry_is_422(client: AsyncClient, admin: U
 
 async def test_adopt_rejects_bad_kind_at_schema(client: AsyncClient, admin: User) -> None:
     resp = await client.post(_URL, headers=_bearer(admin), json={"kind": "mcp", "key": "x"})
-    assert resp.status_code == 422  # Literal[skill|tool|playbook] rejects 'mcp'
+    assert resp.status_code == 422  # Literal[skill|tool|playbook|knowledge] rejects 'mcp'
 
 
 async def test_adopt_requires_admin(
@@ -208,9 +267,32 @@ async def test_remove_is_idempotent(
     assert again.status_code == 204
 
 
+async def test_remove_knowledge_base_is_idempotent(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    kb = await _make_kb(db_session, admin)
+    await client.post(_URL, headers=_bearer(admin), json={"kind": "knowledge", "key": str(kb.id)})
+
+    first = await client.delete(f"{_URL}/knowledge/{kb.id}", headers=_bearer(admin))
+    assert first.status_code == 204
+    gone = (
+        await db_session.execute(
+            select(OrgLibraryEntry).where(
+                OrgLibraryEntry.capability_kind == "knowledge",
+                OrgLibraryEntry.capability_key == str(kb.id),
+            )
+        )
+    ).scalar_one_or_none()
+    assert gone is None
+
+    # Removing again is a no-op 204.
+    again = await client.delete(f"{_URL}/knowledge/{kb.id}", headers=_bearer(admin))
+    assert again.status_code == 204
+
+
 async def test_remove_rejects_bad_kind_at_path(client: AsyncClient, admin: User) -> None:
     resp = await client.delete(f"{_URL}/mcp/x", headers=_bearer(admin))
-    assert resp.status_code == 422  # path Literal[skill|tool|playbook] rejects 'mcp'
+    assert resp.status_code == 422  # path Literal[skill|tool|playbook|knowledge] rejects 'mcp'
 
 
 async def test_remove_requires_admin(client: AsyncClient, member: User) -> None:

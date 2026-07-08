@@ -35,10 +35,12 @@ from app.api.dependencies import ActiveUser, MutatingUser
 from app.api.projects import _load_visible_project
 from app.audit import audit_action
 from app.db.session import get_db
+from app.models.knowledge import KnowledgeBase
 from app.models.playbook import Playbook
 from app.models.practice_area import (
     OrgLibraryEntry,
     PracticeArea,
+    PracticeAreaKnowledgeBase,
     PracticeAreaPlaybook,
     PracticeAreaSkill,
     PracticeAreaToolGroup,
@@ -124,6 +126,24 @@ async def _resolve_inventory(
         .all()
     )
     library_entries = (await db.execute(select(OrgLibraryEntry))).scalars().all()
+    # ADR-F067 D1 (B-3): the area's bound knowledge collections — the panel toggles them
+    # exactly as the agent gets them (adopted into the Library, archived skipped at
+    # resolve time). Same chokepoint as every other kind.
+    area_knowledge_bases = (
+        (
+            await db.execute(
+                select(KnowledgeBase)
+                .join(
+                    PracticeAreaKnowledgeBase,
+                    PracticeAreaKnowledgeBase.knowledge_base_id == KnowledgeBase.id,
+                )
+                .where(PracticeAreaKnowledgeBase.practice_area_id == area.id)
+                .order_by(KnowledgeBase.name, KnowledgeBase.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     # ADR-F067 D2/D3: the panel must show adopted+bound org-authored skills too, so the
     # cockpit toggles exactly what the agent gets. Load the APPROVED snapshots (immutable
     # bytes) and feed them to the same chokepoint; a slug the registry also knows is
@@ -136,17 +156,21 @@ async def _resolve_inventory(
         tool_group_keys=tool_group_keys,
         library_entries=library_entries,
         org_skill_snapshots=org_snapshots,
+        area_knowledge_bases=area_knowledge_bases,
     )
     return inventory, area.key, area.unit_label
 
 
 async def _load_toggles(db: AsyncSession, project_id: uuid.UUID) -> list[MatterCapabilityToggle]:
+    # populate_existing: the PATCH path upserts via Core (bypasses the identity map),
+    # so this re-read must overwrite any cached instances with the committed values —
+    # otherwise a session with expire_on_commit=False can return stale toggle state.
     return list(
         (
             await db.execute(
-                select(MatterCapabilityToggle).where(
-                    MatterCapabilityToggle.project_id == project_id
-                )
+                select(MatterCapabilityToggle)
+                .where(MatterCapabilityToggle.project_id == project_id)
+                .execution_options(populate_existing=True)
             )
         )
         .scalars()

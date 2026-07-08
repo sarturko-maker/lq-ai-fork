@@ -22,6 +22,16 @@ class BoundPlaybook(BaseModel):
     name: str
 
 
+class BoundKnowledgeBase(BaseModel):
+    """One knowledge collection bound to an area — the join summary the admin UI
+    renders (ADR-F067 D1, B-3). Mirrors :class:`BoundPlaybook`: id to link/detach
+    by, name to label the row; the full collection detail lives at the
+    knowledge-bases endpoints."""
+
+    id: uuid.UUID
+    name: str
+
+
 class PracticeAreaRead(BaseModel):
     """ORM-read view of a :class:`~app.models.practice_area.PracticeArea`.
 
@@ -39,7 +49,9 @@ class PracticeAreaRead(BaseModel):
     rows in REGISTRY-CANONICAL order — ``TOOL_GROUP_REGISTRY`` insertion order
     filtered to the area's rows, never DB row order (ADR-F062 D4). ``bound_playbooks``
     is the area's ``practice_area_playbooks`` rows joined to their (non-deleted)
-    playbook name.
+    playbook name. ``bound_knowledge_bases`` (ADR-F067 D1, B-3) is the area's
+    ``practice_area_knowledge_bases`` rows joined to their (non-archived) collection
+    name.
     """
 
     id: uuid.UUID
@@ -57,6 +69,7 @@ class PracticeAreaRead(BaseModel):
     bound_skills: list[str]
     bound_tool_groups: list[str]
     bound_playbooks: list[BoundPlaybook]
+    bound_knowledge_bases: list[BoundKnowledgeBase]
     created_at: datetime
     updated_at: datetime
 
@@ -184,3 +197,16 @@ class PlaybookAttachRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     playbook_id: uuid.UUID
+
+
+class KnowledgeBaseAttachRequest(BaseModel):
+    """Attach a knowledge collection (by id) to an area's available set — ADR-F067 D1.
+
+    Mirrors :class:`PlaybookAttachRequest`: ``knowledge_base_id`` is a real id
+    (knowledge collections are SQL rows). The handler validates the collection
+    exists and is not archived.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    knowledge_base_id: uuid.UUID
