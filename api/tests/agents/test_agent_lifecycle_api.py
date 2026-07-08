@@ -106,7 +106,12 @@ async def test_cancel_settles_a_running_run_and_audits(
     assert audit.details == {"from_status": "running"}
 
 
-@pytest.mark.parametrize("settled_status", ["completed", "failed", "cancelled", "cap_exceeded"])
+# ``awaiting_input`` (HITL-1, ADR-F071): cancel on a paused run is a deliberate
+# no-op this slice — cancel-while-paused lands with HITL-2 (deferred on record);
+# delete-thread is the HITL-1 escape hatch.
+@pytest.mark.parametrize(
+    "settled_status", ["completed", "failed", "cancelled", "cap_exceeded", "awaiting_input"]
+)
 async def test_cancel_is_an_idempotent_noop_on_settled_runs(
     client: AsyncClient,
     db_session: AsyncSession,

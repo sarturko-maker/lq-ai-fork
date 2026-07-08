@@ -18,6 +18,7 @@ deleted at teardown and the cascade clears its runs and steps.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -26,6 +27,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from langchain_core.messages import AIMessage
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -821,3 +823,354 @@ async def test_step_write_survives_a_transient_db_failure(
     # Nothing lost and nothing doubled: the full ordered timeline exists.
     assert [s.kind for s in steps] == ["model_turn", "tool_call", "tool_result", "model_turn"]
     assert [s.seq for s in steps] == [1, 2, 3, 4]
+
+
+# ---------------------------------------------------------------------------
+# HITL-1 pause (ADR-F071)
+# ---------------------------------------------------------------------------
+
+
+def _gated_and_plain_turn() -> AIMessage:
+    """One assistant turn requesting a GATED and an UNGATED tool together —
+    the probe-A shape: the pause must land BEFORE either executes."""
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "send_notice",
+                "args": {"recipient": "counterparty"},
+                "id": "call_gated",
+                "type": "tool_call",
+            },
+            {
+                "name": "read_clause",
+                "args": {"topic": "liability"},
+                "id": "call_plain",
+                "type": "tool_call",
+            },
+        ],
+    )
+
+
+async def _thread_id_of(factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID) -> uuid.UUID:
+    async with factory() as db:
+        run = await db.get(AgentRun, run_id)
+        assert run is not None
+        return run.thread_id
+
+
+async def test_gated_tool_pauses_run_before_any_execution(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """T2 (ADR-F071): an armed run pauses at the stop-and-ask — NOTHING
+    executes (not even the auto-approved sibling), the run settles
+    ``awaiting_input`` with a NULL answer, and exactly one ``hitl_request``
+    step row records the gated call's name+args as bounded JSON."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agents.hitl import compile_hitl_policy
+
+    calls = {"send_notice": 0, "read_clause": 0}
+
+    def send_notice(recipient: str) -> str:
+        """Send a notice document to a recipient."""
+        calls["send_notice"] += 1
+        return "sent"
+
+    def counting_read_clause(topic: str) -> str:
+        """Return the verbatim text of the contract clause covering ``topic``."""
+        calls["read_clause"] += 1
+        return _CLAUSE_TEXT
+
+    counting_read_clause.__name__ = "read_clause"
+
+    run_id = await make_run()
+    thread_id = await _thread_id_of(commit_factory, run_id)
+    model = ScriptedToolCallingModel(
+        responses=[_gated_and_plain_turn(), final_message("never reached")]
+    )
+    interrupt_on = compile_hitl_policy(
+        {"send_notice": True}, frozenset({"send_notice", "read_clause"})
+    )
+    assert interrupt_on is not None
+
+    await execute_agent_run(
+        run_id,
+        commit_factory,
+        tools=[send_notice, counting_read_clause],
+        model=model,
+        checkpointer=InMemorySaver(),
+        thread_id=thread_id,
+        interrupt_on=interrupt_on,
+    )
+
+    run, steps = await _load_run_and_steps(commit_factory, run_id)
+    assert run.status == "awaiting_input"
+    assert run.final_answer is None
+    assert run.error is None
+    assert run.finished_at is not None  # "stopped executing", not "delivered"
+    # The honest pre-ask state: zero side effects, including the ungated sibling.
+    assert calls == {"send_notice": 0, "read_clause": 0}
+
+    assert [s.kind for s in steps] == ["model_turn", "hitl_request"]
+    assert [s.seq for s in steps] == [1, 2]
+    ask = steps[1]
+    assert ask.name == "send_notice"
+    assert ask.parent_step_id is None
+    # Display-only digest of the pending call — only the GATED tool rides the
+    # HITLRequest (the sibling is auto-approved, just not yet executed).
+    assert json.loads(ask.summary) == [
+        {"args": {"recipient": "counterparty"}, "tool": "send_notice"}
+    ]
+
+
+async def test_pause_wire_tail_carries_awaiting_input(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """T3 (ADR-F071): the paused run's SSE tail — the settled ``hitl_request``
+    step mirrors as a generic data-step and the terminal ``data-run`` frame
+    carries ``awaiting_input`` verbatim (zero stream.py changes)."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agents.hitl import compile_hitl_policy
+    from app.agents.stream import CHANNEL_CLOSED, RunStreamBroker
+
+    def send_notice(recipient: str) -> str:
+        """Send a notice document to a recipient."""
+        raise AssertionError("gated tool must never execute on a paused run")
+
+    run_id = await make_run()
+    thread_id = await _thread_id_of(commit_factory, run_id)
+    broker = RunStreamBroker()
+    queue = broker.subscribe(run_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("send_notice", {"recipient": "counterparty"}),
+            final_message("never reached"),
+        ]
+    )
+
+    await execute_agent_run(
+        run_id,
+        commit_factory,
+        tools=[send_notice],
+        model=model,
+        checkpointer=InMemorySaver(),
+        thread_id=thread_id,
+        publisher=broker.publisher(run_id),
+        interrupt_on=compile_hitl_policy({"send_notice": True}, frozenset({"send_notice"})),
+    )
+
+    parts: list[Any] = []
+    while not queue.empty():
+        parts.append(queue.get_nowait())
+    assert parts[-1] is CHANNEL_CLOSED
+    parts = parts[:-1]
+
+    types = [p["type"] for p in parts]
+    assert types[-2:] == ["data-run", "finish"]
+    data_run = next(p for p in parts if p["type"] == "data-run")
+    assert data_run["data"] == {"status": "awaiting_input", "error": None}
+    # No deliverable → no text block on the tail.
+    assert not any(p["type"] == "text-delta" for p in parts)
+    # The settled ask reached the wire as a plain data-step (no tool frames).
+    step_parts = [p for p in parts if p["type"] == "data-step"]
+    assert step_parts[-1]["data"]["kind"] == "hitl_request"
+    _run, steps = await _load_run_and_steps(commit_factory, run_id)
+    assert step_parts[-1]["id"] == str(steps[-1].id)
+    assert not any(p["type"] == "tool-input-available" for p in parts)
+
+
+async def test_armed_run_without_durability_refuses_at_entry(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """T5 (ADR-F071 R6): a pause without a checkpoint is unrecoverable —
+    arming without checkpointer+thread_id must raise, never run."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    run_id = await make_run()
+    thread_id = await _thread_id_of(commit_factory, run_id)
+    model = ScriptedToolCallingModel(responses=[final_message("unused")])
+    armed = {"send_notice": {"allowed_decisions": ["approve", "reject"]}}
+
+    with pytest.raises(ValueError, match="checkpointer"):
+        await execute_agent_run(run_id, commit_factory, tools=[], model=model, interrupt_on=armed)
+    with pytest.raises(ValueError, match="checkpointer"):
+        await execute_agent_run(
+            run_id,
+            commit_factory,
+            tools=[],
+            model=model,
+            checkpointer=InMemorySaver(),
+            interrupt_on=armed,
+        )
+    with pytest.raises(ValueError, match="checkpointer"):
+        await execute_agent_run(
+            run_id,
+            commit_factory,
+            tools=[],
+            model=model,
+            thread_id=thread_id,
+            interrupt_on=armed,
+        )
+
+
+async def test_armed_run_that_never_hits_the_gated_tool_completes_normally(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """R8 (ADR-F071): armed-but-not-paused ⇒ zero behaviour change. An armed run
+    whose model calls only UNGATED tools runs them and settles ``completed`` with
+    a real answer — no pause, no ``hitl_request`` step. Guards against a drift in
+    the not-paused detection mis-settling an ordinary armed run to
+    ``awaiting_input`` and locking its thread."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agents.hitl import compile_hitl_policy
+
+    calls = {"read_clause": 0}
+
+    def read_clause(topic: str) -> str:
+        """Return the verbatim text of the contract clause covering ``topic``."""
+        calls["read_clause"] += 1
+        return _CLAUSE_TEXT
+
+    run_id = await make_run()
+    thread_id = await _thread_id_of(commit_factory, run_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("read_clause", {"topic": "liability"}),
+            final_message("The liability cap is mutual."),
+        ]
+    )
+    # Armed for a tool the model never calls.
+    interrupt_on = compile_hitl_policy(
+        {"send_notice": True}, frozenset({"send_notice", "read_clause"})
+    )
+    assert interrupt_on is not None
+
+    await execute_agent_run(
+        run_id,
+        commit_factory,
+        tools=[read_clause],
+        model=model,
+        checkpointer=InMemorySaver(),
+        thread_id=thread_id,
+        interrupt_on=interrupt_on,
+    )
+
+    run, steps = await _load_run_and_steps(commit_factory, run_id)
+    assert run.status == "completed"
+    assert run.final_answer == "The liability cap is mutual."
+    assert calls == {"read_clause": 1}  # the ungated tool DID run
+    assert "hitl_request" not in [s.kind for s in steps]
+
+
+async def test_in_stream_signal_without_pending_state_settles_completed_and_warns(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """R8 (ADR-F071): the checkpointed state is authoritative, not the in-stream
+    ``__interrupt__`` signal. A real interrupt fires (setting the fast in-stream
+    flag), but state-inspection reports NO pending action — the run must settle
+    ``completed`` (never ``awaiting_input``) and log the signal-drift warning.
+    Exercises the in-stream detection block + the drift branch together."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agents.hitl import compile_hitl_policy
+
+    def send_notice(recipient: str) -> str:
+        """Send a notice document to a recipient."""
+        raise AssertionError("gated tool must never execute on a paused run")
+
+    # Force the authoritative state read to report "not paused" even though the
+    # graph genuinely interrupted — the in-stream flag alone must NOT settle paused.
+    async def _no_pending(_agent: Any, _thread_id: uuid.UUID) -> None:
+        return None
+
+    monkeypatch.setattr("app.agents.runner._pending_hitl_actions", _no_pending)
+
+    run_id = await make_run()
+    thread_id = await _thread_id_of(commit_factory, run_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("send_notice", {"recipient": "counterparty"}),
+            final_message("never reached"),
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.agents.runner"):
+        await execute_agent_run(
+            run_id,
+            commit_factory,
+            tools=[send_notice],
+            model=model,
+            checkpointer=InMemorySaver(),
+            thread_id=thread_id,
+            interrupt_on=compile_hitl_policy({"send_notice": True}, frozenset({"send_notice"})),
+        )
+
+    run, steps = await _load_run_and_steps(commit_factory, run_id)
+    assert run.status == "completed"  # state authoritative — NOT awaiting_input
+    assert "hitl_request" not in [s.kind for s in steps]
+    assert any(
+        getattr(rec, "event", None) == "agent_run_hitl_signal_drift"
+        or "signal_drift" in rec.getMessage()
+        or "without a pending interrupt" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+async def test_unarmed_run_never_passes_interrupt_on_to_the_builder(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R1 zero-config invariant (ADR-F071), pinned at the builder boundary: a run
+    with no compiled policy must call ``build_deep_agent`` WITHOUT an
+    ``interrupt_on`` kwarg at all (no empty-config middleware) — the graph is
+    byte-identical to an unconfigured area's. An armed run, by contrast, passes it.
+    The spy delegates to the real builder so both runs complete normally."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    import app.agents.runner as runner_mod
+
+    real_build = runner_mod.build_deep_agent
+    seen: list[bool] = []
+
+    def spy(**kwargs: Any) -> Any:
+        seen.append("interrupt_on" in kwargs)
+        return real_build(**kwargs)
+
+    monkeypatch.setattr(runner_mod, "build_deep_agent", spy)
+
+    # Unarmed: interrupt_on=None (the zero-config default).
+    unarmed_id = await make_run()
+    await execute_agent_run(
+        unarmed_id,
+        commit_factory,
+        tools=[],
+        model=ScriptedToolCallingModel(responses=[final_message("done")]),
+        interrupt_on=None,
+    )
+    assert seen == [False]  # kwarg omitted entirely
+
+    # Armed: the same seam DOES forward the compiled policy.
+    seen.clear()
+    armed_id = await make_run()
+    armed_thread = await _thread_id_of(commit_factory, armed_id)
+    await execute_agent_run(
+        armed_id,
+        commit_factory,
+        tools=[],
+        model=ScriptedToolCallingModel(responses=[final_message("done")]),
+        checkpointer=InMemorySaver(),
+        thread_id=armed_thread,
+        interrupt_on={"send_notice": {"allowed_decisions": ["approve", "reject"]}},
+    )
+    assert seen == [True]

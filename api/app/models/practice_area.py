@@ -95,6 +95,16 @@ class PracticeArea(Base):
     agent_config: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    # HITL-1 (ADR-F071, migration 0093): the area's stop-and-ask policy —
+    # ``{"<granted tool name>": true}`` compiled at composition into deepagents'
+    # ``interrupt_on`` (intersected with the run's actual grant set). Mirrors
+    # ``agent_config`` exactly; the default ``{}`` is the zero-config invariant (no
+    # HITL middleware attached). No API write surface yet (HITL-3 adds the admin card
+    # + a 422 unknown-name guard); no model CheckConstraint (the shape is validated at
+    # write time, not by the DB).
+    hitl_policy: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

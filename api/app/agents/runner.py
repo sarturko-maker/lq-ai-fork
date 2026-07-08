@@ -13,6 +13,11 @@ Event mapping (``agent.astream_events(..., version="v2")``):
 * ``on_tool_start``      → ``tool_call``   (the model dispatched a tool)
 * ``on_tool_end``        → ``tool_result`` (the tool returned)
 
+A root-level ``on_chain_stream`` chunk carrying ``__interrupt__`` is the
+in-stream signal that a stop-and-ask policy paused the run (HITL-1,
+ADR-F071); the checkpointed state is verified post-stream before the run
+settles ``awaiting_input`` with one ``hitl_request`` step row.
+
 Interim caps (F0-S2): ``max_steps`` from the run row (exceeding →
 ``cap_exceeded``) and a wall-clock timeout (→ ``failed`` with
 ``error='timeout'``). Step summaries are bounded to ~2000 chars; tool
@@ -37,7 +42,7 @@ import uuid
 from collections.abc import Callable, Collection, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
@@ -280,6 +285,25 @@ async def _persist_step(
             await asyncio.sleep(2.0)
 
 
+class _DriveOutcome(NamedTuple):
+    """What one driven stream produced — :func:`_drive_agent`'s return.
+
+    ``interrupt_seen`` is the in-stream HITL pause signal (HITL-1, ADR-F071):
+    a root-level ``__interrupt__`` chunk was observed. It is the FAST signal
+    only — the caller verifies the checkpointed state before settling
+    ``awaiting_input``. ``steps`` is the number of settled step rows (the
+    final ``seq``), so a post-stream ``hitl_request`` row can extend the
+    sequence without a DB read.
+    """
+
+    final_answer: str | None
+    cap_hit: bool
+    token_cap_hit: bool
+    total_tokens: int
+    interrupt_seen: bool
+    steps: int
+
+
 async def _drive_agent(
     agent: Any,
     *,
@@ -295,15 +319,15 @@ async def _drive_agent(
     heartbeat_seconds: float | None = None,
     change_ledger: ChangeLedger | None = None,
     runtime_context: AgentRuntimeContext | None = None,
-) -> tuple[str | None, bool, bool, int]:
+) -> _DriveOutcome:
     """Stream the agent, persisting one step row + COMMIT per event.
 
     The commit-per-step is the load-bearing transaction pattern: the
     run's progress is readable mid-flight (ADR-F002 live activity), and
-    a crash loses at most the in-flight step. Returns
-    ``(final_answer, cap_hit, token_cap_hit, cumulative_tokens)`` — the
-    last is the run's summed model-token usage (F2 Slice G), persisted at
-    settlement for observability + budget calibration.
+    a crash loses at most the in-flight step. Returns a
+    :class:`_DriveOutcome`; ``total_tokens`` is the run's summed
+    model-token usage (F2 Slice G), persisted at settlement for
+    observability + budget calibration.
 
     ``token_budget`` (F2 Slice F, ADR-F051) is the per-run cumulative
     model-token ceiling (R4 realised): each model turn's
@@ -337,6 +361,7 @@ async def _drive_agent(
     cap_hit = False
     token_cap_hit = False
     cumulative_tokens = 0
+    interrupt_seen = False
     interval = heartbeat_seconds if heartbeat_seconds is not None else _default_heartbeat_seconds()
     last_beat = asyncio.get_running_loop().time()
     # Settled tool_call row id per dispatched tool's langchain run id.
@@ -382,6 +407,16 @@ async def _drive_agent(
                         last_beat = now
                         if not await heartbeat_run(session_factory, lease):
                             raise RunSettledElsewhere(str(run_id))
+                # HITL-1 (ADR-F071): a ROOT-level on_chain_stream chunk carrying
+                # __interrupt__ is the in-stream pause signal (root = empty
+                # parent_ids — nested chains stream this event type too). Flag
+                # only: the event then falls through _step_from_event → continue
+                # like any unmapped event, and the caller verifies the
+                # checkpointed state before settling (state is authoritative).
+                if etype == "on_chain_stream" and not event.get("parent_ids"):
+                    chunk = (event.get("data") or {}).get("chunk")
+                    if isinstance(chunk, dict) and "__interrupt__" in chunk:
+                        interrupt_seen = True
                 if publisher is not None:
                     if etype == "on_chat_model_stream":
                         chunk = (event.get("data") or {}).get("chunk")
@@ -469,7 +504,9 @@ async def _drive_agent(
                     break
     finally:
         await stream.aclose()
-    return final_answer, cap_hit, token_cap_hit, cumulative_tokens
+    return _DriveOutcome(
+        final_answer, cap_hit, token_cap_hit, cumulative_tokens, interrupt_seen, seq
+    )
 
 
 def _default_heartbeat_seconds() -> float:
@@ -576,6 +613,37 @@ async def repair_dangling_tool_calls(agent: Any, thread_id: uuid.UUID) -> int:
     return len(synthetic)
 
 
+async def _pending_hitl_actions(agent: Any, thread_id: uuid.UUID) -> list[dict[str, Any]] | None:
+    """The pending stop-and-ask actions iff the thread is genuinely paused (ADR-F071).
+
+    The checkpointed state is authoritative (the in-stream ``__interrupt__``
+    chunk is only the fast signal): the run is paused iff the latest
+    checkpoint still schedules work (``next`` non-empty) AND a task recorded
+    an interrupt. Returns the display-only copy
+    ``[{"tool": name, "args": {...}}, ...]`` extracted from the interrupts'
+    HITLRequest payloads (the approved bytes remain the checkpointed tool
+    call itself), or ``None`` when not paused.
+    """
+    state = await agent.aget_state(thread_config(thread_id))
+    if state is None or not getattr(state, "next", None):
+        return None
+    interrupts = [
+        interrupt
+        for task in getattr(state, "tasks", None) or ()
+        for interrupt in getattr(task, "interrupts", None) or ()
+    ]
+    if not interrupts:
+        return None
+    actions: list[dict[str, Any]] = []
+    for interrupt in interrupts:
+        value = getattr(interrupt, "value", None)
+        requests = value.get("action_requests") if isinstance(value, dict) else None
+        for request in requests or ():
+            if isinstance(request, dict):
+                actions.append({"tool": request.get("name"), "args": request.get("args") or {}})
+    return actions
+
+
 async def execute_agent_run(
     run_id: uuid.UUID,
     db_session_factory: async_sessionmaker[AsyncSession],
@@ -597,6 +665,7 @@ async def execute_agent_run(
     lease: RunLease | None = None,
     heartbeat_seconds: float | None = None,
     change_ledger: ChangeLedger | None = None,
+    interrupt_on: dict[str, Any] | None = None,
 ) -> None:
     """Execute one persisted agent run end to end.
 
@@ -620,10 +689,23 @@ async def execute_agent_run(
     state it writes to the run row, AFTER the row is written — the wire
     never announces a terminal state the DB doesn't have yet.
 
+    ``interrupt_on`` (HITL-1, ADR-F071) is the compiled stop-and-ask
+    policy — the composition point intersects the area's ``hitl_policy``
+    with the run's actual grant set, so an unconfigured area passes
+    ``None`` and the graph is byte-identical to today's. An armed run
+    that pauses settles ``awaiting_input`` (a SETTLED state) with one
+    ``hitl_request`` step row; resume is a HITL-2 follow-up run.
+
     Terminal writes: ``completed`` (+ ``final_answer``), ``cap_exceeded``
-    (step cap), or ``failed`` (``error='timeout'`` for the wall clock;
-    otherwise a bounded exception summary — never a stack trace).
+    (step cap), ``awaiting_input`` (HITL pause), or ``failed``
+    (``error='timeout'`` for the wall clock; otherwise a bounded
+    exception summary — never a stack trace).
     """
+    # HITL-1 (ADR-F071): a pause without a checkpoint is unrecoverable —
+    # refuse to arm at entry. Composition always provides both for real
+    # runs; eval/scenario paths never arm.
+    if interrupt_on and (checkpointer is None or thread_id is None):
+        raise ValueError("interrupt_on requires a checkpointer and a thread_id (ADR-F071)")
     # Load-then-release: the run's fields are snapshotted in a short
     # session; the loop itself holds NO long-lived connection (each step
     # write opens its own — see _persist_step). A Postgres restart
@@ -672,6 +754,12 @@ async def execute_agent_run(
         # Rides **kwargs into create_deep_agent; omitted when nothing renders.
         if middleware:
             agent_kwargs["middleware"] = list(middleware)
+        # HITL-1 (ADR-F071): the compiled stop-and-ask policy. Only when
+        # truthy — key absent ⇒ create_deep_agent unchanged ⇒ no
+        # HumanInTheLoopMiddleware ⇒ the zero-config graph is byte-identical
+        # to today's (the invariant the T1 tests pin).
+        if interrupt_on:
+            agent_kwargs["interrupt_on"] = dict(interrupt_on)
         agent = build_deep_agent(
             model=model,
             tools=tools,
@@ -682,7 +770,7 @@ async def execute_agent_run(
             # F1-S1 thread repair: a prior run settled non-cooperatively
             # may have left dangling tool_calls in the transcript.
             await repair_dangling_tool_calls(agent, thread_id)
-        final_answer, cap_hit, token_cap_hit, total_tokens = await _drive_agent(
+        outcome = await _drive_agent(
             agent,
             run_id=run_id,
             prompt=prompt,
@@ -697,6 +785,25 @@ async def execute_agent_run(
             change_ledger=change_ledger,
             runtime_context=runtime_context,
         )
+        final_answer, cap_hit, token_cap_hit, total_tokens = (
+            outcome.final_answer,
+            outcome.cap_hit,
+            outcome.token_cap_hit,
+            outcome.total_tokens,
+        )
+        # HITL-1 (ADR-F071): iff the run was armed, verify the pause against
+        # the checkpointed state (authoritative; the in-stream chunk is only
+        # the fast signal). Not armed ⇒ no aget_state call at all — the
+        # common path gains zero I/O. Still inside the try: a state-read
+        # failure settles `failed`, never a silent mis-settle.
+        hitl_actions: list[dict[str, Any]] | None = None
+        if interrupt_on and thread_id is not None:  # thread_id: guaranteed by the entry guard
+            hitl_actions = await _pending_hitl_actions(agent, thread_id)
+            if hitl_actions is None and outcome.interrupt_seen:
+                logger.warning(
+                    "in-stream interrupt signal without a pending interrupt in state",
+                    extra={"event": "agent_run_hitl_signal_drift", "run_id": str(run_id)},
+                )
     except RunSettledElsewhere:
         # Sweep or cancel won the row (ADR-F009): no terminal write of
         # ours could land (fenced), and the wire must not announce a
@@ -763,6 +870,59 @@ async def execute_agent_run(
                 "agent run cost estimate failed (non-fatal); settling with cost_usd NULL",
                 extra={"event": "agent_run_cost_estimate_failed", "run_id": str(run_id)},
             )
+    # HITL-1 (ADR-F071): a verified pending interrupt pre-empts the
+    # capped/completed decision — the run settles ``awaiting_input``
+    # through the same fence (finished_at = "stopped executing"; the
+    # lease is not cleared — resume is a NEW run, never a re-claim).
+    # Exactly ONE ``hitl_request`` step row records the ask (settled rows
+    # decide, ADR-F004): a bounded, display-only JSON digest of the
+    # pending tool calls — the approved bytes remain the checkpointed
+    # tool call itself. Written BEFORE the settle so no reader ever sees
+    # a paused run without its ask.
+    if hitl_actions is not None:
+        hitl_seq = outcome.steps + 1
+        hitl_step_id = uuid.uuid4()
+        hitl_created_at = datetime.now(UTC)
+        hitl_name = next((a["tool"] for a in hitl_actions if isinstance(a.get("tool"), str)), None)
+        hitl_summary = _bounded(json.dumps(hitl_actions, default=str, sort_keys=True))
+        await _persist_step(
+            db_session_factory,
+            step_id=hitl_step_id,
+            run_id=run_id,
+            seq=hitl_seq,
+            kind=AgentRunStepKind.hitl_request.value,
+            name=hitl_name,
+            summary=hitl_summary,
+            parent_step_id=None,
+            created_at=hitl_created_at,
+        )
+        settled = await _finalize(
+            db_session_factory,
+            run_id,
+            status=AgentRunStatus.awaiting_input,
+            final_answer=None,
+            error=None,
+            total_tokens=total_tokens,
+            cost_usd=cost_usd,
+            lease=lease,
+        )
+        if publisher is not None and settled:
+            publisher.step_settled(
+                step_payload(
+                    step_id=hitl_step_id,
+                    run_id=run_id,
+                    seq=hitl_seq,
+                    kind=AgentRunStepKind.hitl_request.value,
+                    name=hitl_name,
+                    summary=hitl_summary,
+                    parent_step_id=None,
+                    created_at=hitl_created_at,
+                )
+            )
+            publisher.run_finished(status=AgentRunStatus.awaiting_input.value)
+        elif publisher is not None:
+            publisher.close()
+        return
     settled = await _finalize(
         db_session_factory,
         run_id,

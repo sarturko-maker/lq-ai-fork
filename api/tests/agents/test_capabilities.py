@@ -660,6 +660,102 @@ def test_recommended_library_sets_no_playbooks() -> None:
         assert cap.KIND_PLAYBOOK not in kinds
 
 
+# --- HITL eligible-set drift guard (HITL-1, ADR-F071) -------------------------
+
+
+def test_group_tool_names_cover_the_registry_exactly() -> None:
+    """GROUP_TOOL_NAMES keys == TOOL_GROUP_REGISTRY keys.
+
+    A new/renamed tool group must update its grant-name transcription or CI
+    breaks — never a group whose tools silently fall outside the HITL-eligible
+    set (a policy naming them would never interrupt)."""
+    assert set(cap.GROUP_TOOL_NAMES) == set(cap.TOOL_GROUP_REGISTRY)
+
+
+# Independent ground truth for the GROUP_TOOL_NAMES transcription: the exact tool
+# names each registry group grants, pinned as literals (the per-builder tests — e.g.
+# test_commercial_tools.py — pin each *_TOOL_NAMES frozenset against its live builder;
+# this map catches the OTHER drift, a key wired to the wrong constant). Asserting the
+# eligible set against a set derived from GROUP_TOOL_NAMES would be tautological — so
+# the expectation is written out, not recomputed.
+_EXPECTED_GROUP_TOOL_NAMES: dict[str, frozenset[str]] = {
+    "redlining": frozenset(
+        {
+            "apply_redline",
+            "preview_redline",
+            "extract_counterparty_position",
+            "respond_to_counterparty",
+            "reconcile_positions",
+        }
+    ),
+    "tabular": frozenset(
+        {
+            "start_tabular_review",
+            "record_tabular_row",
+            "finalize_tabular_review",
+            "update_tabular_cells",
+        }
+    ),
+    "ropa": frozenset(
+        {
+            "propose_processing_activity",
+            "retire_processing_activity",
+            "list_processing_activities",
+            "propose_system",
+            "retire_system",
+            "list_systems",
+            "propose_vendor",
+            "retire_vendor",
+            "list_vendors",
+            "propose_transfer",
+            "retire_transfer",
+            "list_transfers",
+            "add_data_categories",
+            "list_data_categories",
+            "add_data_subject_categories",
+            "list_data_subject_categories",
+            "link_processing_activity_to_system",
+            "unlink_system_from_activity",
+            "link_vendor_to_activity",
+            "unlink_vendor_from_activity",
+        }
+    ),
+    "assessment": frozenset(
+        {
+            "propose_assessment",
+            "add_risk",
+            "link_assessment_to_activity",
+            "complete_assessment",
+            "list_assessments",
+        }
+    ),
+    "knowledge": frozenset({"search_knowledge"}),
+}
+
+
+def test_group_tool_names_match_expected_grants() -> None:
+    """Each group's transcribed grant names equal an independent literal expectation.
+
+    Catches a key wired to the wrong ``*_TOOL_NAMES`` constant (e.g.
+    ``REDLINING_GROUP.key: TABULAR_TOOL_NAMES``) — which a set derived from
+    GROUP_TOOL_NAMES itself could never catch (ADR-F071)."""
+    assert set(cap.GROUP_TOOL_NAMES) == set(_EXPECTED_GROUP_TOOL_NAMES)
+    for key, expected in _EXPECTED_GROUP_TOOL_NAMES.items():
+        assert cap.GROUP_TOOL_NAMES[key] == expected, (
+            f"group '{key}' grant-name transcription drifted from the expected literal set"
+        )
+
+
+def test_hitl_eligible_names_exclude_deepagents_builtins() -> None:
+    """The eligible set holds ONLY names composition can grant — deepagents builtins
+    like ``task``/``read_file`` must never become policy-eligible (structurally
+    ungateable, ADR-F071). Also pins that every expected group name IS eligible."""
+    eligible = cap.hitl_eligible_tool_names()
+    assert not eligible & {"task", "write_todos", "ls", "read_file", "write_file", "edit_file"}
+    for names in _EXPECTED_GROUP_TOOL_NAMES.values():
+        assert names <= eligible
+
+
 # --- playbook renderer -------------------------------------------------------
 def _position(
     issue: str, standard: str, *, fallbacks: list[dict] | None = None, severity: str = "high"
