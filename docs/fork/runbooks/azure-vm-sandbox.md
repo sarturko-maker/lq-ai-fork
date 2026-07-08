@@ -266,6 +266,81 @@ the node file: stop the stack, `docker volume rm lq-ai_gateway-config` (this
 discards live edits), boot again. Never `docker volume prune` — it removes named
 volumes wholesale.
 
+## 4b. Optional — source the Azure keys from Key Vault (managed identity)
+
+By default the three Azure keys ride into the gateway as plaintext
+`AZURE_*_API_KEY` values in `.env.prod` (on disk). KV-1 (ADR-F069) lets you
+source them from Azure Key Vault instead, using the VM's **system-assigned
+managed identity**, so no key material lives on disk. It is additive and
+per-key: any pair you don't configure keeps reading its plain env var.
+
+**Honesty note.** Managed identity removes the keys *at rest*, but it is not a
+process-level secret boundary: any process running on this VM can hit the IMDS
+endpoint and mint the same `vault.azure.net` token, then read the same secrets.
+This raises the bar against a stolen `.env.prod`, not against code running on the
+box.
+
+Provision (placeholders only — substitute your names):
+
+```sh
+# 1. Give the VM a system-assigned identity and capture its principal id.
+az vm identity assign -g <your-sandbox-rg> -n <your-vm>
+VM_PRINCIPAL_ID=$(az vm show -g <your-sandbox-rg> -n <your-vm> \
+  --query identity.principalId -o tsv)
+
+# 2. Create an RBAC-authorization vault and capture its resource id.
+az keyvault create -g <your-sandbox-rg> -n <your-vault-name> \
+  -l <your-region> --enable-rbac-authorization true
+VAULT_ID=$(az keyvault show -n <your-vault-name> --query id -o tsv)
+
+# 3. Grant the VM identity read access to secrets (data-plane RBAC).
+az role assignment create --role "Key Vault Secrets User" \
+  --assignee-object-id "$VM_PRINCIPAL_ID" \
+  --assignee-principal-type ServicePrincipal \
+  --scope "$VAULT_ID"
+
+# 4. Store each provider key as a secret (names are your choice).
+az keyvault secret set --vault-name <your-vault-name> \
+  --name <azure-openai-secret-name>    --value <the-azure-openai-key>
+az keyvault secret set --vault-name <your-vault-name> \
+  --name <azure-anthropic-secret-name> --value <the-azure-anthropic-key>
+az keyvault secret set --vault-name <your-vault-name> \
+  --name <azure-foundry-secret-name>   --value <the-azure-foundry-key>
+```
+
+Then wire it in `.env.prod` (all NON-secret — only names, never the keys):
+
+```sh
+AZURE_KEY_VAULT_NAME=<your-vault-name>
+AZURE_OPENAI_KEY_SECRET_NAME=<azure-openai-secret-name>
+AZURE_ANTHROPIC_KEY_SECRET_NAME=<azure-anthropic-secret-name>
+AZURE_FOUNDRY_KEY_SECRET_NAME=<azure-foundry-secret-name>
+```
+
+You may now **remove** the plaintext `AZURE_OPENAI_API_KEY` / `AZURE_ANTHROPIC_API_KEY`
+/ `AZURE_FOUNDRY_API_KEY` lines from `.env.prod` (the Key Vault value is used; if
+both are present the Key Vault value wins and the gateway logs the override).
+
+Activate by **recreating** the gateway so it re-reads the env and re-runs the
+fetch — a restart or SIGHUP does NOT re-read env, and note SIGHUP only swaps the
+config snapshot (it does not rebuild adapters), so **SIGHUP does not re-source
+keys**. To rotate a key later: update the Key Vault secret, then recreate the
+gateway again.
+
+```sh
+dc up -d gateway
+```
+
+Verify:
+
+- `dc logs gateway | grep 'from Azure Key Vault'` — one INFO line per sourced
+  key, e.g. `sourced AZURE_OPENAI_API_KEY from Azure Key Vault (vault=<your-vault-name> secret=<azure-openai-secret-name>)`.
+  No key value or length is ever logged. A per-key failure logs a `Key Vault
+  fetch failed for …` WARNING and the gateway falls back to the plain env var if
+  present (else that provider routes 503).
+- Then run the §5.3 chat-completion smoke per enabled provider — a 200 with
+  `pong` proves the Key-Vault-sourced key reached the upstream call.
+
 ## 5. Per-provider smoke tests (synthetic only)
 
 The gateway publishes **no host port** in prod (Caddy fronts api + web only), so

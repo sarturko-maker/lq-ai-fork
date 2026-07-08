@@ -137,6 +137,7 @@ providers:
       - anthropic.claude-opus-4-7-v1:0
       - anthropic.claude-sonnet-4-6-v1:0
 
+  # KV-1 (ADR-F069): the azure-* keys (AZURE_*_API_KEY) may instead be sourced from Azure Key Vault via the VM's managed identity — see .env.prod.example.
   - name: azure-openai
     type: azure_openai
     # M2-E1 (DE-267): Azure OpenAI adapter. Mirrors the OpenAI wire shape

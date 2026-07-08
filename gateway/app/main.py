@@ -64,6 +64,7 @@ from app.config_holder import MutableConfigHolder, install_sighup_reload
 from app.config_loader import ConfigLoadError, load_config
 from app.db import engine_or_none
 from app.errors import LQAIError
+from app.keyvault import keyvault_env_overlay
 from app.model_discovery import ModelDiscoverer
 from app.providers import (
     AnthropicAdapter,
@@ -93,7 +94,9 @@ def _resolve_config_path() -> Path:
     return DEFAULT_CONFIG_PATH
 
 
-def build_adapter(provider: ProviderConfig) -> ProviderAdapter | None:
+def build_adapter(
+    provider: ProviderConfig, *, env: dict[str, str] | None = None
+) -> ProviderAdapter | None:
     """Construct the adapter for one provider, or ``None`` if no live
     adapter can be built.
 
@@ -119,24 +122,32 @@ def build_adapter(provider: ProviderConfig) -> ProviderAdapter | None:
     runtime BYOK hot-apply path (Donna #7, Task B). Behavior must match
     the per-type dispatch the lifespan used previously, so the set of
     adapters built for a given config is unchanged.
+
+    ``env`` (KV-1, ADR-F069) is the environment mapping used for
+    ``api_key_env`` resolution, threaded down to every ``from_config``
+    factory and thence to :class:`app.secrets.ProviderKeyResolver`. The
+    lifespan passes ``{**os.environ, **keyvault_overlay}`` so provider keys
+    optionally sourced from Azure Key Vault win over any stale plaintext env
+    var; ``None`` (the default) means "use ``os.environ``", which keeps the
+    BYOK hot-apply path and tests byte-identical to before KV-1.
     """
 
     if not provider.enabled:
         return None
     if provider.type == "anthropic":
-        return AnthropicAdapter.from_config(provider)
+        return AnthropicAdapter.from_config(provider, env=env)
     if provider.type in ("openai", "openai_compatible"):
         # C6 + B6: OpenAI adapter services both embeddings and chat
         # completions and handles both ``openai`` and ``openai_compatible``.
-        return OpenAIAdapter.from_config(provider)
+        return OpenAIAdapter.from_config(provider, env=env)
     if provider.type == "azure_openai":
         # M2-E1 (DE-267): Azure OpenAI mirrors the OpenAI wire shape with
         # a deployment-scoped URL (+ api-version) and ``api-key`` auth.
-        return AzureOpenAIAdapter.from_config(provider)
+        return AzureOpenAIAdapter.from_config(provider, env=env)
     if provider.type == "ollama":
         # B6 partial: Ollama is the Mode-2 (air-gapped local inference)
         # backbone per PRD §1.5.1 / §6.1.
-        return OllamaAdapter.from_config(provider)
+        return OllamaAdapter.from_config(provider, env=env)
     # B6 lands the remaining adapters (Vertex, Bedrock); until then there
     # is no adapter for those types (or any unknown type).
     return None
@@ -181,10 +192,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # /ready, /v1/models, and the configured providers that are usable.
     # The chat-completions handler returns a structured 503 if a request
     # routes to a provider with no adapter.
+    #
+    # KV-1 (ADR-F069): optionally source the Azure provider keys from Azure
+    # Key Vault via the VM's managed identity. Computed ONCE per config load;
+    # the result is merged over ``os.environ`` (the overlay WINS) and threaded
+    # into every adapter's key resolution via ``build_adapter(env=...)``. The
+    # overlay is ``{}`` with ZERO network calls when the AZURE_KEY_VAULT_NAME /
+    # *_SECRET_NAME vars are unset, so this is byte-identical to plain-env
+    # behavior; a passed ``env`` of ``None`` in that case means "use os.environ".
+    keyvault_overlay = keyvault_env_overlay(os.environ)
+    resolution_env: dict[str, str] | None = (
+        {**os.environ, **keyvault_overlay} if keyvault_overlay else None
+    )
     adapters: dict[str, ProviderAdapter] = {}
     for provider in config.providers:
         try:
-            adapter = build_adapter(provider)
+            adapter = build_adapter(provider, env=resolution_env)
         except ValueError as exc:
             # Missing/unresolvable key for a supported provider — non-fatal
             # at startup; the provider is skipped and chat requests routing
