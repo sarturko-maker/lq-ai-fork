@@ -8,6 +8,11 @@
 	 * bindings with Detach + an attach `<select>` of not-yet-bound catalog
 	 * entries; a Danger Zone deletes the area with an inline confirm.
 	 *
+	 * B-1 (G13(a)): a bound row whose catalog entry isn't Library-adopted (or
+	 * has no catalog entry at all — registry drift) gets a compact inline
+	 * warning chip — `build_area_inventory` fail-closes on it server-side, so
+	 * the agent silently never receives that capability at run time.
+	 *
 	 * Generation-B surface (plan D1): semantic tokens + ModalShell-free inline
 	 * cards, Badge/Alert/FormControl/Table primitives only — no --lq-* here.
 	 */
@@ -36,6 +41,7 @@
 	} from '$lib/lq-ai/admin/page-helpers';
 	import {
 		bindingLabel,
+		degradedBindingKeys,
 		diffPatch,
 		findAreaByKey,
 		formatDeleteConflict,
@@ -67,9 +73,30 @@
 	// than regress to the raw key (STORE-2 review fix).
 	const skillCatalogAll = $derived(catalogEntriesForKind(catalog, 'skill'));
 	const toolCatalogAll = $derived(catalogEntriesForKind(catalog, 'tool'));
+	const playbookCatalogAll = $derived(catalogEntriesForKind(catalog, 'playbook'));
 	const skillCatalog = $derived(libraryOnly(skillCatalogAll));
 	const toolCatalog = $derived(libraryOnly(toolCatalogAll));
-	const playbookCatalog = $derived(libraryOnly(catalogEntriesForKind(catalog, 'playbook')));
+	const playbookCatalog = $derived(libraryOnly(playbookCatalogAll));
+
+	// G13(a) — bound keys whose catalog entry isn't Library-adopted (or is
+	// missing entirely). `build_area_inventory` fail-closes on these server-
+	// side, so a bound-but-degraded capability never reaches the agent even
+	// though the row shows it as "bound". Checked against the FULL per-kind
+	// catalog, never `libraryOnly(...)` (see `degradedBindingKeys` docstring).
+	const degradedGroupKeys = $derived(
+		area ? degradedBindingKeys(toolCatalogAll, area.bound_tool_groups) : new Set<string>()
+	);
+	const degradedSkillKeys = $derived(
+		area ? degradedBindingKeys(skillCatalogAll, area.bound_skills) : new Set<string>()
+	);
+	const degradedPlaybookKeys = $derived(
+		area
+			? degradedBindingKeys(
+					playbookCatalogAll,
+					area.bound_playbooks.map((pb) => String(pb.id))
+				)
+			: new Set<string>()
+	);
 
 	// Attach `<select>` option sets — computed here (not `{@const}`, which must be
 	// an IMMEDIATE child of an {#if}/{:else}/etc., not nested inside a <section>).
@@ -334,6 +361,20 @@
 	{:else}
 		<SectionHeader title={area.name} subtitle={`Key: ${area.key}`} class="mt-3" />
 
+		<!-- G13(a) — compact inline warning for a bound-but-degraded capability
+		     (bound, but not in the Library, so the agent never receives it). -->
+		{#snippet degradedBindingChip(degraded: boolean, testid: string)}
+			{#if degraded}
+				<span
+					class="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300"
+					data-testid={testid}
+				>
+					Not in your Library — the agent will not receive this.
+					<a href="/lq-ai/admin/store" class="underline">Adopt in Store</a>
+				</span>
+			{/if}
+		{/snippet}
+
 		<!-- ----- Edit card ----- -->
 		<section class="mt-6 space-y-3 rounded-lg border border-border p-4" aria-label="Edit">
 			<SectionHeader size="section" title="Details" />
@@ -446,7 +487,13 @@
 			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-groups-list">
 				{#each area.bound_tool_groups as groupKey (groupKey)}
 					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-						<span class="text-sm text-foreground">{bindingLabel(toolCatalogAll, groupKey)}</span>
+						<span class="flex flex-wrap items-center gap-2">
+							<span class="text-sm text-foreground">{bindingLabel(toolCatalogAll, groupKey)}</span>
+							{@render degradedBindingChip(
+								degradedGroupKeys.has(groupKey),
+								`lq-admin-area-groups-degraded-${groupKey}`
+							)}
+						</span>
 						<Button
 							type="button"
 							size="sm"
@@ -506,12 +553,18 @@
 			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-skills-list">
 				{#each area.bound_skills as skillName (skillName)}
 					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-						<a
-							href="/lq-ai/skills/{encodeURIComponent(skillName)}"
-							class="text-sm text-foreground hover:underline"
-						>
-							{bindingLabel(skillCatalogAll, skillName)}
-						</a>
+						<span class="flex flex-wrap items-center gap-2">
+							<a
+								href="/lq-ai/skills/{encodeURIComponent(skillName)}"
+								class="text-sm text-foreground hover:underline"
+							>
+								{bindingLabel(skillCatalogAll, skillName)}
+							</a>
+							{@render degradedBindingChip(
+								degradedSkillKeys.has(skillName),
+								`lq-admin-area-skills-degraded-${skillName}`
+							)}
+						</span>
 						<Button
 							type="button"
 							size="sm"
@@ -571,7 +624,13 @@
 			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-playbooks-list">
 				{#each area.bound_playbooks as pb (pb.id)}
 					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-						<span class="text-sm text-foreground">{pb.name}</span>
+						<span class="flex flex-wrap items-center gap-2">
+							<span class="text-sm text-foreground">{pb.name}</span>
+							{@render degradedBindingChip(
+								degradedPlaybookKeys.has(String(pb.id)),
+								`lq-admin-area-playbooks-degraded-${pb.id}`
+							)}
+						</span>
 						<Button
 							type="button"
 							size="sm"

@@ -9,6 +9,7 @@ import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 import {
 	bindingLabel,
+	degradedBindingKeys,
 	diffPatch,
 	findAreaByKey,
 	formatDeleteConflict,
@@ -246,6 +247,51 @@ describe('unboundOptions', () => {
 
 	it('returns [] when everything is bound', () => {
 		expect(unboundOptions(options, ['redlining', 'tabular', 'ropa'])).toEqual([]);
+	});
+});
+
+describe('degradedBindingKeys (G13(a))', () => {
+	const catalog = [
+		{ key: 'redlining', label: 'Redlining', description: null, in_library: true },
+		{ key: 'nda-review', label: 'NDA review', description: null, in_library: false }
+	];
+
+	it('is not degraded when the bound key is Library-adopted', () => {
+		expect(degradedBindingKeys(catalog, ['redlining'])).toEqual(new Set());
+	});
+
+	it('is degraded when the bound key has a catalog entry but is not adopted', () => {
+		expect(degradedBindingKeys(catalog, ['nda-review'])).toEqual(new Set(['nda-review']));
+	});
+
+	it('is degraded when the bound key has NO catalog entry at all (registry drift)', () => {
+		expect(degradedBindingKeys(catalog, ['retired-skill'])).toEqual(new Set(['retired-skill']));
+	});
+
+	it('mixes adopted and degraded keys correctly in one call', () => {
+		expect(degradedBindingKeys(catalog, ['redlining', 'nda-review', 'retired-skill'])).toEqual(
+			new Set(['nda-review', 'retired-skill'])
+		);
+	});
+
+	it('isolates kinds — the same key string in a different kind catalog is judged independently', () => {
+		// Same key 'shared-key' adopted in one kind's catalog, not in another's —
+		// callers pass one kind's catalog at a time, so each call is self-contained.
+		const toolCatalog = [{ key: 'shared-key', label: 'Tool', description: null, in_library: true }];
+		const skillCatalog = [{ key: 'shared-key', label: 'Skill', description: null, in_library: false }];
+		expect(degradedBindingKeys(toolCatalog, ['shared-key'])).toEqual(new Set());
+		expect(degradedBindingKeys(skillCatalog, ['shared-key'])).toEqual(new Set(['shared-key']));
+	});
+
+	it('returns an empty set for empty inputs', () => {
+		expect(degradedBindingKeys([], [])).toEqual(new Set());
+		expect(degradedBindingKeys(catalog, [])).toEqual(new Set());
+	});
+
+	it('degrades every bound key when the catalog itself is empty', () => {
+		expect(degradedBindingKeys([], ['redlining', 'nda-review'])).toEqual(
+			new Set(['redlining', 'nda-review'])
+		);
 	});
 });
 
