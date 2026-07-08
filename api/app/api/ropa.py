@@ -3,9 +3,9 @@
 Read-only endpoints over the Privacy module's **deployment-global** inventory
 graph (Systems ↔ Processing Activities). The register is the company's standing
 record (LQ.AI is single-tenant — the in-house team's one client is its own
-organization; ADR-F019), so it is intentionally **shared across the firm's
+organization; ADR-F019), so it is intentionally **shared across the company's
 users**: the cross-user→404 rule that protects private matters does NOT apply
-here. The gate is just "active (authenticated) firm user", enforced at the
+here. The gate is just "active (authenticated) company user", enforced at the
 ``include_router`` site (``dependencies=_active``); a 404 means a genuinely
 missing record id, not an existence-hiding authz refusal.
 

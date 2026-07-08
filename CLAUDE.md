@@ -110,12 +110,12 @@ StoreBackend namespaces keyed `(org_id, …)`; company and practice levels read-
 
 These are the agreed names for every memory tier. **Convention: when discussing memory with the
 maintainer, always refer to a tier by its canonical name followed by a one-sentence plain-language
-description** (e.g. *"Practice Knowledge — the firm's approved, anonymised house know-how shared across
-the practice group"*).
+description** (e.g. *"Practice Knowledge — the company's approved, anonymised house know-how shared
+across the practice group"*).
 
 | Name | Level | One-sentence description | Source of truth |
 |---|---|---|---|
-| **House Brief** | Firm | who the firm is and who it acts for; same for everyone, read-only to the agent. | `organization_profile` |
+| **House Brief** | Company | who the company is and who its legal team acts for; same for everyone, read-only to the agent. | `organization_profile` |
 | **Practice Playbook** | Practice area | the area's job description (doctrine, skills, helper roster, min model), human-curated, read-only to the agent. | `practice_areas` + bound skills |
 | **Practice Knowledge** ⭐ | Practice area | approved, anonymised house know-how built up across matters; agent proposes, human approves, shared with the practice group. | *future* — Store-backed + a safety harness (`docs/fork/plans/PRACTICE-KNOWLEDGE-prize.md`); NOT built |
 | **Lawyer Preferences** | User | one lawyer's private notes on how they like to work; never shared. | `autonomous_memory` (write-only today) |
