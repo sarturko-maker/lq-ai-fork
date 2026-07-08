@@ -80,7 +80,7 @@
 <PageShell size="wide" data-testid="lq-library-page">
 	<SectionHeader
 		title="Library"
-		subtitle="Your organisation's Library — what your firm has adopted for its agents. Read-only."
+		subtitle="Your organisation's Library — what your company has adopted for its agents. Read-only."
 	/>
 
 	{#if loading}
@@ -88,7 +88,7 @@
 	{:else if loadError}
 		<div class="mt-6"><Alert intent="error">{loadError}</Alert></div>
 	{:else if entries.length === 0}
-		<p class="mt-6 text-sm text-muted-foreground">Your firm hasn't added anything yet.</p>
+		<p class="mt-6 text-sm text-muted-foreground">Your company hasn't added anything yet.</p>
 	{:else}
 		<div class="mt-6 flex flex-col gap-8">
 			{#each SECTIONS as section (section.kind)}

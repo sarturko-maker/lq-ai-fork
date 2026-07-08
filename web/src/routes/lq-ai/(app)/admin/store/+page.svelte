@@ -144,7 +144,7 @@
 <PageShell size="wide" data-testid="lq-admin-store-page">
 	<SectionHeader
 		title="Store"
-		subtitle="Everything that ships with LQ.AI Oscar Edition. Add what your firm uses to your Library."
+		subtitle="Everything that ships with LQ.AI Oscar Edition. Add what your company uses to your Library."
 	/>
 	<p class="mt-1 text-sm">
 		<a href="/lq-ai/admin/library" class="underline">Go to your Library</a>
