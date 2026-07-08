@@ -81,9 +81,30 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   (serverless deployments idle at $0). **Workstream AZ is now COMPLETE on the dev side** — what
 >   remains needs a real Azure resource (maintainer executes the runbook; findings feed back). AZ-4b
 >   (Voyage) stays PARKED; AZ-6 (AKS/Entra) unplanned.
-> - **NEXT ▶ B-0 (drafts ready: `docs/adr/F067-module-model.md` + `docs/fork/plans/MODULES-milestone.md`
->   — reviewed, land as proposed for maintainer edit) and BRAND-1 (scout plan in session scratchpad
->   `brand-1-plan.md`; ADR number = F068; two stacked slices 1a backend / 1b web).**
+> - **B-0 ✓ LANDED — both docs status PROPOSED: the maintainer edits/accepts them before any B slice
+>   is built.** `docs/adr/F067-module-model.md`: D1 module vocabulary (skill / knowledge / playbook /
+>   tool group / sub-agent profile + future MCP, each with an injection-risk class); D2 org-authored
+>   path reopening F065 D7 — propose → admin approve → IMMUTABLE content-hash-pinned snapshot
+>   (post-approval edits need re-approval: closes TOCTOU), no shadowing of shipped slugs in v1;
+>   D3 the harness — KEY FIND: deepagents 0.6.8 SkillsMiddleware renders `allowed-tools` frontmatter
+>   VERBATIM into the system prompt (skills.py:887), so the strict org-frontmatter allowlist DENIES it
+>   (grants stay code-only per F062 — but the steering surface needed closing too) + denies
+>   minimum_inference_tier/ensemble_verification; provenance banner at point of use; 32 KiB cap;
+>   audit every transition; revocation fail-closes at build_area_inventory; LLM injection-screening
+>   REJECTED (F018 doctrine; the screener is itself injectable); D4 agent profiles = in-repo
+>   `profiles/*.yaml` manifests, apply = COPY-not-link; D5 HITL seam named, deliberately undesigned
+>   pending the B-6 langgraph-interrupts spike; D6 non-goals. `docs/fork/plans/MODULES-milestone.md`:
+>   B-1 House Brief page + G13 chip → B-2a/2b/2c harness (backend / UI / red-team eval) → B-3
+>   knowledge tool group → B-4 playbooks → B-5 sub-agent roster UI → B-6 HITL spike→ADR→slice →
+>   B-7a profile manifests (parity oracle: applying Commercial reproduces today's seeded state) →
+>   B-7b the wizard (absorbs ONBOARD-1/2 + G13/#473; acceptance = maintainer-walked fresh-org
+>   rehearsal).
+> - **NEXT ▶ BRAND-1a backend (workflow IN FLIGHT overnight 2026-07-08)** — see the BRAND-1 entry
+>   below; scout plan (session scratchpad `brand-1-plan.md`) CORRECTED the token detail: the brandable
+>   set is the SEMANTIC tokens in `web/src/app.css` (`--brand` family — the scarce blue), NOT the
+>   legacy `--lq-*` set (those stay untouched); ADR number = **F068**; logo = BYTEA raster-only
+>   (unauth path must not need S3 creds); injection = dual-scope `<style id="lq-branding">` tag
+>   (inline setProperty on `<html>` would break dark mode). Slice 1b (web) follows.
 > - **BRAND-1 — tenant white-labeling (maintainer, 2026-07-07: clients brand the product — palette,
 >   logo, product name — WITHOUT coding; task #480).** The substrate makes this cheap BY DESIGN:
 >   (a) the ADR-F013 token layer means palette = overriding a handful of `--lq-*` CSS custom
@@ -101,12 +122,6 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   stack-per-tenant means deployment-level branding IS tenant-level — no per-org rows needed.
 >   Org-admin edits it (their brand); operator pre-seeds via wizard. Slot: after AZ-2b (or parallel
 >   to AZ-5 — disjoint files).
-> - **B-0 — module-model ADR + milestone re-plan (starts Workstream B).** One vocabulary: module =
->   skill | knowledge | playbook | tool group | sub-agent profile; how org-AUTHORED content enters the
->   Library (reopens ADR-F065 D7 WITH the injection harness it demanded — org-authored skills are a
->   prompt-injection surface); what an "agent profile" is. Then re-plan B-1…B-7 (House Brief page →
->   org skills → knowledge → playbooks → sub-agent config → HITL policy (needs a langgraph-interrupts
->   research spike) → the wizard, absorbing ONBOARD-1/2 + G13/#473) as its own milestone doc.
 > - **GOTCHAS:** background Workflow runs are SESSION-scoped — after a compaction, resume from the
 >   branch diff + this banner, not the run id. Strays stay uncommitted (`sample-documents/`,
 >   `api/tests/agents/scenarios/test_*_live.py`). Ruff CI-parity trap (run CI's exact version +
