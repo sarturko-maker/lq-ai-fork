@@ -1275,3 +1275,174 @@ async def test_practice_areas_default_budget_profile_check(db_session: AsyncSess
     with pytest.raises(IntegrityError):
         await db_session.flush()
     await db_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# org_skill_versions — org-authored skill propose/approve harness (0091, ADR-F067 D2/D3, B-2a)
+# ---------------------------------------------------------------------------
+
+_MIN_ORG_SKILL_VERSION_SQL = (
+    "INSERT INTO org_skill_versions "
+    "(slug, version_no, raw_yaml, body, frontmatter, content_hash, state) "
+    "VALUES (:slug, :version_no, 'name: x', 'body', '{}'::jsonb, :hash, :state)"
+)
+
+
+@pytest.mark.integration
+async def test_org_skill_versions_table_exists(db_session: AsyncSession) -> None:
+    """0091 (ADR-F067 D2/D3): the org_skill_versions table exists with the expected columns."""
+    cols = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'org_skill_versions'"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {
+        "id",
+        "slug",
+        "version_no",
+        "raw_yaml",
+        "body",
+        "frontmatter",
+        "content_hash",
+        "source_user_skill_id",
+        "author_user_id",
+        "state",
+        "proposed_at",
+        "reviewed_by",
+        "reviewed_at",
+        "review_note",
+        "revoked_by",
+        "revoked_at",
+    }.issubset(set(cols))
+    # PK is (id).
+    pk = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT a.attname FROM pg_index i "
+                    "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+                    "WHERE i.indrelid = 'org_skill_versions'::regclass AND i.indisprimary"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert set(pk) == {"id"}
+
+
+@pytest.mark.integration
+async def test_org_skill_versions_state_check(db_session: AsyncSession) -> None:
+    """state is constrained to the F067 D2 state machine vocabulary (0091 CHECK)."""
+    from sqlalchemy.exc import IntegrityError
+
+    slug = f"chk-probe-{uuid.uuid4().hex[:8]}"
+    await db_session.execute(
+        text(_MIN_ORG_SKILL_VERSION_SQL),
+        {"slug": slug, "version_no": 1, "hash": "hash-1", "state": "proposed"},
+    )
+    await db_session.flush()  # a valid state must NOT raise
+    with pytest.raises(IntegrityError):
+        await db_session.execute(
+            text(_MIN_ORG_SKILL_VERSION_SQL),
+            {"slug": slug, "version_no": 2, "hash": "hash-2", "state": "bogus"},
+        )
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_org_skill_versions_one_proposed_per_slug(db_session: AsyncSession) -> None:
+    """ux_org_skill_versions_slug_proposed: at most one OPEN proposal per slug (0091,
+    ADR-F067 D3 — a duplicate open proposal is the endpoint's 409 source)."""
+    from sqlalchemy.exc import IntegrityError
+
+    slug = f"uniq-proposed-{uuid.uuid4().hex[:8]}"
+    await db_session.execute(
+        text(_MIN_ORG_SKILL_VERSION_SQL),
+        {"slug": slug, "version_no": 1, "hash": "hash-1", "state": "proposed"},
+    )
+    await db_session.flush()
+    with pytest.raises(IntegrityError):
+        await db_session.execute(
+            text(_MIN_ORG_SKILL_VERSION_SQL),
+            {"slug": slug, "version_no": 2, "hash": "hash-2", "state": "proposed"},
+        )
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_org_skill_versions_one_approved_per_slug(db_session: AsyncSession) -> None:
+    """ux_org_skill_versions_slug_approved: at most one LIVE approved version per slug (0091,
+    ADR-F067 D2 "approval pins bytes, not a row" — a prior approved row must be superseded
+    in the SAME transaction as the new approval, or this index raises)."""
+    from sqlalchemy.exc import IntegrityError
+
+    slug = f"uniq-approved-{uuid.uuid4().hex[:8]}"
+    await db_session.execute(
+        text(_MIN_ORG_SKILL_VERSION_SQL),
+        {"slug": slug, "version_no": 1, "hash": "hash-1", "state": "approved"},
+    )
+    await db_session.flush()
+    with pytest.raises(IntegrityError):
+        await db_session.execute(
+            text(_MIN_ORG_SKILL_VERSION_SQL),
+            {"slug": slug, "version_no": 2, "hash": "hash-2", "state": "approved"},
+        )
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_org_skill_versions_user_fks_set_null_on_user_delete(
+    db_session: AsyncSession,
+) -> None:
+    """author_user_id / reviewed_by / revoked_by are all ON DELETE SET NULL — a version's
+    provenance survives the referenced user's deletion (mirrors
+    test_org_library_entries_adopted_by_set_null_on_user_delete; it is the org's approved
+    artifact, not the individual's)."""
+    user = User(
+        email=f"org-skill-fk-{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Org Skill FK User",
+        hashed_password="x",
+        is_admin=True,
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    slug = f"fk-probe-{uuid.uuid4().hex[:8]}"
+    await db_session.execute(
+        text(
+            "INSERT INTO org_skill_versions "
+            "(slug, version_no, raw_yaml, body, frontmatter, content_hash, state, "
+            " author_user_id, reviewed_by, revoked_by) "
+            "VALUES (:slug, 1, 'name: x', 'body', '{}'::jsonb, 'hash-1', 'revoked', "
+            " :uid, :uid, :uid)"
+        ),
+        {"slug": slug, "uid": user.id},
+    )
+    await db_session.flush()
+    await db_session.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": user.id})
+    await db_session.flush()
+
+    row = (
+        await db_session.execute(
+            text(
+                "SELECT author_user_id, reviewed_by, revoked_by FROM org_skill_versions "
+                "WHERE slug = :slug"
+            ),
+            {"slug": slug},
+        )
+    ).one()
+    assert row.author_user_id is None
+    assert row.reviewed_by is None
+    assert row.revoked_by is None
+    await db_session.rollback()

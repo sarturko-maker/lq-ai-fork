@@ -32,8 +32,8 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from pydantic import BaseModel, Field, ValidationError as PydanticValidationError, field_validator
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,9 +41,18 @@ from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.models.audit import AuditLog
+from app.models.org_skill import OrgSkillVersion
 from app.models.team import Team, TeamMember
 from app.models.user import User
 from app.models.user_skill import UserSkill
+from app.skills.org_proposal import (
+    ORG_SKILL_MAX_BYTES,
+    content_size_bytes,
+    synthesize_org_skill,
+    validate_org_frontmatter,
+)
+from app.skills.registry import MutableSkillRegistry
+from app.skills.schema import SkillFrontmatter
 
 router = APIRouter(prefix="/user-skills", tags=["user-skills"])
 
@@ -833,3 +842,262 @@ async def delete_user_skill(
     await db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# ADR-F067 D2/D3 — propose a user-scope skill for org-wide adoption.
+#
+# The author side of the org-skills harness: bridges a lawyer's OWN user-scope
+# skill into the propose->approve pipeline (`app.api.admin` owns the admin
+# review side beside the Library block). Nothing here mutates the source
+# `user_skills` row or grants anything — a proposal is an immutable snapshot
+# insert, gated by the D3.3 closed frontmatter allowlist and the D3.6 size cap.
+# ---------------------------------------------------------------------------
+
+
+class OrgSkillProposalResponse(BaseModel):
+    """One ``org_skill_versions`` row, from the AUTHOR's point of view.
+
+    Shared by ``POST .../propose`` (201, the freshly-inserted row — the
+    review-only fields are naturally ``None``) and ``GET .../proposals``
+    (the caller's full version history for the slug, review fields populated
+    once an admin has acted). Deliberately excludes ``raw_yaml``/``body``/
+    ``frontmatter`` — the author already has those in the source row; this is
+    a status view, not a content view (the admin review queue in
+    ``app.api.admin`` is the content view).
+    """
+
+    id: uuid.UUID
+    slug: str
+    version_no: int
+    state: str
+    content_hash: str
+    size_bytes: int
+    proposed_at: datetime
+    reviewed_at: datetime | None = None
+    review_note: str | None = None
+    revoked_at: datetime | None = None
+
+
+def _require_skill_registry(request: Request) -> MutableSkillRegistry:
+    """Current skill-registry holder from ``app.state``, or a clear error if uninstalled.
+
+    Mirrors ``app.api.skills._registry`` EXACTLY: the D2 no-shadowing collision check is a
+    security control, so it must NEVER be skipped — a missing registry fails CLOSED with the
+    same ``InternalError`` skills.py raises, rather than silently proceeding without the check.
+    """
+    holder: MutableSkillRegistry | None = getattr(request.app.state, "skill_registry", None)
+    if holder is None:
+        from app.errors import InternalError
+
+        raise InternalError(
+            message="Skill registry is not initialised; the API process is "
+            "not yet ready to serve skill queries.",
+            details={"hint": "lifespan startup did not run"},
+        )
+    return holder
+
+
+def _to_proposal_response(version: OrgSkillVersion) -> OrgSkillProposalResponse:
+    size_bytes = content_size_bytes(version.raw_yaml, version.body)
+    return OrgSkillProposalResponse(
+        id=version.id,
+        slug=version.slug,
+        version_no=version.version_no,
+        state=version.state,
+        content_hash=version.content_hash,
+        size_bytes=size_bytes,
+        proposed_at=version.proposed_at,
+        reviewed_at=version.reviewed_at,
+        review_note=version.review_note,
+        revoked_at=version.revoked_at,
+    )
+
+
+async def _load_owned_user_skill(
+    db: AsyncSession, *, skill_id: uuid.UUID, user_id: uuid.UUID
+) -> UserSkill:
+    """Load a user-scope skill row STRICTLY owner-scoped — 404 otherwise (ADR-F067 D2).
+
+    The org-skills author surface is user-scope-only ("their own artifact"): a team-scope row,
+    a non-owned row, an archived row, or an unknown id all 404 identically (no existence leak).
+    Shared by ``POST .../propose`` and ``GET .../proposals`` so the two never diverge — the GET
+    is author-only, NOT team-admin-visible (unlike the CRUD ``_load_mutable`` gate).
+    """
+    row = (
+        await db.execute(
+            select(UserSkill).where(
+                UserSkill.id == skill_id,
+                UserSkill.scope == "user",
+                UserSkill.owner_user_id == user_id,
+                UserSkill.archived_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found")
+    return row
+
+
+@router.post(
+    "/{skill_id}/propose",
+    response_model=OrgSkillProposalResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Propose a user-scope skill for org-wide adoption (ADR-F067 D2/D3).",
+    responses={
+        404: {"description": "User skill not found (including team-scope and archived rows)"},
+        409: {
+            "description": (
+                "Slug collides with a shipped skill, or an open proposal for this "
+                "slug already exists"
+            )
+        },
+        422: {"description": "Frontmatter fails the org allowlist, or exceeds the size cap"},
+    },
+)
+async def propose_user_skill(
+    skill_id: uuid.UUID,
+    request: Request,
+    user: MutatingUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> OrgSkillProposalResponse:
+    """POST /api/v1/user-skills/{id}/propose
+
+    v1 is user-scope-only ("their own artifact", ADR-F067 D2): a team-scope row 404s here
+    exactly like a non-owned or archived row — propose is not a team-admin action.
+    Synthesizes canonical ``SKILL.md`` content byte-identical to what the row currently
+    renders as (:func:`~app.skills.org_proposal.synthesize_org_skill`, mirroring
+    ``app.api.skills._skill_from_user_skill``), then in order: the D3.3 closed frontmatter
+    allowlist (422 naming every offending dotted key — reject, don't sanitize), well-formedness
+    (422), the D3.6 32 KiB size cap (422), the D2 no-shadowing shipped-slug check (409), and
+    the one-open-proposal-per-slug check (409, with the partial-unique-index race also caught
+    as an IntegrityError -> 409). Inserts an immutable ``proposed`` row and audits
+    ``library.propose`` with kind/key/version/hash/size only — never content.
+    """
+
+    row = await _load_owned_user_skill(db, skill_id=skill_id, user_id=user.id)
+
+    content = synthesize_org_skill(row)
+
+    offending = validate_org_frontmatter(content.frontmatter)
+    if offending:
+        raise HTTPException(
+            status_code=422,
+            detail=f"frontmatter keys not allowed for an org skill: {', '.join(offending)}",
+        )
+    try:
+        SkillFrontmatter.model_validate(content.frontmatter)
+    except PydanticValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    if content.size_bytes > ORG_SKILL_MAX_BYTES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"org skill content is {content.size_bytes} bytes, exceeding the "
+                f"{ORG_SKILL_MAX_BYTES}-byte cap"
+            ),
+        )
+
+    # D2 no-shadowing: fail CLOSED if the registry is unavailable — never proceed without the
+    # shipped-slug collision check (mirrors app.api.skills._registry).
+    holder = _require_skill_registry(request)
+    if row.slug in holder.current().names():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"skill slug {row.slug!r} collides with a shipped skill",
+        )
+
+    open_proposal = (
+        await db.execute(
+            select(OrgSkillVersion.id).where(
+                OrgSkillVersion.slug == row.slug,
+                OrgSkillVersion.state == "proposed",
+            )
+        )
+    ).scalar_one_or_none()
+    if open_proposal is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"an open proposal already exists for slug {row.slug!r}",
+        )
+
+    max_version_no = (
+        await db.execute(
+            select(func.max(OrgSkillVersion.version_no)).where(OrgSkillVersion.slug == row.slug)
+        )
+    ).scalar_one()
+    version_no = (max_version_no or 0) + 1
+
+    version = OrgSkillVersion(
+        slug=row.slug,
+        version_no=version_no,
+        raw_yaml=content.raw_yaml,
+        body=content.body,
+        frontmatter=content.frontmatter,
+        content_hash=content.content_hash,
+        source_user_skill_id=row.id,
+        author_user_id=user.id,
+    )
+    db.add(version)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        # Either partial-unique index (one-open-proposal-per-slug or the
+        # (slug, version_no) race) collided with a concurrent propose.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"a concurrent proposal for slug {row.slug!r} was just recorded — retry",
+        ) from None
+
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="library.propose",
+        resource_type="org_skill_version",
+        resource_id=str(version.id),
+        request=request,
+        details={
+            "kind": "skill",
+            "key": row.slug,
+            "version": version_no,
+            "content_hash": content.content_hash,
+            "size_bytes": content.size_bytes,
+        },
+    )
+    await db.commit()
+    await db.refresh(version)
+
+    return _to_proposal_response(version)
+
+
+@router.get(
+    "/{skill_id}/proposals",
+    response_model=list[OrgSkillProposalResponse],
+    summary="This skill's org-proposal version history, author-only (ADR-F067 D2/D3).",
+    responses={404: {"description": "User skill not found"}},
+)
+async def list_user_skill_proposals(
+    skill_id: uuid.UUID,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[OrgSkillProposalResponse]:
+    """GET /api/v1/user-skills/{id}/proposals
+
+    The caller's own propose/approve/reject/revoke history for this skill's slug, newest
+    version first. STRICTLY owner-scoped (``_load_owned_user_skill`` — the SAME gate as
+    propose, NOT the team-admin-visible CRUD gate): propose is user-scope-only (v1), so only
+    the row owner can ever have authored a proposal here; a team-scope or non-owned id 404s,
+    and the ``author_user_id == user.id`` filter is kept explicit on top.
+    """
+
+    row = await _load_owned_user_skill(db, skill_id=skill_id, user_id=user.id)
+
+    stmt = (
+        select(OrgSkillVersion)
+        .where(OrgSkillVersion.slug == row.slug, OrgSkillVersion.author_user_id == user.id)
+        .order_by(OrgSkillVersion.version_no.desc())
+    )
+    versions = (await db.execute(stmt)).scalars().all()
+    return [_to_proposal_response(v) for v in versions]

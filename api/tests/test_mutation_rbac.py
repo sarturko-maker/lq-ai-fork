@@ -138,33 +138,38 @@ def test_mutating_route_entry_count_pinned() -> None:
     both AdminUser-gated — they pass the drift guard automatically (no allowlist entry).
     BRAND-1a (ADR-F068) adds 3 mutating branding routes (PUT /branding +
     POST/DELETE /branding/logo), all AdminUser-gated at the handler level
-    (the router itself is unauth-mounted for the public GETs): 126 → 129."""
-    assert len(_mutating_routes()) == 129
+    (the router itself is unauth-mounted for the public GETs): 126 → 129.
+    B-2a (ADR-F067 D2/D3) adds 4 mutating org-skills routes (POST propose,
+    MutatingUser-gated; POST approve/reject/revoke, AdminUser-gated): 129 → 133."""
+    assert len(_mutating_routes()) == 133
 
 
 @pytest.mark.unit
 def test_api_v1_path_count_pinned() -> None:
     """STORE-1 (ADR-F065) adds 2 routes (the Org Library adopt/remove pair): 171 → 173.
     STORE-2 (ADR-F065 D-B) adds 1 route (GET /api/v1/library, member-readable): 173 → 174.
-    BRAND-1a (ADR-F068) adds 2 paths (/branding + /branding/logo): 174 → 176."""
+    BRAND-1a (ADR-F068) adds 2 paths (/branding + /branding/logo): 174 → 176.
+    B-2a (ADR-F067 D2/D3) adds 6 paths (user-skills propose + proposals;
+    admin/org-skills + approve/reject/revoke): 176 → 182."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 176
+    assert len(paths) == 182
 
 
 @pytest.mark.unit
 def test_swapped_routers_expose_no_ungated_write() -> None:
-    """Spot-pin: all 68 tenant-data writes are get_mutating_user-gated
-    (52 direct swaps + 16 autonomous via the stacked opt-in gate, §E)."""
+    """Spot-pin: all 69 tenant-data writes are get_mutating_user-gated
+    (53 direct swaps + 16 autonomous via the stacked opt-in gate, §E; B-2a adds
+    POST /user-skills/{skill_id}/propose — the author-side org-skill propose)."""
     gated = sum(
         1
         for _m, _p, route in _mutating_routes()
         if "get_mutating_user" in _auth_callables(route.dependant)
     )
-    assert gated == 68
+    assert gated == 69
 
 
 # ---------------------------------------------------------------------------

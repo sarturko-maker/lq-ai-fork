@@ -37,6 +37,7 @@ from app.api.dependencies import ActiveUser, AdminUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, NotFound, ValidationError
+from app.models.org_skill import OrgSkillVersion
 from app.models.playbook import Playbook
 from app.models.practice_area import (
     OrgLibraryEntry,
@@ -287,6 +288,19 @@ async def _adopted_keys_of_kind(db: AsyncSession, kind: str) -> set[str]:
         .all()
     )
     return set(rows)
+
+
+async def _is_approved_org_skill(db: AsyncSession, slug: str) -> bool:
+    """ADR-F067 D2/D3: an approved org-skill snapshot counts as "exists" for binding,
+    exactly like a registry-known filesystem skill. A merely-proposed/rejected/revoked/
+    superseded slug does NOT count — only ``state == 'approved'`` — so a 404 here still
+    correctly fires for e.g. a proposal awaiting review. The Org Library D4 422 gate below
+    still applies unchanged: an approved-but-unadopted org skill 422s, it does not bind.
+    """
+    stmt = select(OrgSkillVersion.id).where(
+        OrgSkillVersion.slug == slug, OrgSkillVersion.state == "approved"
+    )
+    return (await db.execute(stmt)).scalar_one_or_none() is not None
 
 
 async def _require_in_library(db: AsyncSession, kind: str, key: str) -> None:
@@ -739,13 +753,16 @@ async def attach_practice_area_skill(
 ) -> Response:
     """POST /api/v1/practice-areas/{key}/skills
 
-    Body ``{skill_name}``; the skill must exist in the in-memory registry.
-    Re-attaching returns 409. (Config-landed in S3; live attachment to the
-    running agent is the S9-gated activation slice — plan §non-goals.)
+    Body ``{skill_name}``; the skill must exist in the in-memory registry OR be an approved
+    org-skill snapshot (ADR-F067 D2/D3 — a merely-proposed slug still 404s here, only
+    ``state == 'approved'`` counts). Re-attaching returns 409. (Config-landed in S3; live
+    attachment to the running agent is the S9-gated activation slice — plan §non-goals.)
     """
     area = await _load_area_or_404(db, key)
     registry = _registry(request).current()
-    if registry.get(payload.skill_name) is None:
+    if registry.get(payload.skill_name) is None and not await _is_approved_org_skill(
+        db, payload.skill_name
+    ):
         raise NotFound(
             f"Skill {payload.skill_name!r} is not in the registry.",
             details={"skill_name": payload.skill_name},

@@ -252,3 +252,35 @@ every fork tool dispatch — never as a parallel enforcement path.
   R4/R5/R6 on every agent action, audit counts/types/IDs, the Citation Engine, the SKILL.md format,
   read-only shared memory tiers (F049), matter auto-write-then-correct (F042).
 - Slices + verification: `docs/fork/plans/MODULES-milestone.md` (B-1…B-7).
+
+## Implementation addendum — B-2a (2026-07-08, appended; the decisions above are unchanged)
+
+The harness backend for kind=skill landed as slice B-2a (migration 0091). Five implementation
+calls worth recording, all within the D2/D3 envelope:
+
+1. **Proposal state lives on `org_skill_versions` itself** (states `proposed → approved |
+   rejected`; `approved → superseded | revoked`) — `user_skills` is untouched, so the live
+   user/team chat-shadow path carries zero risk from this slice. `superseded` is set only by a
+   newer approval of the same slug, never by an endpoint. Partial unique indexes enforce one open
+   proposal and one live approved version per slug.
+2. **The provenance banner is rendered at serve time** from snapshot metadata, not baked into the
+   stored bytes: the approver and approval date do not exist at propose time, and the content
+   hash must cover exactly the bytes the admin reviewed. The stored snapshot is the author's
+   bytes; `served_skill_md` prefixes the D3.5 banner as a body blockquote at the wiring seam.
+3. **Later shipped-slug collisions warn, never swap silently.** Propose 409s against the current
+   registry (D2 no-shadowing), but a *later* shipped release can still mint the same slug — the
+   runtime then serves the shipped skill and logs `org_skill_shadowed_by_shipped`.
+4. **Revoke leaves the `org_library_entries` row in place** — the drop happens at
+   `build_area_inventory` (fail-closed, `skill_unresolved_skipped` warning), and the member
+   Library read shows the dangling entry, mirroring registry-drift semantics. Removing the
+   adoption stays an explicit admin action with the F065 D6 confirm posture.
+5. **The platform operator is excluded from the org-skills admin surface** (list / approve /
+   reject / revoke return 403 via `tenant_admin_visibility`): the review queue exposes
+   tenant-authored legal know-how, which ADR-F064 walls off from platform operations. Approval
+   is therefore a *tenant org-admin* act — consistent with D2's roles, which never contemplated
+   the operator.
+
+Also fixed in-flight (adversarial review): approve's supersede is two-step-flushed because
+SQLAlchemy orders same-table UPDATEs by primary key, which could transiently violate the
+one-approved-per-slug index; transitions row-lock (`FOR UPDATE`) to close the check-then-write
+window; `registry is None` (skills off) fails org skills closed at BOTH chokepoints.
