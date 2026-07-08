@@ -146,7 +146,7 @@ class PracticeAreaPlaybook(Base):
     are SQL rows, unlike filesystem-canonical skills). A playbook bound here is
     AVAILABLE to matters under the area; the lawyer toggles it on/off per matter via
     ``matter_capability_toggles``. The legacy playbook EXECUTOR is frozen (CLAUDE.md)
-    — the deep agent reuses only the playbook DATA (the firm's preferred positions),
+    — the deep agent reuses only the playbook DATA (the company's preferred positions),
     injected read-only as the "Practice Playbook" memory tier. Hard-deleting a
     playbook CASCADE-drops its bindings (and a soft-delete hides it from the
     inventory), so no dead toggle rows accumulate.

@@ -331,7 +331,7 @@ and **Playbooks-as-deliverables**.
   "System proposes, user owns" applied to capabilities.
 - **Playbooks, Skills, Tools are real now**; **MCP is a visible-but-disabled placeholder** to be wired
   into the (approval-gated) **MCP milestone** later. Playbooks reuse the EXISTING `playbooks`/
-  `playbook_positions` DATA (the firm's preferred positions) — NOT the frozen legacy executor.
+  `playbook_positions` DATA (the company's preferred positions) — NOT the frozen legacy executor.
 - Primitive builtins (read/write/edit/bash/task) are NEVER shown — only legal capabilities.
 
 **Phase 1 — the capability-toggle panel. ✅ SHIPPED + MERGED PR #177 (`29d9d027`), 2026-06-30
@@ -815,7 +815,7 @@ lead model drafts/orchestrates/verifies; smaller models implement.
 
 - **Per-matter selectable embedding provider (ADR-F056, plan `EMBEDDING-PROVIDER-choice.md`; surfaced
   2026-07-01).** Local (private/$0/sensitive) vs inference (gateway→OpenAI now, Voyage `voyage-law-2` later),
-  per-matter with a firm default; single ingest↔query resolver + per-chunk provenance + re-embed-on-change +
+  per-matter with a company default; single ingest↔query resolver + per-chunk provenance + re-embed-on-change +
   coverage health. Fixes the silent drift/degrade/half-index class that caused the tabular thrash. **Confirmed:
   build AFTER tabular T4.** Immediate incident already fixed (aligned dev stack to `local`, re-embedded).
 

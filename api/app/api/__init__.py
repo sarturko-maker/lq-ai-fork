@@ -126,7 +126,7 @@ api_router.include_router(files.router, dependencies=_active)
 api_router.include_router(knowledge_bases.router, dependencies=_active)
 api_router.include_router(organization_profile.router, dependencies=_active)
 # STORE-2 (ADR-F065 D-B): the member-readable Org Library read model. Any active
-# user can see what their firm's agents actually run on (transparency) — the
+# user can see what their company's agents actually run on (transparency) — the
 # admin write surface (adopt/remove) stays fenced at `admin.router` below.
 api_router.include_router(library.router, dependencies=_active)
 # C3a (ADR-F042): the matter-memory pin endpoint — the ONLY writer of a
@@ -145,7 +145,7 @@ api_router.include_router(matter_capabilities.router, dependencies=_active)
 api_router.include_router(matter_files.router, dependencies=_active)
 api_router.include_router(saved_prompts.router, dependencies=_active)
 # PRIV-3 (ADR-F019): the deployment-global ROPA register read API. Mounted under
-# `_active` (active firm user); the register is shared firm-wide, so no per-user
+# `_active` (active company user); the register is shared company-wide, so no per-user
 # scoping — 404 means a missing record id, not an existence-hiding refusal.
 api_router.include_router(ropa.router, dependencies=_active)
 # PRIV-A3 (ADR-F019/F027): the deployment-global assessment register read API

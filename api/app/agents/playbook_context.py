@@ -1,6 +1,6 @@
 """Practice Playbook tier renderer — ADR-F054 (capability panel).
 
-Renders the firm's enabled playbooks (the ``playbooks`` / ``playbook_positions``
+Renders the company's enabled playbooks (the ``playbooks`` / ``playbook_positions``
 DATA — the preferred-positions wish-list) into the inner text of the read-only
 "Practice Playbook" memory tier. The legacy linear executor is FROZEN (CLAUDE.md);
 this REUSES only the data, injected as standing context the agent weighs each turn

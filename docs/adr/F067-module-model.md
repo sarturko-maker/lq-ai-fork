@@ -1,6 +1,6 @@
 # F067 — The module model: one vocabulary for agent capabilities + the org-authored content harness
 
-- Status: proposed
+- Status: accepted (maintainer, 2026-07-08)
 - Date: 2026-07-08
 - Deciders: maintainer (Arturs) + agent lead
 - Slice: B-0 (Workstream B, `docs/fork/plans/PIVOT-modular-azure.md`)
@@ -119,7 +119,7 @@ an approved-snapshot store the runtime reads.
   solo admin is permitted (a two-person rule would deadlock every small org); the audit row makes
   it visible. This is deliberately weaker than F050's "never the contributing lawyer" curator rule
   — F050 governs *agent-proposed* learnings (a different pipeline, still future); this governs
-  human-authored artifacts an admin consciously publishes to their own firm.
+  human-authored artifacts an admin consciously publishes to their own company's legal team.
 
 ### D3 — The harness (real, ship-sized controls — all of them, none optional)
 
@@ -146,7 +146,7 @@ an approved-snapshot store the runtime reads.
    Store/Library/binding pages render a `source='org'` badge with author + approver (the STORE-2
    D-A badge slot already exists; playbooks finally get a non-None source). Injected: the served
    SKILL.md body is prefixed at snapshot time with a one-line provenance banner
-   (*"Provenance: org-authored by {author}, approved by {approver} on {date} — your firm's own
+   (*"Provenance: org-authored by {author}, approved by {approver} on {date} — your company's own
    material, not LQ-shipped."*) so the model and any transcript reader see origin at the point of
    use. **Honesty note:** a skill is INSTRUCTION-class — it cannot be data-fenced the way the
    TierMemoryMiddleware tiers are (F049), because being instructions is its purpose. The banner is

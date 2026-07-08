@@ -199,17 +199,17 @@ def tenant_admin_visibility(user: User) -> bool:
     bypass, NOT a dependency gate.
 
     Several pre-operator tenant-data endpoints widen an owner filter for
-    ``is_admin`` so a single firm's admin sees every user's matters / playbooks
+    ``is_admin`` so a single company's admin sees every user's matters / playbooks
     / tabular runs. ADR-F061 D3 made the platform ``operator`` an ``is_admin``
     superset, which silently handed it that cross-user visibility too. This
     helper narrows the bypass to a *tenant* admin: the org-admin keeps
     admin-sees-all; the ``operator`` is excluded and falls back to owner-scoped
     (member-like) access on tenant data.
 
-    The rationale is separation of duties — platform operations vs. the firm's
+    The rationale is separation of duties — platform operations vs. the company's
     legal matters. Mode-neutral (ADR-F058: three delivery modes): the operator
     is "whoever runs the platform" — a hosting company in Mode 2 (hosted SaaS)
-    or the firm's OWN IT in self-host Mode 1. Minting an operator is OPTIONAL
+    or the company's OWN IT in self-host Mode 1. Minting an operator is OPTIONAL
     (``FIRST_RUN_OPERATOR_EMAIL``); a self-hoster that skips it has no operator
     row and org-admins keep admin-sees-all unchanged, so the operator /
     no-operator choice IS the separation-of-duties dial. This touches only the

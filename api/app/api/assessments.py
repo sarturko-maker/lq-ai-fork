@@ -6,7 +6,7 @@ the risk findings within them, the assessment-track sibling of the ROPA register
 read API (``app.api.ropa``). Mounted under the same ``/ropa`` prefix and the same
 shared-read posture (ADR-F019 — LQ.AI is single-tenant; the assessment record is
 the company's standing accountability record, not a per-user artifact): the gate
-is just "active (authenticated) firm user", enforced at the ``include_router``
+is just "active (authenticated) company user", enforced at the ``include_router``
 site (``dependencies=_active``); a 404 means a genuinely missing assessment id,
 not an existence-hiding authz refusal.
 

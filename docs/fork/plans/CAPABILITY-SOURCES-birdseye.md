@@ -57,9 +57,9 @@ The sources that can actually reach the agent:
 |---|---|---|---|
 | **Default tools** | `TOOL_GROUP_REGISTRY` (`capabilities.py:116+`) | tool group → `build_deep_agent_tools` (`capabilities.py:309+`); grants stay code (ADR-F062) | `practice_area_tool_groups` ∩ Library ∩ per-matter toggle |
 | **Skills** | **filesystem** `skills/` (66 SKILL.md incl. `skills/community/`) loaded into `app.state.skill_registry` (`registry.py:9-10` — filesystem, atomic swap) | injected as the area's skill list; agent reads a SKILL.md via built-in `read_file` (`composition.py:640,812`) | `practice_area_skills` **∩ `registry.names()`** ∩ Library (`capabilities.py:11-12,596-597`) |
-| **Playbook *positions*** | 5 DB-seeded playbooks (`playbooks`/`playbook_positions`, migs 0032/0033; `skills/playbooks/{nda,nda-unilateral,msa-saas,msa-commercial-purchase,dpa-gdpr}`) | the **"Practice Playbook" memory tier** — read-only injected *text* of the firm's preferred positions (`composition.py:309-355`, `playbook_context.render_practice_playbook`). The agent **reads** positions; it does **not execute** a playbook | `practice_area_playbooks` (0 bound on a fresh org) |
+| **Playbook *positions*** | 5 DB-seeded playbooks (`playbooks`/`playbook_positions`, migs 0032/0033; `skills/playbooks/{nda,nda-unilateral,msa-saas,msa-commercial-purchase,dpa-gdpr}`) | the **"Practice Playbook" memory tier** — read-only injected *text* of the company's preferred positions (`composition.py:309-355`, `playbook_context.render_practice_playbook`). The agent **reads** positions; it does **not execute** a playbook | `practice_area_playbooks` (0 bound on a fresh org) |
 | **Matter files** | documents uploaded *to the matter* | `search_documents` / `read_document` / `get_document_metadata` → `matter_hybrid_search`/rerank (`tools.py:122-174,228`) | implicit (the run's matter) |
-| **Memory tiers** | House Brief (`organization_profile`), Matter File/Corrections/Roster | `TierMemoryMiddleware` injects read-only (ADR-F049) | firm/matter scoped |
+| **Memory tiers** | House Brief (`organization_profile`), Matter File/Corrections/Roster | `TierMemoryMiddleware` injects read-only (ADR-F049) | company/matter scoped |
 
 **Key mechanical fact (the crux of item 3/4):** the agent's skill list comes from the **filesystem
 registry only**. `build_area_inventory` drift-filters bound skills against `registry.names()`
@@ -116,7 +116,7 @@ These are real, working, shipped UI + API. What they produce is the problem.
 
 | # | Maintainer finding | Ground truth | Nature |
 |---|---|---|---|
-| 1 | No org-profile screen; agents need to know who they act for | House Brief backend is complete (`organization_profile.py`, admin `PUT`) but has **no web UI** — this is **ONBOARD gap G2**, already logged. Empty profile ⇒ every agent runs with blank firm identity | build a small admin page (no backend) |
+| 1 | No org-profile screen; agents need to know who they act for | House Brief backend is complete (`organization_profile.py`, admin `PUT`) but has **no web UI** — this is **ONBOARD gap G2**, already logged. Empty profile ⇒ every agent runs with blank company identity | build a small admin page (no backend) |
 | 2 | Split Store skills by category; pull from `github.com/LegalQuants/lq-skills` | `lq_ai.tags` already exist on every SKILL.md (categories are latent in the data). `lq-skills` is public, Apache-2.0, 50 skills, 17+ jurisdictions, same SKILL.md format | (a) group Store by tag = small; (b) remote sync = own milestone (maintainer: not priority) |
 | 3 | Library dead-ends to the Store; admin should create skills + playbooks | The named "Library" is *by construction* the adopted subset of the Store (F065). Org authoring exists (Universe 2) but is **orphaned from Deep Agents** | the core architectural gap |
 | 4 | Give org-authored skills/playbooks/knowledge to agents, controlled | Requires **merging Universe 2 into Universe 1**. F065 D7 deferred exactly this (ratified §7 no-v1): org-authored skills are a **prompt-injection surface needing its own harness + ADR**. The `org` namespace tier is already reserved (`F065:72-74`) | ADR-gated; the biggest piece |

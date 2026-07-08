@@ -19,7 +19,7 @@ Three real capability kinds (+ a disabled MCP placeholder):
   the group's tools are not built, so they never enter ``GuardContext.granted`` (R6
   fail-closes). Toggled by GROUP ("Redlining" / "ROPA" / "Assessments"), not by
   individual tool name — lawyer-legible.
-* **playbook** — the area's bound ``practice_area_playbooks`` (the firm's preferred
+* **playbook** — the area's bound ``practice_area_playbooks`` (the company's preferred
   positions; reuse the DATA, the legacy executor is frozen). Off ⇒ not injected as
   the read-only "Practice Playbook" memory tier.
 * **mcp** — a visible-but-disabled placeholder; real MCP wiring is its own
@@ -521,7 +521,7 @@ def build_area_inventory(
 
     entries: list[CapabilityEntry] = []
 
-    # Playbooks — the firm's preferred positions bound to this area (adopted ones only).
+    # Playbooks — the company's preferred positions bound to this area (adopted ones only).
     for pb in area_playbooks:
         if (KIND_PLAYBOOK, str(pb.id)) not in adopted:
             continue

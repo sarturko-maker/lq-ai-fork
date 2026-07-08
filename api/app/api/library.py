@@ -8,7 +8,7 @@ surface stays fenced at ``PATCH /admin/tier-policy``): the Org Library's WRITE
 surface (``POST``/``DELETE /admin/library``) stays ``AdminUser``-gated
 (``app.api.admin``); this module's single GET is the member-readable read model
 over the same ``org_library_entries`` table, so any active user can see what
-their firm's agents are actually running on — not just an admin.
+their company's agents are actually running on — not just an admin.
 
 Returns ONLY adopted entries, each joined to its catalog for display metadata
 (reusing the exact label/description/provenance derivations

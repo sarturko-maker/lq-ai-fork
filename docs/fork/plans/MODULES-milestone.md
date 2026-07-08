@@ -1,8 +1,8 @@
 # MODULES milestone — Workstream B re-plan (B-1…B-7)
 
-**Status:** proposed (B-0 deliverable, 2026-07-08 — maintainer edits this doc before anything is
-built). Governing ADR: `docs/adr/F067-module-model.md` (the module vocabulary, the org-authored
-harness D2/D3, agent profiles D4, the HITL seam D5, non-goals D6). Substrate map:
+**Status:** accepted (maintainer, 2026-07-08 — ladder in execution; B-1 started same day).
+Governing ADR: `docs/adr/F067-module-model.md` (**accepted** — the module vocabulary, the
+org-authored harness D2/D3, agent profiles D4, the HITL seam D5, non-goals D6). Substrate map:
 `docs/fork/plans/CAPABILITY-SOURCES-birdseye.md`. Intent: `docs/fork/plans/PIVOT-modular-azure.md`
 § Workstream B.
 
@@ -33,7 +33,7 @@ with the B-6 *spike* started early in parallel (it is read/research, zero produc
 
 ## B-1 — House Brief admin page (+ the G13 degraded-binding signal)
 
-**Goal:** an admin can state who the firm is and who it acts for (G2/G9 — today every fresh org's
+**Goal:** an admin can state who the company is and who its legal team acts for (G2/G9 — today every fresh org's
 agents run with a blank House Brief), and an area page warns when a binding is not adopted
 (G13(a) — "configured for redlining" yet the agent can't redline).
 
@@ -153,7 +153,7 @@ its positions inject as the (already fenced) Practice Playbook tier.
   Bind/adopt/toggle paths already exist (`practice_area_playbooks`, inventory kind `playbook`).
 - **Verification:** deterministic — approved-snapshot (not live-row) positions render in the tier;
   post-approval edits invisible until re-approval; revoke drops the tier next run. Live: build a
-  playbook in the easy builder → propose → approve → adopt → bind → the agent cites the firm's
+  playbook in the easy builder → propose → approve → adopt → bind → the agent cites the company's
   position in a negotiation answer.
 - **Dependencies:** B-2a (shared harness plumbing). Parallel with B-3/B-5.
 
