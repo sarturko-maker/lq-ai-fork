@@ -203,7 +203,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   SSH-tunnel access, Tailscale = signoff-gated alternative), `.env.private.example`, runbook §8
 >   with the egress-inventory table, ADR-F070 proposed. Public path stays byte-identical; generic
 >   framing only.
-> - **B-3b THIS PR (branch `b3b-knowledge-web`, contract = scratchpad `b3b-contract.md`):** the
+> - **B-3b PR #247 (branch `b3b-knowledge-web`, contract = scratchpad `b3b-contract.md`):** the
 >   web surfaces B-3 deferred — Store page + admin/member Library pages get a 4th "Knowledge"
 >   section; area-detail page gets a Knowledge collections bind card (mirrors the Playbooks card);
 >   matter-panel `CapabilityKind`/`CapabilityToggleInput` TS unions + `emptyCaption` gain the
