@@ -33,10 +33,14 @@ LQ.AI extension fields
 ----------------------
 
 OpenAI rejects unknown body fields with HTTP 400, so the adapter
-strips the LQ.AI-specific keys (``minimum_inference_tier``,
-``skill_name``, ``chat_id``, ``anonymize``, ``lq_ai_*``) before
-serialization. The router has already consumed any of these that
-mattered for routing; the upstream provider never sees them.
+strips every LQ.AI-internal control field before serialization: all
+``lq_ai_*``-prefixed keys plus a closed set of historically
+non-prefixed keys (``minimum_inference_tier``, ``skill_name``,
+``chat_id``, ``anonymize``). The strip is prefix-based (see
+:func:`strip_internal_fields`) so a newly added ``lq_ai_*`` field can
+never re-leak by being forgotten in a hand-maintained list. The router
+has already consumed any of these that mattered for routing; the
+upstream provider never sees them.
 
 Why no ``openai`` SDK dependency
 --------------------------------
@@ -79,37 +83,81 @@ from app.providers.openai_schema import (
 )
 from app.secrets import ProviderKeyResolver
 
-# Body keys that the gateway adds on top of OpenAI's schema (per
-# ``docs/api/gateway-openapi.yaml``) and that OpenAI itself rejects with
-# HTTP 400 if forwarded. The router consumes everything in this set
-# before dispatch; the adapter strips them defensively in case the
-# request landed here without going through the router (tests, direct
-# adapter use, future code paths).
-_LQ_AI_EXTENSION_KEYS = frozenset(
+# Internal control fields the gateway consumes for routing/policy that
+# must NEVER egress to a provider. OpenAI-family providers reject unknown
+# body keys with HTTP 400, and even the permissive ones log whatever they
+# receive — so an internal field that leaks lands in provider telemetry.
+# Two disjoint classes make up the internal namespace:
+#
+#   * everything prefixed ``lq_ai_*`` (the LQ.AI extension namespace), and
+#   * a small, CLOSED set of historically non-prefixed control keys that
+#     predate the prefix convention (:data:`_INTERNAL_NON_PREFIXED_KEYS`).
+#
+# The strip is PREFIX-based, deliberately not a hand-maintained allow/block
+# list of exact names. A blocklist was the original bug: a new ``lq_ai_*``
+# field (``lq_ai_file_ids``) was added to the request schema but forgotten
+# in the list, so a chat request leaked it to a strict provider → HTTP 400.
+# A prefix strip closes the whole class — any future ``lq_ai_*`` field is
+# stripped by construction. Native OpenAI extras (``tools``, ``seed``,
+# ``response_format``, ``reasoning_content``, …) match neither class and
+# are preserved — this is a strip of a known internal namespace, NOT an
+# allowlist of permitted provider fields.
+#
+# The router consumes these before dispatch; the adapter strips them
+# defensively in case the request landed here without going through the
+# router (tests, direct adapter use, future code paths). Anthropic / Ollama
+# adapters build the provider body field-by-field, so they never forward an
+# unmodeled field and need no strip.
+_LQ_AI_PREFIX = "lq_ai_"
+
+_INTERNAL_NON_PREFIXED_KEYS = frozenset(
     {
         "minimum_inference_tier",
-        "lq_ai_project_minimum_inference_tier",
         "skill_name",
         "chat_id",
         "anonymize",
-        "lq_ai_skills",
-        "lq_ai_skill_inputs",
-        "lq_ai_inline_skills",
-        "lq_ai_chat_id",
-        "lq_ai_message_id",
-        "lq_ai_user_id",
-        "lq_ai_purpose",
-        # F0-S1: defaults to False (not None), so ``exclude_none`` keeps
-        # it and it leaked into provider bodies — strict providers 400.
-        "lq_ai_privileged",
     }
 )
 
-# M2-D2: per-message LQ.AI extension keys that must not reach OpenAI.
-# Anthropic / Ollama adapters build message dicts field-by-field so
-# they ignore these implicitly; the OpenAI adapter uses ``model_dump``
-# and needs the explicit strip.
-_LQ_AI_MESSAGE_EXTENSION_KEYS = frozenset({"lq_ai_skip_anonymization"})
+
+def _is_internal_field(key: str) -> bool:
+    """True if ``key`` is an LQ.AI-internal control field (must not egress)."""
+
+    return key.startswith(_LQ_AI_PREFIX) or key in _INTERNAL_NON_PREFIXED_KEYS
+
+
+def strip_internal_fields(body: dict[str, Any]) -> dict[str, Any]:
+    """Return ``body`` without any LQ.AI-internal control field.
+
+    Single source of truth for the outbound-body strip. Removes every
+    ``lq_ai_*``-prefixed key plus the closed set of historically
+    non-prefixed control keys (:data:`_INTERNAL_NON_PREFIXED_KEYS`).
+    Native provider extras that rode ``extra="allow"`` into ``model_extra``
+    (``tools``, ``seed``, ``response_format``, ``reasoning_content``, …) do
+    NOT match either class and are preserved — see the module note above on
+    why this is a namespace strip rather than an allowlist.
+
+    Returns a NEW dict; ``body`` is not mutated.
+    """
+
+    return {k: v for k, v in body.items() if not _is_internal_field(k)}
+
+
+def _strip_internal_message_fields(message: dict[str, Any]) -> dict[str, Any]:
+    """Return one message dict without ``lq_ai_*`` control fields.
+
+    Per-message analogue of :func:`strip_internal_fields`. Anthropic /
+    Ollama build message dicts field-by-field so they ignore these
+    implicitly; the OpenAI adapter uses ``model_dump`` and needs the
+    explicit strip (e.g. ``lq_ai_skip_anonymization``, M2-D2). Prefix-based
+    for the same reason as the body strip — a new per-message ``lq_ai_*``
+    marker can never re-leak. Native message fields (``role``, ``content``,
+    ``tool_calls``, ``tool_call_id``, ``name``, ``reasoning_content``, …)
+    are not ``lq_ai_*``-prefixed and are preserved.
+    """
+
+    return {k: v for k, v in message.items() if not k.startswith(_LQ_AI_PREFIX)}
+
 
 logger = logging.getLogger(__name__)
 
@@ -471,8 +519,9 @@ def _to_openai_request(
       have resolved to a different model than the caller asked for).
     * ``stream`` is forced to the route handler's decision (the body's
       original ``stream`` was a hint, not authoritative).
-    * LQ.AI extension keys (per :data:`_LQ_AI_EXTENSION_KEYS`) are
-      stripped — OpenAI rejects unknown body fields with HTTP 400.
+    * LQ.AI-internal control fields (every ``lq_ai_*`` key plus the closed
+      non-prefixed set, per :func:`strip_internal_fields`) are stripped —
+      OpenAI rejects unknown body fields with HTTP 400.
     * ``messages`` is serialized via pydantic so role/content/tool_calls
       are normalized; pydantic's ``mode="json"`` produces wire-shaped
       dicts (``None`` fields dropped via ``exclude_none``).
@@ -483,18 +532,16 @@ def _to_openai_request(
     ``extra="allow"``.
     """
 
-    body = request.model_dump(mode="json", exclude_none=True)
-    for key in _LQ_AI_EXTENSION_KEYS:
-        body.pop(key, None)
-    # M2-D2: per-message LQ.AI keys (e.g., lq_ai_skip_anonymization)
-    # are api-internal markers; strip from each message so OpenAI's
-    # strict body validation doesn't reject the request.
+    body = strip_internal_fields(request.model_dump(mode="json", exclude_none=True))
+    # Per-message LQ.AI markers (e.g., lq_ai_skip_anonymization, M2-D2) are
+    # api-internal; strip from each message so a strict provider's body
+    # validation doesn't reject the request and nothing internal is logged.
     messages = body.get("messages")
     if isinstance(messages, list):
-        for msg in messages:
-            if isinstance(msg, dict):
-                for key in _LQ_AI_MESSAGE_EXTENSION_KEYS:
-                    msg.pop(key, None)
+        body["messages"] = [
+            _strip_internal_message_fields(msg) if isinstance(msg, dict) else msg
+            for msg in messages
+        ]
     body["model"] = model
     body["stream"] = stream
     # ``stream_options.include_usage`` is required for OpenAI to emit a

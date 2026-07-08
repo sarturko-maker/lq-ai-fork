@@ -245,6 +245,25 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   `awaiting_input` joins the continuable set, cancel-while-paused — the FIVE route drift guards trip.
 >   Then HITL-3 (confirm card + admin `hitl_policy` write w/ 422 + live Commercial apply_redline
 >   verify). Maintainer open item: confirm-card vocabulary ("Waiting for your go-ahead" / Approve·Refuse).
+> - **GW-STRIP ✓ SHIPPED (branch `gw-strip-lqai-prefix`, gateway-only, no migration; task #489) —
+>   interleaved bugfix.** Chat requests leaked internal `lq_ai_file_ids` to Azure OpenAI → HTTP 400
+>   (`Unknown parameter`), on EVERY chat request (empty `[]` survives `exclude_none`). Root cause: the
+>   OpenAI-family adapter stripped internal fields via a hand-maintained exact-name BLOCKLIST
+>   (`_LQ_AI_EXTENSION_KEYS`) that omitted the newly added `lq_ai_file_ids`. Fix (maintainer-decided,
+>   CENTRAL + PREFIX-based, NOT azure-only, NOT "add one key"): shared `strip_internal_fields()` in
+>   `gateway/app/providers/openai.py` removes every `lq_ai_*`-prefixed key + a closed 4-set of
+>   non-prefixed control keys (`minimum_inference_tier`/`skill_name`/`chat_id`/`anonymize`); per-message
+>   strip also prefix-based. Native extras (`tools`/`seed`/`response_format`/`reasoning_content`)
+>   preserved by construction (still a namespace strip, NOT an allowlist — `test_..:962` pins it). openai
+>   + azure share `_to_openai_request` (azure only surfaced the leak); Anthropic/Ollama build bodies
+>   field-by-field → immune, untouched. Gate: gateway suite **630 passed / 2 skipped**, ruff (root
+>   config) + `mypy app` --strict clean; live shipped-artifact repro in the REBUILT `gateway` container
+>   (body keys = `['messages','model','seed','stream']`, all internal stripped incl. empty-list). Review
+>   (3-lens adversarial + per-finding verify): correctness/security CLEAN (full class closure, no
+>   false-positive strip, no aliasing, no log leak); 1 trivial doc nit fixed (kept accurate history +
+>   added forward pointer), 2 rejected on sound grounds. **Follow-up (own ticket #490, GW-FILEIDS):**
+>   the api chat path emits `lq_ai_file_ids` but the gateway has NO consumer yet — either build gateway
+>   file-content injection or stop emitting it. Orthogonal to the leak fix.
 > - Slice traps (recur): FIVE drift guards trip on new routes (test_endpoints _PARAM_VALUES +
 >   IMPLEMENTED_ROUTES; test_mutation_rbac ×3 pins now 135/184/69; test_openapi EXPECTED_PATHS +
 >   the SECOND len(actual) pin ~:419 now 184); api CI runs `mypy app` (containerized pytest gate

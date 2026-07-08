@@ -531,11 +531,13 @@ async def test_chat_completion_inline_skill_body_does_not_leak_to_openai() -> No
     verbatim user-drafted body inside it) must NEVER reach OpenAI.
 
     Regression for the C1 finding in the Task 3.0 code+security review:
-    ``lq_ai_inline_skills`` was missing from ``_LQ_AI_EXTENSION_KEYS`` so
-    a chat routed through an openai-protocol provider transmitted the
-    inline body to ``api.openai.com``. OpenAI 400s on unknown fields but
-    the body has already left our gateway by then and lands in OpenAI's
-    request logs / error telemetry.
+    ``lq_ai_inline_skills`` was missing from the adapter's then exact-name
+    extension-key blocklist (``_LQ_AI_EXTENSION_KEYS``, replaced by the
+    ``strip_internal_fields`` prefix strip in GW-STRIP), so a chat routed
+    through an openai-protocol provider transmitted the inline body to
+    ``api.openai.com``. OpenAI 400s on unknown fields but the body has
+    already left our gateway by then and lands in OpenAI's request logs /
+    error telemetry.
     """
 
     from app.providers.openai_schema import InlineSkillRef
@@ -1002,6 +1004,110 @@ def test_request_preserves_think_history_and_strips_only_lq_ai_keys() -> None:
     assert assistant["tool_calls"][0]["id"] == "call_function_xplk3zli8lqh_1"
     assert body["messages"][2]["tool_call_id"] == "call_function_xplk3zli8lqh_1"
     assert "lq_ai_purpose" not in body
+
+
+@pytest.mark.unit
+def test_strip_internal_fields_drops_prefix_and_nonprefixed_keeps_native() -> None:
+    """GW-STRIP unit: the shared strip removes the whole internal namespace
+    (every ``lq_ai_*`` key + the closed non-prefixed set) and preserves
+    everything else, including native OpenAI extras. Not an allowlist."""
+
+    from app.providers.openai import strip_internal_fields
+
+    stripped = strip_internal_fields(
+        {
+            # native fields — MUST survive
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "function": {"name": "f"}}],
+            "seed": 7,
+            "response_format": {"type": "json_object"},
+            "reasoning_content": "keep me",
+            "stream_options": {"include_usage": True},
+            # internal, non-prefixed — MUST be dropped
+            "minimum_inference_tier": 3,
+            "skill_name": "nda-review",
+            "chat_id": "c-1",
+            "anonymize": True,
+            # internal, lq_ai_* prefix — MUST be dropped
+            "lq_ai_file_ids": ["doc-1"],
+            "lq_ai_purpose": "chat",
+            "lq_ai_privileged": False,
+            "lq_ai_future_marker": "not-yet-invented",
+        }
+    )
+
+    assert stripped == {
+        "model": "gpt-4o",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [{"type": "function", "function": {"name": "f"}}],
+        "seed": 7,
+        "response_format": {"type": "json_object"},
+        "reasoning_content": "keep me",
+        "stream_options": {"include_usage": True},
+    }
+
+
+@pytest.mark.unit
+def test_to_openai_request_strips_lq_ai_file_ids_and_all_internal_fields() -> None:
+    """GW-STRIP regression (OpenAI family): the exact leak — ``lq_ai_file_ids``
+    riding ``extra="allow"`` into ``model_extra`` — plus every other internal
+    control field is stripped from the outbound body, while native extras and
+    a would-be future ``lq_ai_*`` field are handled correctly."""
+
+    from app.providers.openai import _to_openai_request
+
+    request = ChatCompletionRequest.model_validate(
+        {
+            "model": "smart",
+            "messages": [{"role": "user", "content": "hi"}],
+            # native OpenAI extras — MUST be preserved
+            "seed": 11,
+            "response_format": {"type": "json_object"},
+            # non-prefixed internal — MUST be stripped
+            "minimum_inference_tier": 3,
+            "skill_name": "nda-review",
+            "chat_id": "c-1",
+            "anonymize": True,
+            # lq_ai_* internal — MUST be stripped (file_ids is the reported bug;
+            # empty-list case still leaks under exclude_none, so also assert []),
+            "lq_ai_file_ids": ["doc-1", "doc-2"],
+            "lq_ai_purpose": "chat",
+            "lq_ai_privileged": False,
+            "lq_ai_future_marker": "not-yet-invented",
+        }
+    )
+    body = _to_openai_request(request, model="gpt-4o", stream=False)
+
+    assert not any(k.startswith("lq_ai_") for k in body), (
+        f"lq_ai_* leaked: {sorted(k for k in body if k.startswith('lq_ai_'))}"
+    )
+    for forbidden in ("minimum_inference_tier", "skill_name", "chat_id", "anonymize"):
+        assert forbidden not in body, f"internal field {forbidden!r} leaked"
+    # Native extras survive; model/stream are stamped.
+    assert body["seed"] == 11
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["model"] == "gpt-4o"
+    assert body["stream"] is False
+
+
+@pytest.mark.unit
+def test_to_openai_request_strips_empty_lq_ai_file_ids() -> None:
+    """GW-STRIP edge: the leak shipped on EVERY chat request because an
+    empty ``lq_ai_file_ids=[]`` survives ``exclude_none=True`` (only ``None``
+    is dropped). The prefix strip must remove it even when empty."""
+
+    from app.providers.openai import _to_openai_request
+
+    request = ChatCompletionRequest.model_validate(
+        {
+            "model": "smart",
+            "messages": [{"role": "user", "content": "hi"}],
+            "lq_ai_file_ids": [],
+        }
+    )
+    body = _to_openai_request(request, model="gpt-4o", stream=False)
+    assert "lq_ai_file_ids" not in body
 
 
 @pytest.mark.unit
