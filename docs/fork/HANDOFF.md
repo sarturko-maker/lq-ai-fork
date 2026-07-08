@@ -69,13 +69,21 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   conformance reviewer independently re-ran the suite), ruff + mypy --strict clean. Live smoke vs a
 >   real Anthropic/Foundry key DEFERRED to AZ-5 on record (no key on this box; respx route-level tests
 >   prove tools survive app+middleware unary+streaming).
-> - **NEXT ▶ AZ-5 — Azure VM sandbox runbook** (draft exists: reviewed, stashed in session scratchpad
->   `azure-vm-sandbox.md`; land as `docs/fork/runbooks/azure-vm-sandbox.md` with the Claude sections
->   updated to post-AZ-2b tool-capable reality + §5.4 gaining an azure-claude tool smoke).
-> - **AZ-5 — Azure VM sandbox runbook** (compose on an Azure VM; secrets via env; per-provider
->   synthetic smoke commands from the maintainer's brief; region: **Sweden Central or East US2** —
->   Claude's restriction binds; builds on `docs/fork/runbooks/staging-bringup.md` patterns). AZ-4b
->   (Voyage) stays DEFERRED until this resource exists; AZ-6 (AKS/Entra) unplanned.
+> - **AZ-5 ✓ SHIPPED — `docs/fork/runbooks/azure-vm-sandbox.md`.** Operator-run: one Foundry resource
+>   in **Sweden Central or East US2** (Claude's region rule binds; one resource serves all three
+>   families — same name in all three `*_RESOURCE` vars); 16 GiB/4 vCPU VM (8 GiB = reduced profile);
+>   DNS-01 reality: `lq-ai-caddy` compiles ONLY hetzner|ionos providers — Azure DNS unsupported,
+>   delegate a subzone; S3-compatible bucket required (Azure Blob is NOT S3-compatible); the
+>   named-volume trap gets Path A (seed before first boot) + Path B (edit live file; env change →
+>   RECREATE gateway, file-only → SIGHUP); §5 synthetic smokes from a throwaway curl container on the
+>   stack network (gateway has no host port in prod) incl. per-family chat + tool-calling smokes —
+>   **the §5.4 azure-claude tool smoke IS the deferred AZ-2b live proof (on record)**; teardown/cost
+>   (serverless deployments idle at $0). **Workstream AZ is now COMPLETE on the dev side** — what
+>   remains needs a real Azure resource (maintainer executes the runbook; findings feed back). AZ-4b
+>   (Voyage) stays PARKED; AZ-6 (AKS/Entra) unplanned.
+> - **NEXT ▶ B-0 (drafts ready: `docs/adr/F067-module-model.md` + `docs/fork/plans/MODULES-milestone.md`
+>   — reviewed, land as proposed for maintainer edit) and BRAND-1 (scout plan in session scratchpad
+>   `brand-1-plan.md`; ADR number = F068; two stacked slices 1a backend / 1b web).**
 > - **BRAND-1 — tenant white-labeling (maintainer, 2026-07-07: clients brand the product — palette,
 >   logo, product name — WITHOUT coding; task #480).** The substrate makes this cheap BY DESIGN:
 >   (a) the ADR-F013 token layer means palette = overriding a handful of `--lq-*` CSS custom
