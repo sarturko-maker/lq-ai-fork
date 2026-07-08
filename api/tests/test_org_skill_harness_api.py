@@ -335,6 +335,8 @@ async def test_approve_flips_state_and_records_reviewer(
 
     assert approved["state"] == "approved"
     assert approved["reviewed_at"] is not None
+    # B-2b, D3.5 wire gap: approver_email mirrors author_email's resolution technique.
+    assert approved["approver_email"] == admin.email
 
     version = await db_session.get(OrgSkillVersion, uuid.UUID(proposal["id"]))
     assert version is not None
@@ -429,6 +431,9 @@ async def test_reject_stores_note_and_audits_has_note_only(
     body = resp.json()
     assert body["state"] == "rejected"
     assert body["review_note"] == note_text
+    # A reject ALSO sets reviewed_by (it is a review outcome, not just an approval one) —
+    # approver_email resolves it exactly like an approve's.
+    assert body["approver_email"] == admin.email
 
     audit = await _latest_audit(db_session, action="library.reject", resource_id=proposal["id"])
     details = audit.details or {}
@@ -451,6 +456,9 @@ async def test_revoke_happy_path(
     body = resp.json()
     assert body["state"] == "revoked"
     assert body["revoked_at"] is not None
+    # revoke does NOT touch reviewed_by (ADR-F067 D3.8) — the approving admin's
+    # approver_email survives the revoke transition untouched.
+    assert body["approver_email"] == admin.email
 
 
 async def test_revoke_409_on_proposed(
@@ -501,6 +509,28 @@ async def test_list_org_skill_versions_rejects_unknown_state(
         "/api/v1/admin/org-skills", params={"state": "bogus"}, headers=_bearer(admin)
     )
     assert resp.status_code == 422
+
+
+async def test_list_org_skill_versions_includes_approver_email(
+    client: AsyncClient, user: User, admin: User, db_session: AsyncSession
+) -> None:
+    """The review-queue GET (B-2b's data source) carries author_email AND
+    approver_email per row — None on a still-proposed row, resolved once reviewed."""
+    row = await _make_user_skill(db_session, owner=user, slug="list-approver-email")
+    proposal = await _propose(client, user, row.id)
+
+    resp = await client.get("/api/v1/admin/org-skills", headers=_bearer(admin))
+    assert resp.status_code == 200
+    row_before = next(v for v in resp.json()["versions"] if v["id"] == proposal["id"])
+    assert row_before["author_email"] == user.email
+    assert row_before["approver_email"] is None
+
+    await _approve(client, admin, proposal["id"])
+
+    resp = await client.get("/api/v1/admin/org-skills", headers=_bearer(admin))
+    assert resp.status_code == 200
+    row_after = next(v for v in resp.json()["versions"] if v["id"] == proposal["id"])
+    assert row_after["approver_email"] == admin.email
 
 
 # ---------------------------------------------------------------------------
@@ -556,6 +586,9 @@ async def test_capabilities_lists_org_skill_with_source_and_in_library_flip(
     assert entry["author"] == user.email
     assert entry["version"] == "1.0.0"
     assert entry["in_library"] is False
+    # B-2b, D3.5 wire gap: the catalog entry also carries the approver (reviewed_by
+    # resolved to an email), additive alongside author.
+    assert entry["approver"] == admin.email
 
     await client.post(
         "/api/v1/admin/library",
@@ -596,6 +629,9 @@ async def test_library_read_shows_label_and_source_after_adoption(
     # The member-readable Library surface carries no cross-user identifiers (module
     # docstring) — author is admin/audit territory only (GET /admin/capabilities).
     assert entry["author"] is None
+    # approver DOES surface here (B-2b, D3.5) — "an admin reviewed and approved this"
+    # is not the same disclosure as "who wrote it".
+    assert entry["approver"] == admin.email
 
 
 async def test_revoked_slug_disappears_from_capabilities_but_adopted_row_dangles(

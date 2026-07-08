@@ -15,6 +15,7 @@
  */
 import { apiRequest } from './client';
 import type {
+	OrgSkillVersionState,
 	UserSkill,
 	UserSkillCreate,
 	UserSkillUpdate,
@@ -86,5 +87,69 @@ export async function listUserSkillVersions(
 ): Promise<UserSkillVersionsResponse> {
 	return apiRequest<UserSkillVersionsResponse>(
 		`/user-skills/${encodeURIComponent(skillId)}/versions?limit=${limit}`
+	);
+}
+
+// ---------------------------------------------------------------------------
+// ADR-F067 D2/D3 — propose a user-scope skill for org-wide adoption.
+//
+// Author-side of the org-skills harness (B-2a backend, B-2b UI). A proposal
+// is an immutable ``org_skill_versions`` snapshot; the admin review side
+// (content view — raw_yaml/body, approve/reject/revoke) lives in
+// ``adminApi`` (``admin.ts``), NOT here. This is the status view only.
+// ---------------------------------------------------------------------------
+
+/**
+ * One ``org_skill_versions`` row from the AUTHOR's point of view.
+ * ``state`` is the shared ``OrgSkillVersionState`` union from
+ * ``$lib/lq-ai/types`` (also used by the admin review view in ``admin.ts``).
+ *
+ * Mirrors ``OrgSkillProposalResponse`` (``api/app/api/user_skills.py:858-880``).
+ * Deliberately excludes ``raw_yaml``/``body``/``frontmatter`` — the author
+ * already has those in the source ``UserSkill`` row; the admin review queue
+ * is the content view.
+ */
+export interface OrgSkillProposalResponse {
+	id: string;
+	slug: string;
+	version_no: number;
+	state: OrgSkillVersionState;
+	content_hash: string;
+	size_bytes: number;
+	proposed_at: string;
+	reviewed_at?: string | null;
+	review_note?: string | null;
+	revoked_at?: string | null;
+}
+
+/**
+ * POST /api/v1/user-skills/{id}/propose — submit this user-scope skill for
+ * org-wide adoption (ADR-F067 D2/D3).
+ *
+ * Owner-only (team-scope, non-owned, and archived rows all 404 — no
+ * existence leak). 409 when the slug collides with a shipped skill, or an
+ * open proposal for the slug already exists (this is the caller's guard —
+ * the UI does NOT precompute open-proposal state to avoid an N+1 list
+ * fetch). 422 when the synthesized frontmatter fails the org allowlist, or
+ * the content exceeds the size cap. Both error messages are meant to
+ * surface verbatim (``describeMutationError`` on the calling page).
+ */
+export async function proposeUserSkill(id: string): Promise<OrgSkillProposalResponse> {
+	return apiRequest<OrgSkillProposalResponse>(
+		`/user-skills/${encodeURIComponent(id)}/propose`,
+		{ method: 'POST' }
+	);
+}
+
+/**
+ * GET /api/v1/user-skills/{id}/proposals — this skill's org-proposal version
+ * history, newest version first (ADR-F067 D2/D3).
+ *
+ * Strictly author-scoped (same owner-only gate as ``proposeUserSkill``) —
+ * NOT the team-admin-visible CRUD gate.
+ */
+export async function listUserSkillProposals(id: string): Promise<OrgSkillProposalResponse[]> {
+	return apiRequest<OrgSkillProposalResponse[]>(
+		`/user-skills/${encodeURIComponent(id)}/proposals`
 	);
 }

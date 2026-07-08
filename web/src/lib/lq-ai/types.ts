@@ -620,6 +620,20 @@ export interface SavedPromptUpdate {
 // ----- User skills (D8 / ADR 0012) -----
 
 /**
+ * The five ``org_skill_versions.state`` values (ADR-F067 D2/D3, B-2a/B-2b).
+ *
+ * Single source for both sides of the org-skills harness: the author-side
+ * proposal status view (``api/userSkills.ts``) and the admin review queue
+ * (``api/admin.ts``) branch on this same closed set rather than bare strings.
+ */
+export type OrgSkillVersionState =
+	| 'proposed'
+	| 'approved'
+	| 'rejected'
+	| 'superseded'
+	| 'revoked';
+
+/**
  * A DB-backed user- or team-scope skill. Shadows filesystem-canonical
  * built-ins (per ADR 0004) at slug collision when resolved for the
  * owning user's chats (user shadow) or for any team member's chats

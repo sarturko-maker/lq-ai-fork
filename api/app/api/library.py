@@ -23,6 +23,8 @@ territory, not something every member needs to see).
 
 from __future__ import annotations
 
+import uuid as _uuid_mod
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Annotated
 
@@ -43,8 +45,10 @@ from app.api.admin import playbook_display_label
 from app.api.dependencies import ActiveUser
 from app.db.session import get_db
 from app.models.knowledge import KnowledgeBase
+from app.models.org_skill import OrgSkillVersion
 from app.models.playbook import Playbook as PlaybookORM
 from app.models.practice_area import OrgLibraryEntry
+from app.models.user import User as UserORM
 from app.skills.org_proposal import load_approved_org_skill_versions
 from app.skills.registry import MutableSkillRegistry, SkillRegistry
 from app.skills.schema import humanise_skill_name
@@ -69,6 +73,13 @@ class LibraryEntryRead(BaseModel):
     catalog — a deleted playbook, a renamed/removed skill) — the web renders the
     bare key plus an honest "no longer in the shipped catalog" note rather than
     guessing a label.
+
+    ``approver`` (B-2b, D3.5 wire gap): additive — for a ``source == "org"`` skill
+    entry, the approving admin's email (the snapshot's ``reviewed_by`` resolved
+    via one batched join, mirroring the admin catalog's technique); ``None`` for
+    every other entry. ``author`` deliberately stays ``None`` for org skills here
+    (unchanged from B-2a) — this member-visible read still exposes no AUTHOR
+    identity, only that an admin reviewed and approved the content.
     """
 
     kind: str
@@ -78,6 +89,7 @@ class LibraryEntryRead(BaseModel):
     source: str | None
     author: str | None
     version: str | None
+    approver: str | None
     adopted_at: datetime
 
 
@@ -96,6 +108,23 @@ def _registry_or_none(request: Request) -> SkillRegistry | None:
     """
     holder: MutableSkillRegistry | None = getattr(request.app.state, "skill_registry", None)
     return holder.current() if holder is not None else None
+
+
+async def _approver_emails_for_snapshots(
+    db: AsyncSession, snapshots: Iterable[OrgSkillVersion]
+) -> dict[_uuid_mod.UUID, str]:
+    """Batch-resolve ``reviewed_by`` -> email for a set of approved org-skill
+    snapshots (B-2b, D3.5) — one query for the whole Library response rather
+    than an N+1 per entry, mirroring ``app.api.admin``'s join technique."""
+    reviewer_ids = {s.reviewed_by for s in snapshots if s.reviewed_by is not None}
+    if not reviewer_ids:
+        return {}
+    rows = (
+        (await db.execute(select(UserORM.id, UserORM.email).where(UserORM.id.in_(reviewer_ids))))
+        .tuples()
+        .all()
+    )
+    return dict(rows)
 
 
 async def _live_playbooks_by_id(db: AsyncSession) -> dict[str, PlaybookORM]:
@@ -143,8 +172,10 @@ async def get_library(
     # The shared approved-snapshot reader (ADR-F067). This member-visible read deliberately
     # exposes NO author identity: below, label/description/source come from the snapshot, but
     # author/version stay None for an org skill (author IS shown on the admin catalog surface,
-    # already admin/audit territory).
+    # already admin/audit territory). approver DOES surface here (B-2b, D3.5) — the fact that
+    # an admin reviewed and approved the content is not the same disclosure as who wrote it.
     org_snapshots_by_slug = await load_approved_org_skill_versions(db)
+    approver_emails = await _approver_emails_for_snapshots(db, org_snapshots_by_slug.values())
 
     entries: list[LibraryEntryRead] = []
     for row in rows:
@@ -154,6 +185,7 @@ async def get_library(
         source: str | None = None
         author: str | None = None
         version: str | None = None
+        approver: str | None = None
 
         if kind == KIND_TOOL:
             # Composition-only keys (F067 B-3) can never be adopted as tools —
@@ -182,6 +214,8 @@ async def get_library(
                     label = snap.title or humanise_skill_name(key)
                     description = snap.description
                     source = "org"
+                    if snap.reviewed_by is not None:
+                        approver = approver_emails.get(snap.reviewed_by)
         elif kind == KIND_PLAYBOOK:
             pb = playbooks_by_id.get(key)
             if pb is not None:
@@ -206,6 +240,7 @@ async def get_library(
                 source=source,
                 author=author,
                 version=version,
+                approver=approver,
                 adopted_at=row.adopted_at,
             )
         )

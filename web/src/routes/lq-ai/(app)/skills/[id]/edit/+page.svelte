@@ -18,12 +18,27 @@
 	import { userSkillsApi, skillsApi, teamsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { UserSkill, SkillSummary, TeamSummary } from '$lib/lq-ai/types';
+	import type { OrgSkillProposalResponse } from '$lib/lq-ai/api/userSkills';
+	import TrustPill from '$lib/lq-ai/components/TrustPill.svelte';
+	import {
+		describeMutationError,
+		formatDateTime,
+		proposalStateLabel,
+		proposalStateTone,
+		showProposalsSection,
+		sortProposalsNewestFirst
+	} from './page-helpers';
 
 	let row: UserSkill | null = null;
 	let builtinSlugs = new Set<string>();
 	let teamNamesById = new Map<string, string>();
 	let loading = true;
 	let loadError: string | null = null;
+
+	// ADR-F067 D2/D3 — "Proposals" status section (B-2b).
+	let proposals: OrgSkillProposalResponse[] = [];
+	let proposalsLoading = true;
+	let proposalsError: string | null = null;
 
 	let displayName = '';
 	let description = '';
@@ -59,6 +74,10 @@
 			version = skill.version;
 			tagsInput = (skill.tags ?? []).join(', ');
 			body = skill.body;
+			// ADR-F067 D2 — proposals are user-scope only; the endpoint 404s
+			// for team-scope rows, so the fetch waits for the row and only
+			// fires when the section will actually render.
+			if (showProposalsSection(skill.scope)) void loadProposals();
 		} catch (e) {
 			console.error('user-skills/edit: load failed', e);
 			if (e instanceof LQAIApiError && e.status === 404) {
@@ -129,6 +148,20 @@
 			submitError = e instanceof Error ? e.message : 'Failed to save changes.';
 		} finally {
 			submitting = false;
+		}
+	}
+
+	async function loadProposals(): Promise<void> {
+		proposalsLoading = true;
+		proposalsError = null;
+		try {
+			const res = await userSkillsApi.listUserSkillProposals(skillId as string);
+			proposals = sortProposalsNewestFirst(res);
+		} catch (e) {
+			console.error('user-skills/edit: load proposals failed', e);
+			proposalsError = describeMutationError(e, 'Failed to load proposal history.');
+		} finally {
+			proposalsLoading = false;
 		}
 	}
 
@@ -337,6 +370,72 @@
 				</button>
 			</div>
 		</form>
+
+		{#if showProposalsSection(row.scope)}
+		<section class="mt-8" data-testid="lq-ai-user-skill-proposals">
+			<h2 class="lq-text-h4 mb-2">Proposals</h2>
+			<p class="lq-text-caption mb-3" style="color: var(--lq-text-tertiary);">
+				Your org-wide adoption history for <code class="font-mono">{row.slug}</code> — every version
+				you've proposed to the Library, newest first.
+			</p>
+			{#if proposalsLoading}
+				<p class="lq-text-body" style="color: var(--lq-text-secondary);">Loading…</p>
+			{:else if proposalsError}
+				<div
+					class="mb-4 p-3 rounded border border-rose-300 bg-rose-50 text-rose-900 text-sm dark:border-rose-700 dark:bg-rose-950 dark:text-rose-100"
+					role="alert"
+					data-testid="lq-ai-user-skill-proposals-error"
+				>
+					{proposalsError}
+				</div>
+			{:else if proposals.length === 0}
+				<p class="lq-text-caption" style="color: var(--lq-text-tertiary);">
+					Not proposed to the Library yet.
+				</p>
+			{:else}
+				<ul class="lq-proposal-list">
+					{#each proposals as p (p.id)}
+						<li
+							class="lq-proposal-row"
+							data-testid="lq-ai-user-skill-proposal-row"
+							data-state={p.state}
+						>
+							<div class="flex items-center gap-2 flex-wrap">
+								<span class="lq-text-caption font-mono" style="color: var(--lq-text-tertiary);"
+									>v{p.version_no}</span
+								>
+								<span
+									title={`${proposalStateLabel(p.state)} — content hash ${p.content_hash.slice(0, 12)}…`}
+									data-testid="lq-ai-user-skill-proposal-state-chip"
+								>
+									<TrustPill
+										variant="tier"
+										tone={proposalStateTone(p.state)}
+										label={proposalStateLabel(p.state)}
+									/>
+								</span>
+								<span class="lq-text-caption" style="color: var(--lq-text-tertiary);">
+									Proposed {formatDateTime(p.proposed_at)}
+									{#if p.reviewed_at}
+										· Reviewed {formatDateTime(p.reviewed_at)}
+									{/if}
+								</span>
+							</div>
+							{#if p.state === 'rejected' && p.review_note}
+								<p
+									class="lq-text-caption mt-1"
+									style="color: var(--lq-error);"
+									data-testid="lq-ai-user-skill-proposal-review-note"
+								>
+									Reason: {p.review_note}
+								</p>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
+		{/if}
 	{/if}
 </div>
 
@@ -380,4 +479,18 @@
 		cursor: pointer;
 	}
 	.lq-btn-danger:hover { background: var(--lq-error-soft); }
+
+	.lq-proposal-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.lq-proposal-row {
+		padding: 0.6rem 0.75rem;
+		border: 1px solid var(--lq-border);
+		border-radius: var(--lq-radius);
+	}
 </style>

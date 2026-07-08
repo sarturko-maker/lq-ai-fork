@@ -43,6 +43,7 @@ from sqlalchemy import ColumnElement, Select, Text, and_, delete, func, select, 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.agents.capabilities import (
     COMPOSITION_ONLY_GROUP_KEYS,
@@ -1440,7 +1441,13 @@ class DeploymentCapabilityRead(BaseModel):
     a badge only when ``source`` is present), ``author``/``version`` (skills only — D5 makes
     community-skill author/version real; ``None`` for tools/playbooks), ``tags`` (skills only,
     default empty), and ``recommended_for`` (the shipped-default area keys this capability
-    belongs to per :data:`RECOMMENDED_LIBRARY_SETS`, default empty)."""
+    belongs to per :data:`RECOMMENDED_LIBRARY_SETS`, default empty).
+
+    ``approver`` (B-2b, D3.5 provenance badge): additive, optional — the approving admin's
+    email for ``source == "org"`` skill entries. :func:`_deployment_inventory` populates it
+    from :func:`_approved_org_skill_snapshots` (the approved version's ``reviewed_by``
+    resolved to an email). ``None`` for every other capability, and ``None`` for an org skill
+    whose reviewer's user row no longer exists."""
 
     capability_kind: str
     capability_key: str
@@ -1451,6 +1458,7 @@ class DeploymentCapabilityRead(BaseModel):
     source: str | None = None
     author: str | None = None
     version: str | None = None
+    approver: str | None = None
     tags: list[str] = Field(default_factory=list)
     recommended_for: list[str] = Field(default_factory=list)
 
@@ -1527,16 +1535,24 @@ async def _approved_org_skill_slugs(db: AsyncSession) -> set[str]:
 
 async def _approved_org_skill_snapshots(
     db: AsyncSession,
-) -> list[tuple[OrgSkillVersion, str | None]]:
-    """Every ``approved`` org-skill snapshot, with its author's email resolved via one
-    batched join (never a raw user id in model-/admin-facing text — ADR-F067 D3.5)."""
+) -> list[tuple[OrgSkillVersion, str | None, str | None]]:
+    """Every ``approved`` org-skill snapshot, with its author's AND approver's email each
+    resolved via one batched join (never a raw user id in model-/admin-facing text —
+    ADR-F067 D3.5). The approver is ``reviewed_by`` — set by the SAME transition that flips
+    the row to ``approved``, so it is always the approving admin for a row in this state."""
+    author = aliased(UserORM)
+    approver = aliased(UserORM)
     stmt = (
-        select(OrgSkillVersion, UserORM.email)
-        .outerjoin(UserORM, OrgSkillVersion.author_user_id == UserORM.id)
+        select(OrgSkillVersion, author.email, approver.email)
+        .outerjoin(author, OrgSkillVersion.author_user_id == author.id)
+        .outerjoin(approver, OrgSkillVersion.reviewed_by == approver.id)
         .where(OrgSkillVersion.state == "approved")
         .order_by(OrgSkillVersion.slug)
     )
-    return [(v, email) for v, email in (await db.execute(stmt)).all()]
+    return [
+        (v, author_email, approver_email)
+        for v, author_email, approver_email in (await db.execute(stmt)).all()
+    ]
 
 
 def playbook_display_label(pb: PlaybookORM) -> str:
@@ -1645,6 +1661,7 @@ async def _deployment_inventory(
         source: str | None = None,
         author: str | None = None,
         version: str | None = None,
+        approver: str | None = None,
         tags: list[str] | None = None,
     ) -> DeploymentCapabilityRead:
         adopted = (kind, key) in in_library
@@ -1659,6 +1676,7 @@ async def _deployment_inventory(
             source=source,
             author=author,
             version=version,
+            approver=approver,
             tags=tags or [],
             recommended_for=recommended_for.get((kind, key), []),
         )
@@ -1699,7 +1717,7 @@ async def _deployment_inventory(
 
     # ADR-F067 D2/D3 — approved org-skill snapshots join the catalog too. Shipped wins on a
     # slug collision (no shadowing, D2): skip any slug the registry also knows.
-    for snap, author_email in await _approved_org_skill_snapshots(db):
+    for snap, author_email, approver_email in await _approved_org_skill_snapshots(db):
         if registry is not None and registry.get(snap.slug) is not None:
             continue
         skill_entries.append(
@@ -1711,6 +1729,7 @@ async def _deployment_inventory(
                 source="org",
                 author=author_email,
                 version=(snap.frontmatter.get("lq_ai") or {}).get("version"),
+                approver=approver_email,
                 tags=snap.tags,
             )
         )
@@ -1939,7 +1958,12 @@ async def update_deployment_capabilities(
 
 
 class OrgSkillVersionAdminRead(BaseModel):
-    """One ``org_skill_versions`` row, FULL content — the admin review view."""
+    """One ``org_skill_versions`` row, FULL content — the admin review view.
+
+    ``approver_email`` (B-2b, D3.5 wire gap): additive, optional — ``reviewed_by`` resolved to
+    an email via the same outerjoin technique as ``author_email``. Populated once the row has
+    been reviewed (approved OR rejected both set ``reviewed_by``); ``None`` on a still-proposed
+    row."""
 
     id: _uuid_mod.UUID
     slug: str
@@ -1949,6 +1973,7 @@ class OrgSkillVersionAdminRead(BaseModel):
     author_email: str | None
     proposed_at: datetime
     reviewed_by: _uuid_mod.UUID | None
+    approver_email: str | None
     reviewed_at: datetime | None
     review_note: str | None
     revoked_at: datetime | None
@@ -1975,7 +2000,9 @@ class OrgSkillRejectRequest(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
 
 
-async def _org_skill_author_email(db: AsyncSession, user_id: _uuid_mod.UUID | None) -> str | None:
+async def _org_skill_user_email(db: AsyncSession, user_id: _uuid_mod.UUID | None) -> str | None:
+    """Resolve an org-skill-version user reference (``author_user_id`` OR
+    ``reviewed_by``) to an email; ``None`` when unset or the user row is gone."""
     if user_id is None:
         return None
     return (
@@ -1984,7 +2011,7 @@ async def _org_skill_author_email(db: AsyncSession, user_id: _uuid_mod.UUID | No
 
 
 def _to_org_skill_admin_read(
-    version: OrgSkillVersion, *, author_email: str | None
+    version: OrgSkillVersion, *, author_email: str | None, approver_email: str | None = None
 ) -> OrgSkillVersionAdminRead:
     return OrgSkillVersionAdminRead(
         id=version.id,
@@ -1995,6 +2022,7 @@ def _to_org_skill_admin_read(
         author_email=author_email,
         proposed_at=version.proposed_at,
         reviewed_by=version.reviewed_by,
+        approver_email=approver_email,
         reviewed_at=version.reviewed_at,
         review_note=version.review_note,
         revoked_at=version.revoked_at,
@@ -2056,8 +2084,12 @@ async def list_org_skill_versions(
     # ADR-F064: tenant-authored content — the platform operator is excluded (see note above).
     if not tenant_admin_visibility(admin):
         raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
-    stmt = select(OrgSkillVersion, UserORM.email).outerjoin(
-        UserORM, OrgSkillVersion.author_user_id == UserORM.id
+    author = aliased(UserORM)
+    approver = aliased(UserORM)
+    stmt = (
+        select(OrgSkillVersion, author.email, approver.email)
+        .outerjoin(author, OrgSkillVersion.author_user_id == author.id)
+        .outerjoin(approver, OrgSkillVersion.reviewed_by == approver.id)
     )
     if state is not None:
         stmt = stmt.where(OrgSkillVersion.state == state)
@@ -2065,7 +2097,10 @@ async def list_org_skill_versions(
     rows = (await db.execute(stmt)).all()
 
     return OrgSkillVersionsListResponse(
-        versions=[_to_org_skill_admin_read(v, author_email=email) for v, email in rows]
+        versions=[
+            _to_org_skill_admin_read(v, author_email=author_email, approver_email=approver_email)
+            for v, author_email, approver_email in rows
+        ]
     )
 
 
@@ -2142,8 +2177,11 @@ async def approve_org_skill_version(
     )
     await db.commit()
     await db.refresh(version)
-    author_email = await _org_skill_author_email(db, version.author_user_id)
-    return _to_org_skill_admin_read(version, author_email=author_email)
+    author_email = await _org_skill_user_email(db, version.author_user_id)
+    approver_email = await _org_skill_user_email(db, version.reviewed_by)
+    return _to_org_skill_admin_read(
+        version, author_email=author_email, approver_email=approver_email
+    )
 
 
 @router.post(
@@ -2192,8 +2230,11 @@ async def reject_org_skill_version(
     )
     await db.commit()
     await db.refresh(version)
-    author_email = await _org_skill_author_email(db, version.author_user_id)
-    return _to_org_skill_admin_read(version, author_email=author_email)
+    author_email = await _org_skill_user_email(db, version.author_user_id)
+    approver_email = await _org_skill_user_email(db, version.reviewed_by)
+    return _to_org_skill_admin_read(
+        version, author_email=author_email, approver_email=approver_email
+    )
 
 
 @router.post(
@@ -2243,5 +2284,8 @@ async def revoke_org_skill_version(
     )
     await db.commit()
     await db.refresh(version)
-    author_email = await _org_skill_author_email(db, version.author_user_id)
-    return _to_org_skill_admin_read(version, author_email=author_email)
+    author_email = await _org_skill_user_email(db, version.author_user_id)
+    approver_email = await _org_skill_user_email(db, version.reviewed_by)
+    return _to_org_skill_admin_read(
+        version, author_email=author_email, approver_email=approver_email
+    )

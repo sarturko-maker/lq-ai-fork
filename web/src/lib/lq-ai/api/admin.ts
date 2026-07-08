@@ -7,6 +7,7 @@
  */
 import { apiRequest } from './client';
 import type {
+	OrgSkillVersionState,
 	UsageResponse,
 	UsageQuery,
 	AdminUserListResponse,
@@ -212,7 +213,12 @@ export async function enableUser(userId: string): Promise<UserDisableResponse> {
  *  fixtures across the admin pages don't construct, so treating them as optional
  *  avoids churning every unrelated test's literal. Skill entries carry real
  *  `source`/`author`/`version`/`tags`; tool entries get `source: "built-in"` only;
- *  playbook entries get `source: null` (no provenance field exists for them yet). */
+ *  playbook entries get `source: null` (no provenance field exists for them yet).
+ *
+ *  `approver` (B-2b, D3.5 wire gap): additive, optional — for `source === "org"`
+ *  skill entries, the approving admin's email (the snapshot's `reviewed_by`
+ *  resolved to an email, mirroring `author`'s resolution); `undefined`/`null` for
+ *  every other entry. */
 export interface DeploymentCapabilityRead {
 	capability_kind: 'skill' | 'tool' | 'playbook';
 	capability_key: string;
@@ -223,6 +229,7 @@ export interface DeploymentCapabilityRead {
 	source?: string | null;
 	author?: string | null;
 	version?: string | null;
+	approver?: string | null;
 	tags?: string[];
 	recommended_for?: string[];
 }
@@ -283,5 +290,93 @@ export async function removeLibraryEntry(kind: 'skill' | 'tool' | 'playbook', ke
 	await apiRequest<void>(
 		`/admin/library/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`,
 		{ method: 'DELETE' }
+	);
+}
+
+// ----- Org-skills review queue (B-2b, ADR-F067 D2/D3) -----
+
+/**
+ * One `org_skill_versions` row, FULL content — the admin review view
+ * (`GET /admin/org-skills`, the approve/reject/revoke echo).
+ *
+ * `raw_yaml`/`body` are the review source of truth (the admin reads the exact
+ * bytes before approving, D3.1) — never rendered as trusted markup, only shown
+ * verbatim in a `<pre>` (or, for `body`, optionally ALSO through
+ * `renderModelMarkdown` in a second view — the `<pre>` stays authoritative).
+ */
+export interface OrgSkillVersionAdminRead {
+	id: string;
+	slug: string;
+	version_no: number;
+	/** The shared ``OrgSkillVersionState`` union from ``$lib/lq-ai/types``
+	 *  (also used by the author-side status view in ``userSkills.ts``). */
+	state: OrgSkillVersionState;
+	author_user_id: string | null;
+	author_email: string | null;
+	proposed_at: string;
+	reviewed_by: string | null;
+	/** B-2b, D3.5 wire gap — `reviewed_by` resolved to an email, mirroring
+	 *  `author_email`. `null` until the row has been reviewed (approved OR
+	 *  rejected both set it; revoke leaves it untouched). */
+	approver_email: string | null;
+	reviewed_at: string | null;
+	review_note: string | null;
+	revoked_at: string | null;
+	content_hash: string;
+	size_bytes: number;
+	raw_yaml: string;
+	body: string;
+}
+
+export interface OrgSkillVersionsListResponse {
+	versions: OrgSkillVersionAdminRead[];
+}
+
+/**
+ * GET /api/v1/admin/org-skills — the review queue, optionally state-filtered.
+ * Newest-proposed first. AdminUser-gated; ADR-F064 excludes the platform
+ * operator (tenant-authored content) — 403.
+ */
+export async function listOrgSkillVersions(
+	state?: OrgSkillVersionState
+): Promise<OrgSkillVersionsListResponse> {
+	const qs = state ? `?state=${encodeURIComponent(state)}` : '';
+	return apiRequest<OrgSkillVersionsListResponse>(`/admin/org-skills${qs}`);
+}
+
+/**
+ * POST /api/v1/admin/org-skills/{id}/approve — pins the immutable snapshot.
+ * 409 unless the row is `proposed`.
+ */
+export async function approveOrgSkillVersion(id: string): Promise<OrgSkillVersionAdminRead> {
+	return apiRequest<OrgSkillVersionAdminRead>(
+		`/admin/org-skills/${encodeURIComponent(id)}/approve`,
+		{ method: 'POST' }
+	);
+}
+
+/**
+ * POST /api/v1/admin/org-skills/{id}/reject — `note` rides the response's
+ * `review_note` (<=2000 chars); 409 unless the row is `proposed`.
+ */
+export async function rejectOrgSkillVersion(
+	id: string,
+	note?: string
+): Promise<OrgSkillVersionAdminRead> {
+	return apiRequest<OrgSkillVersionAdminRead>(
+		`/admin/org-skills/${encodeURIComponent(id)}/reject`,
+		{ method: 'POST', body: { note: note && note.trim() !== '' ? note : undefined } }
+	);
+}
+
+/**
+ * POST /api/v1/admin/org-skills/{id}/revoke — 409 unless the row is `approved`.
+ * Does NOT remove a matching Library row (ADR-F067 D3.8 fail-close) — the
+ * runtime and the member Library read both surface the dangling entry.
+ */
+export async function revokeOrgSkillVersion(id: string): Promise<OrgSkillVersionAdminRead> {
+	return apiRequest<OrgSkillVersionAdminRead>(
+		`/admin/org-skills/${encodeURIComponent(id)}/revoke`,
+		{ method: 'POST' }
 	);
 }

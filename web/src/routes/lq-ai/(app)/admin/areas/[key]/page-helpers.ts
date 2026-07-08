@@ -7,6 +7,7 @@
  */
 
 import { LQAIApiError } from '$lib/lq-ai/api/client';
+import type { DeploymentCapabilitiesResponse } from '$lib/lq-ai/api/admin';
 import type { PracticeArea, PracticeAreaUpdateBody } from '$lib/lq-ai/api/practiceAreas';
 import type { CatalogOption } from '$lib/lq-ai/admin/page-helpers';
 
@@ -106,6 +107,41 @@ export function bindingLabel(options: CatalogOption[], key: string): string {
 export function unboundOptions(options: CatalogOption[], boundKeys: string[]): CatalogOption[] {
 	const bound = new Set(boundKeys);
 	return options.filter((o) => !bound.has(o.key));
+}
+
+/** The shape `provenanceBadge` ($lib/lq-ai/library/page-helpers) needs for an
+ *  org-authored skill's provenance chip. */
+export interface OrgSkillBadge {
+	source: 'org';
+	author: string | null;
+	approver: string | null;
+}
+
+/**
+ * B-2b (ADR-F067 D2/D3, decision 5) — org-authored skill provenance, keyed by
+ * skill key. Reads straight off the FULL catalog response — `DeploymentCapabilityRead`
+ * already carries `source`/`author`/`approver` for an approved org-skill snapshot,
+ * but the narrower `CatalogOption` projection this page's other pickers use strips
+ * them — so this is a small standalone derivation rather than widening the shared
+ * `CatalogOption` shape every other admin page consumes. `catalog` may be `null`
+ * while loading; a key with no `source === 'org'` entry (built-in, dangling, or no
+ * catalog yet) is simply absent from the returned map.
+ */
+export function orgSkillBadges(
+	catalog: DeploymentCapabilitiesResponse | null
+): Map<string, OrgSkillBadge> {
+	const section = catalog?.sections.find((s) => s.kind === 'skill');
+	const map = new Map<string, OrgSkillBadge>();
+	for (const e of section?.entries ?? []) {
+		if (e.source === 'org') {
+			map.set(e.capability_key, {
+				source: 'org',
+				author: e.author ?? null,
+				approver: e.approver ?? null
+			});
+		}
+	}
+	return map;
 }
 
 /**

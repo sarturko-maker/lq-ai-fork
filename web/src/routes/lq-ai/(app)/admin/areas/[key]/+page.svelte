@@ -25,6 +25,7 @@
 	import { auth } from '$lib/lq-ai/auth/store';
 	import type { DeploymentCapabilitiesResponse } from '$lib/lq-ai/api/admin';
 	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
+	import { provenanceBadge } from '$lib/lq-ai/library/page-helpers';
 
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -46,6 +47,7 @@
 		findAreaByKey,
 		formatDeleteConflict,
 		hasMultipleLedgerBearingGroups,
+		orgSkillBadges,
 		parseRosterDraft,
 		pickerEmptyState,
 		unboundOptions
@@ -74,6 +76,12 @@
 	const skillCatalogAll = $derived(catalogEntriesForKind(catalog, 'skill'));
 	const toolCatalogAll = $derived(catalogEntriesForKind(catalog, 'tool'));
 	const playbookCatalogAll = $derived(catalogEntriesForKind(catalog, 'playbook'));
+
+	// B-2b (decision 5) — org-authored skill provenance, keyed by skill key. Reads the
+	// FULL catalog response directly (skillCatalogAll's CatalogOption projection strips
+	// source/author/approver) so a bound skill whose catalog entry resolves with
+	// source='org' gets the "Org-authored · …" badge next to the degraded chip below.
+	const orgSkillBadgeByKey = $derived(orgSkillBadges(catalog));
 	const skillCatalog = $derived(libraryOnly(skillCatalogAll));
 	const toolCatalog = $derived(libraryOnly(toolCatalogAll));
 	const playbookCatalog = $derived(libraryOnly(playbookCatalogAll));
@@ -552,6 +560,7 @@
 			<SectionHeader size="section" title="Skills" />
 			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-skills-list">
 				{#each area.bound_skills as skillName (skillName)}
+					{@const orgBadge = orgSkillBadgeByKey.get(skillName)}
 					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
 						<span class="flex flex-wrap items-center gap-2">
 							<a
@@ -560,6 +569,14 @@
 							>
 								{bindingLabel(skillCatalogAll, skillName)}
 							</a>
+							{#if orgBadge}
+								<span
+									class="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+									data-testid={`lq-admin-area-skill-org-${skillName}`}
+								>
+									{provenanceBadge(orgBadge)}
+								</span>
+							{/if}
 							{@render degradedBindingChip(
 								degradedSkillKeys.has(skillName),
 								`lq-admin-area-skills-degraded-${skillName}`

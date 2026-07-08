@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { LQAIApiError } from '$lib/lq-ai/api/client';
+import type { DeploymentCapabilitiesResponse } from '$lib/lq-ai/api/admin';
 import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 import {
 	bindingLabel,
@@ -14,6 +15,7 @@ import {
 	findAreaByKey,
 	formatDeleteConflict,
 	hasMultipleLedgerBearingGroups,
+	orgSkillBadges,
 	parseRosterDraft,
 	pickerEmptyState,
 	unboundOptions
@@ -321,6 +323,76 @@ describe('hasMultipleLedgerBearingGroups (D5)', () => {
 	it('is true with both redlining and ropa bound', () => {
 		expect(hasMultipleLedgerBearingGroups(['redlining', 'ropa'])).toBe(true);
 		expect(hasMultipleLedgerBearingGroups(['redlining', 'tabular', 'ropa'])).toBe(true);
+	});
+});
+
+describe('orgSkillBadges (B-2b, decision 5)', () => {
+	type SkillEntry = DeploymentCapabilitiesResponse['sections'][number]['entries'][number];
+
+	function catalog(skillEntries: SkillEntry[]): DeploymentCapabilitiesResponse {
+		return {
+			sections: [
+				{ kind: 'tool', label: 'Tools', entries: [] },
+				{ kind: 'skill', label: 'Skills', entries: skillEntries },
+				{ kind: 'playbook', label: 'Playbooks', entries: [] }
+			]
+		};
+	}
+
+	it('returns an empty map for a null catalog (still loading)', () => {
+		expect(orgSkillBadges(null).size).toBe(0);
+	});
+
+	it('maps only source="org" skill entries, keyed by capability_key', () => {
+		const cat = catalog([
+			{
+				capability_kind: 'skill',
+				capability_key: 'org-nda',
+				label: 'Org NDA',
+				description: null,
+				in_library: true,
+				enabled: true,
+				source: 'org',
+				author: 'Jamie Tso',
+				approver: 'Alex Admin'
+			},
+			{
+				capability_kind: 'skill',
+				capability_key: 'builtin-nda',
+				label: 'Built-in NDA',
+				description: null,
+				in_library: true,
+				enabled: true,
+				source: 'built-in'
+			}
+		]);
+		const map = orgSkillBadges(cat);
+		expect(map.size).toBe(1);
+		expect(map.get('org-nda')).toEqual({
+			source: 'org',
+			author: 'Jamie Tso',
+			approver: 'Alex Admin'
+		});
+		expect(map.has('builtin-nda')).toBe(false);
+	});
+
+	it('defaults author/approver to null when the wire omits them', () => {
+		const cat = catalog([
+			{
+				capability_kind: 'skill',
+				capability_key: 'org-bare',
+				label: 'Org Bare',
+				description: null,
+				in_library: false,
+				enabled: false,
+				source: 'org'
+			}
+		]);
+		expect(orgSkillBadges(cat).get('org-bare')).toEqual({
+			source: 'org',
+			author: null,
+			approver: null
+		});
 	});
 });
 

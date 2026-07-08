@@ -11,7 +11,7 @@
 	 * built-in); the shadow indicator surfaces here so the user can see
 	 * which slugs they're overriding.
 	 */
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
 	import { userSkillsApi, skillsApi, teamsApi } from '$lib/lq-ai/api';
@@ -19,6 +19,12 @@
 	import type { UserSkill, SkillSummary, TeamSummary } from '$lib/lq-ai/types';
 	import TrustPill from '$lib/lq-ai/components/TrustPill.svelte';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
+	import {
+		canProposeSkill,
+		describeMutationError,
+		isOpenProposalConflict,
+		proposeSuccessMessage
+	} from './page-helpers';
 
 	let rows: UserSkill[] = [];
 	let builtinSlugs = new Set<string>();
@@ -27,6 +33,16 @@
 	let loading = false;
 	let listError: string | null = null;
 	let actionError: string | null = null;
+
+	// ADR-F067 D2/D3 — "Propose to Library" row action (B-2b).
+	let proposingId: string | null = null;
+	let proposeSuccess: string | null = null;
+	let proposeSuccessTimer: ReturnType<typeof setTimeout> | null = null;
+	// Rows locked after an "open proposal already exists" 409 — disabled +
+	// tooltip until the caller reloads (page-helpers.isOpenProposalConflict;
+	// deliberately NOT precomputed to avoid an N+1 proposals fetch per row).
+	let lockedRowIds = new Set<string>();
+	let lockedTooltips = new Map<string, string>();
 
 	async function load(): Promise<void> {
 		loading = true;
@@ -74,6 +90,29 @@
 		}
 	}
 
+	async function propose(row: UserSkill): Promise<void> {
+		proposingId = row.id;
+		actionError = null;
+		try {
+			const res = await userSkillsApi.proposeUserSkill(row.id);
+			if (proposeSuccessTimer) clearTimeout(proposeSuccessTimer);
+			proposeSuccess = proposeSuccessMessage(res);
+			proposeSuccessTimer = setTimeout(() => {
+				proposeSuccess = null;
+				proposeSuccessTimer = null;
+			}, 8000);
+		} catch (e) {
+			console.error('user-skills: propose failed', e);
+			actionError = describeMutationError(e, 'Failed to propose this skill to the Library.');
+			if (isOpenProposalConflict(e)) {
+				lockedRowIds = new Set(lockedRowIds).add(row.id);
+				lockedTooltips = new Map(lockedTooltips).set(row.id, actionError);
+			}
+		} finally {
+			proposingId = null;
+		}
+	}
+
 	function shortDate(iso: string): string {
 		try {
 			return new Date(iso).toLocaleString();
@@ -84,6 +123,10 @@
 
 	onMount(() => {
 		load();
+	});
+
+	onDestroy(() => {
+		if (proposeSuccessTimer) clearTimeout(proposeSuccessTimer);
 	});
 </script>
 
@@ -122,6 +165,15 @@
 			role="alert"
 		>
 			{actionError}
+		</div>
+	{/if}
+	{#if proposeSuccess}
+		<div
+			class="mb-4 p-3 rounded border border-emerald-300 bg-emerald-50 text-emerald-900 text-sm dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100"
+			role="status"
+			data-testid="lq-ai-user-skill-propose-success"
+		>
+			{proposeSuccess}
 		</div>
 	{/if}
 
@@ -243,7 +295,26 @@
 								>{shortDate(row.updated_at)}</td
 							>
 							<td class="px-3 py-2 text-right whitespace-nowrap">
-								<a href={`/lq-ai/skills/${row.id}/edit`} class="lq-btn-secondary lq-text-caption">
+								{#if canProposeSkill(row)}
+									<button
+										type="button"
+										class="lq-btn-secondary lq-text-caption"
+										on:click={() => propose(row)}
+										disabled={proposingId === row.id || lockedRowIds.has(row.id)}
+										title={lockedRowIds.has(row.id) ? lockedTooltips.get(row.id) : undefined}
+										data-testid="lq-ai-user-skill-propose-btn"
+									>
+										{proposingId === row.id
+											? 'Proposing…'
+											: lockedRowIds.has(row.id)
+												? 'Proposal open'
+												: 'Propose to Library'}
+									</button>
+								{/if}
+								<a
+									href={`/lq-ai/skills/${row.id}/edit`}
+									class="ml-1 lq-btn-secondary lq-text-caption"
+								>
 									Edit
 								</a>
 								<button
@@ -306,6 +377,13 @@
 	}
 	.lq-btn-secondary:hover {
 		background: var(--muted);
+	}
+	.lq-btn-secondary:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
+	.lq-btn-secondary:disabled:hover {
+		background: transparent;
 	}
 
 	.lq-btn-danger {
