@@ -130,11 +130,15 @@ async def _resolve_org_skill_files(
     if ids:
         rows = await db.execute(select(User.id, User.email).where(User.id.in_(ids)))
         emails = {row.id: row.email for row in rows}
+
+    def label(uid: uuid.UUID | None) -> str:
+        return (emails.get(uid) if uid is not None else None) or "unknown"
+
     return {
         slug: served_skill_md(
             version,
-            author_label=emails.get(version.author_user_id) or "unknown",
-            approver_label=emails.get(version.reviewed_by) or "unknown",
+            author_label=label(version.author_user_id),
+            approver_label=label(version.reviewed_by),
         )
         for slug, version in wanted.items()
     }
