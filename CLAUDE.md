@@ -4,6 +4,9 @@ Fork of [LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (Apache-2.0), 
 
 ## The goal (why we forked)
 
+**This fork is for IN-HOUSE legal teams — a company's own legal department — NOT law firms.** The org
+is one company; its users are that company's lawyers. Say "the company's legal team", never "the firm".
+
 Upstream organises the UX around tools (Skills, Playbooks, Tabular Review — 11 flat tabs). We organise it
 around an in-house lawyer's **unit of work**, inside configurable **practice areas** (Commercial, Disputes,
 M&A, Privacy, Employment…). Concretely:
@@ -20,6 +23,21 @@ M&A, Privacy, Employment…). Concretely:
 Upstream's three "agentic" executors (playbooks, tabular, autonomous) are linear LangGraph pipelines —
 Python walks the graph, the model fills JSON slots, no model-chosen tool call exists anywhere. We replace
 the orchestration; we keep the substrate (gateway, brakes, audit, citations, skills format).
+
+## Authoring boundary (maintainer ruling, 2026-07-08 — binding on Workstream B)
+
+Two tiers, never blurred:
+
+- **Personal tier — any user.** Users author skills and upload knowledge for THEIR OWN account and
+  invoke them in plain chat (`/skill-name`). Personal modules NEVER reach a Deep Agent.
+- **Org tier — admin only.** Deep Agents cut across the organisation, so only the ADMIN assembles
+  them: which modules, which practice areas (admins create any area they want; shipped default
+  templates exist for common ones). Users cannot configure, extend, or self-serve onto a Deep
+  Agent — they ASK the admin. The only path from user-authored content to an org Deep Agent is
+  propose → admin approve → Library → area binding (ADR-F067) — no other path, ever.
+- **MCP is double-gated.** Users can NEVER connect an external MCP server (no user-level MCP at
+  all), and the admin-level MCP module kind is itself still future work behind its own
+  approval-gated milestone (ADRs 0014/0015).
 
 ## State of the pivot (keep current — stale info here is worse than none)
 
