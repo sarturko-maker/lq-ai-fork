@@ -41,6 +41,8 @@
 		libraryOnly
 	} from '$lib/lq-ai/admin/page-helpers';
 	import {
+		addSubagent,
+		agentConfigToRoster,
 		bindingLabel,
 		degradedBindingKeys,
 		diffPatch,
@@ -49,9 +51,16 @@
 		hasMultipleLedgerBearingGroups,
 		hitlPolicyDirty,
 		orgSkillBadges,
-		parseRosterDraft,
 		pickerEmptyState,
-		unboundOptions
+		removeSubagent,
+		rosterDirty,
+		rosterErrors,
+		rosterToAgentConfig,
+		subagentSkillRows,
+		toggleSubagentSkill,
+		unboundOptions,
+		updateSubagent,
+		type SubagentDraft
 	} from './page-helpers';
 
 	const SELECT_CLASS =
@@ -167,7 +176,7 @@
 	let draftTierFloor = $state('');
 	// '' = Inherit deployment default (SETUP-5a, ADR-F063).
 	let draftBudgetProfile = $state('');
-	let draftRoster = $state('');
+	let draftSubagents = $state<SubagentDraft[]>([]);
 	let editSaving = $state(false);
 	let editError = $state<string | null>(null);
 	let rosterSaving = $state(false);
@@ -184,12 +193,16 @@
 			draftDoctrine = area.profile_md ?? '';
 			draftTierFloor = area.default_tier_floor === null ? '' : String(area.default_tier_floor);
 			draftBudgetProfile = area.default_budget_profile ?? '';
-			draftRoster = JSON.stringify(area.agent_config ?? {}, null, 2);
+			draftSubagents = agentConfigToRoster(area.agent_config);
 			hitlDraft = { ...(area.hitl_policy ?? {}) };
 		}
 	});
 
-	const rosterParsed = $derived(parseRosterDraft(draftRoster));
+	// B-5 — the roster's client-side validity + dirty gates (Save enabled only when
+	// clean of errors AND changed). The server's own build_area_subagents validation
+	// (HTTP 400) stays authoritative and is surfaced verbatim via `rosterError`.
+	const rosterErrorList = $derived(area ? rosterErrors(draftSubagents, area.bound_skills) : []);
+	const rosterIsDirty = $derived(area ? rosterDirty(area.agent_config, draftSubagents) : false);
 
 	async function saveEdit() {
 		if (!area) return;
@@ -219,18 +232,34 @@
 		}
 	}
 
+	// B-5 — immutable roster mutators (runes reactivity needs a fresh array ref).
+	function addRosterSubagent() {
+		draftSubagents = addSubagent(draftSubagents);
+	}
+	function removeRosterSubagent(index: number) {
+		draftSubagents = removeSubagent(draftSubagents, index);
+	}
+	function updateRosterSubagent(index: number, patch: Partial<SubagentDraft>) {
+		draftSubagents = updateSubagent(draftSubagents, index, patch);
+	}
+	function toggleRosterSkill(index: number, skill: string, on: boolean) {
+		draftSubagents = toggleSubagentSkill(draftSubagents, index, skill, on);
+	}
+
 	async function saveRoster() {
-		if (!area || rosterParsed.error || rosterParsed.value === null) return;
+		if (!area || rosterErrorList.length > 0 || !rosterIsDirty) return;
 		rosterSaving = true;
 		rosterError = null;
 		try {
+			// Whole-object PATCH: rosterToAgentConfig splices the serialized roster into
+			// a copy of the current config, PRESERVING any by-reference playbooks/mcp_servers.
 			const updated = await practiceAreasApi.updatePracticeArea(area.key, {
-				agent_config: rosterParsed.value
+				agent_config: rosterToAgentConfig(draftSubagents, area.agent_config)
 			});
 			applyUpdated(updated);
-			draftRoster = JSON.stringify(updated.agent_config ?? {}, null, 2);
+			draftSubagents = agentConfigToRoster(updated.agent_config);
 		} catch (e) {
-			rosterError = describeMutationError(e, 'Failed to save the roster.');
+			rosterError = describeMutationError(e, 'Failed to save the sub-agents.');
 		} finally {
 			rosterSaving = false;
 		}
@@ -542,36 +571,138 @@
 			</Button>
 		</section>
 
-		<!-- ----- Roster card (D6) ----- -->
-		<section class="mt-6 space-y-3 rounded-lg border border-border p-4" aria-label="Roster">
+		<!-- ----- Sub-agents (roster) — B-5 (surfaces ADR-F034's fan-out roster) ----- -->
+		<section class="mt-6 space-y-3 rounded-lg border border-border p-4" aria-label="Sub-agents">
 			<SectionHeader
 				size="section"
-				title="Subagent roster"
-				subtitle="Declarative agent_config JSON — subagents, by-reference playbooks/MCPs."
+				title="Sub-agents"
+				subtitle="The specialists this area's agent delegates to when it fans out (ADR-F034)."
 			/>
 			<p class="text-xs text-muted-foreground">
-				A brand-new area has no bound skills yet — a subagent referencing a skill 404/400s until
-				that skill is attached below (the server validates against the area's bound set).
+				Give each sub-agent a name, a short note on when to use it, and plain-language
+				instructions. A sub-agent may use only the skills bound to this area (in the Skills
+				section below).
 			</p>
-			<Textarea
-				bind:value={draftRoster}
-				rows={10}
-				class="font-mono text-xs"
-				data-testid="lq-admin-area-roster"
-			/>
-			{#if rosterParsed.error}
-				<Alert intent="error">{rosterParsed.error}</Alert>
+
+			<ul class="flex flex-col gap-3" data-testid="lq-admin-area-roster-list">
+				{#each draftSubagents as sub, i (i)}
+					{@const skillRows = subagentSkillRows(area.bound_skills, sub.skills)}
+					<li
+						class="space-y-3 rounded-lg border border-border p-3"
+						data-testid={`lq-admin-area-roster-item-${i}`}
+					>
+						<div class="flex items-end gap-2">
+							<div class="flex-1">
+								<FormControl id={`lq-roster-name-${i}`} label="Name">
+									<Input
+										id={`lq-roster-name-${i}`}
+										value={sub.name}
+										oninput={(e) => updateRosterSubagent(i, { name: e.currentTarget.value })}
+										placeholder="e.g. clause-drafter"
+										data-testid={`lq-admin-area-roster-name-${i}`}
+									/>
+								</FormControl>
+							</div>
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								onclick={() => removeRosterSubagent(i)}
+								data-testid={`lq-admin-area-roster-remove-${i}`}
+							>
+								Remove
+							</Button>
+						</div>
+						<FormControl id={`lq-roster-desc-${i}`} label="When to use this sub-agent">
+							<Textarea
+								id={`lq-roster-desc-${i}`}
+								value={sub.description}
+								oninput={(e) => updateRosterSubagent(i, { description: e.currentTarget.value })}
+								rows={2}
+								placeholder="When should the lead agent delegate to this sub-agent?"
+								data-testid={`lq-admin-area-roster-description-${i}`}
+							/>
+						</FormControl>
+						<FormControl id={`lq-roster-prompt-${i}`} label="Instructions">
+							<Textarea
+								id={`lq-roster-prompt-${i}`}
+								value={sub.system_prompt}
+								oninput={(e) => updateRosterSubagent(i, { system_prompt: e.currentTarget.value })}
+								rows={5}
+								placeholder="How this sub-agent should work — its brief."
+								data-testid={`lq-admin-area-roster-instructions-${i}`}
+							/>
+						</FormControl>
+						<div class="space-y-1.5">
+							<span class="text-xs font-medium text-muted-foreground">Skills</span>
+							{#if skillRows.length === 0}
+								<p class="text-xs text-muted-foreground">
+									No skills bound to this area yet — attach one in the Skills section below to let a
+									sub-agent use it.
+								</p>
+							{:else}
+								<ul class="flex flex-wrap gap-1.5" data-testid={`lq-admin-area-roster-skills-${i}`}>
+									{#each skillRows as row (row.name)}
+										<li>
+											<label
+												class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs {row.bound
+													? 'border-border text-foreground'
+													: 'border-amber-500/40 text-amber-700 dark:text-amber-300'}"
+												title={row.bound
+													? undefined
+													: 'No longer bound to this area — un-check to clear the error.'}
+											>
+												<input
+													type="checkbox"
+													class="size-3.5 accent-foreground"
+													checked={sub.skills.includes(row.name)}
+													onchange={(e) => toggleRosterSkill(i, row.name, e.currentTarget.checked)}
+													data-testid={`lq-admin-area-roster-skill-${i}-${row.name}`}
+												/>
+												{bindingLabel(skillCatalogAll, row.name)}
+											</label>
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+					</li>
+				{:else}
+					<li class="text-xs text-muted-foreground" data-testid="lq-admin-area-roster-empty">
+						No sub-agents yet. Add one to let this area's agent delegate work when it fans out.
+					</li>
+				{/each}
+			</ul>
+
+			<Button
+				type="button"
+				variant="outline"
+				size="sm"
+				onclick={addRosterSubagent}
+				data-testid="lq-admin-area-roster-add"
+			>
+				Add sub-agent
+			</Button>
+
+			{#if rosterErrorList.length > 0}
+				<Alert intent="error">
+					<ul class="list-disc space-y-0.5 pl-4" data-testid="lq-admin-area-roster-errors">
+						{#each rosterErrorList as msg (msg)}
+							<li>{msg}</li>
+						{/each}
+					</ul>
+				</Alert>
 			{/if}
 			{#if rosterError}
 				<Alert intent="error">{rosterError}</Alert>
 			{/if}
 			<Button
 				type="button"
-				disabled={rosterSaving || !!rosterParsed.error}
+				disabled={rosterSaving || rosterErrorList.length > 0 || !rosterIsDirty}
 				onclick={saveRoster}
 				data-testid="lq-admin-area-roster-save"
 			>
-				{rosterSaving ? 'Saving…' : 'Save roster'}
+				{rosterSaving ? 'Saving…' : 'Save sub-agents'}
 			</Button>
 		</section>
 
