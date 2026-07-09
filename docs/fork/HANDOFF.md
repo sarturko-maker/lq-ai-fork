@@ -240,11 +240,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   agents): correctness/security/migration-web CLEAN; 4 test-quality/robustness findings all FIXED
 >   (de-tautologised the GROUP_TOOL_NAMES drift guard against literal ground truth; added
 >   armed-but-not-paused + in-stream-drift + builder-kwarg-omission runner tests; isinstance guard in
->   the compiler). **NEXT = HITL-2** (resume round-trip): `POST /runs/{run_id}/resume` (owner-404,
->   closed approve|reject enum), runner `Command(resume=…)` input + SKIP-repair on resume,
->   `awaiting_input` joins the continuable set, cancel-while-paused — the FIVE route drift guards trip.
->   Then HITL-3 (confirm card + admin `hitl_policy` write w/ 422 + live Commercial apply_redline
->   verify). Maintainer open item: confirm-card vocabulary ("Waiting for your go-ahead" / Approve·Refuse).
+>   the compiler). HITL-2 (resume round-trip) shipped next — see its block below.
 > - **GW-STRIP ✓ SHIPPED (branch `gw-strip-lqai-prefix`, gateway-only, no migration; task #489) —
 >   interleaved bugfix.** Chat requests leaked internal `lq_ai_file_ids` to Azure OpenAI → HTTP 400
 >   (`Unknown parameter`), on EVERY chat request (empty `[]` survives `exclude_none`). Root cause: the
@@ -264,9 +260,34 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   added forward pointer), 2 rejected on sound grounds. **Follow-up (own ticket #490, GW-FILEIDS):**
 >   the api chat path emits `lq_ai_file_ids` but the gateway has NO consumer yet — either build gateway
 >   file-content injection or stop emitting it. Orthogonal to the leak fix.
+> - **B-6 HITL-2 ✓ SHIPPED (branch `hitl-2-resume`, mig 0094, ADR-F071 HITL-2 addendum; task #491;
+>   contract = scratchpad `hitl2-contract.md`) — the resume round-trip, backend-only.**
+>   `POST /api/v1/agents/runs/{run_id}/resume` (owner-404; closed-enum body
+>   `{decision:{type:approve|reject,message?}}`, `extra="forbid"`) creates a NEW run-per-resume on the
+>   SAME thread carrying the choice in `agent_runs.resume_decision` (mig 0094, nullable JSONB — presence
+>   marks a resume; the paused run is NEVER mutated, stays `awaiting_input` as the ask's record). Worker
+>   gets only run_id → composition reads `run.resume_decision` → runner: SKIPS `repair_dangling_tool_calls`
+>   (repair would destroy the interrupt), re-reads the pending interrupt(s) from `aget_state`
+>   (`_pending_interrupts`, id never in our schema), builds `Command(resume={id:{"decisions":[…]×n}})`
+>   (`_build_resume_command` — one human decision fanned across the turn's gated calls) and drives the
+>   graph with it instead of a user message; no-pending-interrupt (raced) → `failed`. `awaiting_input`
+>   joins `_TERMINAL_STATUSES` → a NEW-message follow-up on a paused thread is admitted and DISSOLVES the
+>   pause (non-resume path repairs); **retires the HITL-1 R11 lock**. Cancel-while-paused settles
+>   `awaiting_input → cancelled` (abort only for the running transition). Audit `agent_run.hitl_decision` =
+>   decision + tool name + resume-run id (NO args, NO reject message; message stored on the row for the
+>   model only). Endpoint 409s: `run_not_awaiting_input` / `run_superseded` (paused run no longer the
+>   thread tail) / `thread_busy` (concurrent resume, DB-enforced on flush). Gate: ruff + `mypy app` (229
+>   files) clean; full containerized `tests/agents/` **882 passed / 46 skipped** + targeted/drift/migration
+>   **195 passed**; resume proven against the REAL HumanInTheLoopMiddleware on real Postgres (approve
+>   executes / reject closes / reject-no-message OK / skip-repair asserted on resume & NOT on follow-up);
+>   mig 0094 up/down/up on throwaway pgvector; api+arq+ingest rebuilt, live dev DB auto-migrated to 0094
+>   (column + 0093 CHECKs verified). Review: 5-lens adversarial + per-finding verify. **NEXT = HITL-3**
+>   (confirm card from the settled `hitl_request` step + admin `hitl_policy` write w/ 422 + live Commercial
+>   apply_redline confirm). Maintainer open item: confirm-card vocabulary ("Waiting for your go-ahead" /
+>   Approve·Refuse). LLM-driven live confirm is HITL-3's gate (HITL-2 proof = mechanism on real Postgres).
 > - Slice traps (recur): FIVE drift guards trip on new routes (test_endpoints _PARAM_VALUES +
->   IMPLEMENTED_ROUTES; test_mutation_rbac ×3 pins now 135/184/69; test_openapi EXPECTED_PATHS +
->   the SECOND len(actual) pin ~:419 now 184); api CI runs `mypy app` (containerized pytest gate
+>   IMPLEMENTED_ROUTES; test_mutation_rbac ×3 pins now 136/185/70; test_openapi EXPECTED_PATHS +
+>   the SECOND len(actual) pin ~:419 now 185); api CI runs `mypy app` (containerized pytest gate
 >   does NOT); area DELETE refuses while an archived matter references it (SQL sweep); matters 400
 >   on an area without profile_md; docker-exec python needs PYTHONPATH=/app.
 > - **MAINTAINER GATES STILL OPEN:** edit/accept ADR-F068 (branding — shipped + live-verified,

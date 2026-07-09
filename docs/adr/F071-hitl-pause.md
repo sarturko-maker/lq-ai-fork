@@ -124,3 +124,55 @@ Chosen: **option 1**, with the fork owning run-lifecycle + policy semantics:
 - Named non-goals for this substrate (all possible later): `edit`/`respond` decisions,
   subagent-scope policies, per-matter policy overrides, arg-conditional (`when`)
   predicates, auto-expiry TTL, multi-interrupt resume UI.
+
+## Addendum — HITL-2 (resume round-trip), 2026-07-09
+
+HITL-2 discharges decision 9 ("Resume, designed not built") and retires the HITL-1 R11
+interim lock. Backend only; the confirm card + admin policy write + LLM-driven live verify
+remain HITL-3.
+
+1. **Run-per-resume, decision durable on the row (migration 0094).** Resolving a paused run
+   creates a NEW `AgentRun` on the SAME thread; the paused run is NEVER mutated — it stays
+   `awaiting_input` as the durable record of the ask. The worker only ever receives `run_id`
+   and reads everything else from the row, so the human's choice lives on the new row:
+   `agent_runs.resume_decision` — nullable JSONB, migration 0094. Its PRESENCE marks the run
+   as a resume (composition keys off it); NULL for every ordinary run (zero-config: ordinary
+   runs are byte-identical). No CHECK — dict-typed at the ORM boundary; a malformed value
+   degrades the run to `failed` in the runner, never raises (mirrors `hitl_policy`).
+   Downgrade drops the column (no data migration — a NULL-or-decision column loses nothing
+   the older schema needs).
+2. **Endpoint `POST /agents/runs/{run_id}/resume`.** Owner-scoped 404 (never 403); closed-enum
+   Pydantic body `{decision: {type: approve|reject, message?}}` (`extra="forbid"`). Guards:
+   409 `run_not_awaiting_input` (not paused); 409 `run_superseded` (the paused run is no
+   longer the thread's tail — already resolved, or dissolved by a follow-up); 409 `thread_busy`
+   (a concurrent resume — DB-enforced by `uq_agent_runs_thread_running` on the flush); 429 at
+   the running-run cap. One `agent_run.hitl_decision` audit row: decision type + tool name +
+   resume-run id — counts/types/IDs only, NEVER the tool args or the reject message.
+3. **Single decision, fanned across the turn (v1).** The body carries ONE decision (one
+   Approve/Refuse pair — no per-call granularity until `edit` lands). At resume time the runner
+   re-reads the pending interrupt(s) from `aget_state` (`_pending_interrupts` — the interrupt id
+   is never in our schema) and builds `Command(resume={interrupt_id: {"decisions":
+   [{"type": …}] × n_action_requests}})`, fanning the one decision across every gated call in
+   the paused turn. Probed shapes (spike §3.1): approve `{"type":"approve"}`, reject
+   `{"type":"reject","message":…}`.
+4. **Skip repair on resume.** The resume path SKIPS `repair_dangling_tool_calls` — repair would
+   answer the gated tool_call with a synthetic ToolMessage and destroy the pending interrupt.
+   The guard is `resume_decision is None` (not merely "checkpointer + thread present"). A
+   no-longer-present interrupt (raced with a cancel, or dissolved) settles the resume run
+   `failed` — never a silent mis-completion.
+5. **`awaiting_input` joins the follow-up-admission set (`_TERMINAL_STATUSES`).** Two effects,
+   both wanted: (a) a NEW-message follow-up on a paused thread is admitted and DISSOLVES the
+   pause — the NON-resume path repairs (synthesises answers for the gated calls) and the model
+   responds to the new message (spike §3.3, "a new user message dissolves the pause"); (b)
+   `continuable` reads true for a paused thread (advisory; HITL-3 decides composer-vs-card UX).
+   This RETIRES the R11 lock.
+6. **Cancel-while-paused.** Cancel now settles `awaiting_input → cancelled` (abandons the ask —
+   distinct from `reject`, which lets the model close the turn). A paused run has no live worker,
+   so the arq abort fires only for the `running` transition.
+7. **Budget across the pause is honest** (already noted in HITL-1): the resume run arms its own
+   envelope, so one logical turn can spend up to 2× across a pause — recorded, not tightened.
+8. **Verification:** the resume mechanism is proven end-to-end against the REAL
+   `HumanInTheLoopMiddleware` on a REAL Postgres test DB (approve executes the gated call;
+   reject closes the turn without executing; skip-repair asserted on the resume path and NOT on
+   the follow-up path; no-pending-interrupt → failed). Migration 0094 up/down/up on a throwaway
+   pgvector. The LLM-driven confirm-card round-trip is HITL-3's live gate.

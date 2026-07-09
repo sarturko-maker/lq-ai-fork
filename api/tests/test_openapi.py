@@ -254,6 +254,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/agents/runs/{run_id}/stream",
         # F1-S1 (fork) — run cancel (settle-first, ADR-F009)
         "/api/v1/agents/runs/{run_id}/cancel",
+        # HITL-2 (fork) — resume a paused run (ADR-F071)
+        "/api/v1/agents/runs/{run_id}/resume",
         # F1-S2 (fork) — cockpit reads (ADR-F002): practice areas + matters rollup
         "/api/v1/practice-areas",
         "/api/v1/agents/matters",
@@ -423,7 +425,8 @@ async def test_openapi_paths_match_sketch() -> None:
     #   proposals, admin/org-skills queue + approve/reject/revoke (176 -> 182).
     # +2: B-3 (ADR-F067 D1) — admin knowledge-collection attach/detach
     #   (/practice-areas/{key}/knowledge-bases + .../{kb_id} = 2 new paths, 182 -> 184).
-    assert len(actual) == 184  # +3: ADR-F054 capability panel (GET/PUT
+    # +1: HITL-2 (ADR-F071) — POST /agents/runs/{run_id}/resume (184 -> 185).
+    assert len(actual) == 185  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

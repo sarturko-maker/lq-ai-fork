@@ -884,31 +884,31 @@ async def test_follow_up_on_interrupted_thread_is_admitted(
 
 
 @pytest.mark.integration
-async def test_follow_up_on_paused_thread_returns_409(
+async def test_follow_up_on_paused_thread_is_admitted_and_dissolves_pause(
     client: AsyncClient,
     db_session: AsyncSession,
     user_a: User,
     thread_saver: InMemorySaver,
 ) -> None:
-    """HITL-1 (ADR-F071 R11): a paused (``awaiting_input``) thread is LOCKED —
-    admitting a follow-up would run ``repair_dangling_tool_calls`` and destroy
-    the pending interrupt, so the thread refuses (``thread_not_continuable``)
-    and reads ``continuable=False`` until HITL-2's resume lands."""
+    """HITL-2 (ADR-F071): a paused (``awaiting_input``) thread is CONTINUABLE —
+    the HITL-1 R11 lock is retired. A NEW-message follow-up is admitted (202)
+    and dissolves the pause: the runner (non-resume path) repairs the dangling
+    gated tool_call and the model answers the new message. The dedicated resume
+    endpoint is the OTHER way out (approve/reject the pending ask)."""
     thread = await _make_thread(db_session, user=user_a)
     await _make_run(db_session, user=user_a, status="awaiting_input", thread=thread)
     await _put_checkpoint(thread_saver, thread.id)
 
     detail = await client.get(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a))
-    assert detail.json()["continuable"] is False
+    assert detail.json()["continuable"] is True
 
     with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
-            json={"prompt": "resume?", "thread_id": str(thread.id)},
+            json={"prompt": "actually, do this instead", "thread_id": str(thread.id)},
         )
-    assert resp.status_code == 409
-    assert resp.json()["detail"] == "thread_not_continuable"
+    assert resp.status_code == 202, resp.text
 
 
 @pytest.mark.integration
