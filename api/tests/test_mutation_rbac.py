@@ -147,8 +147,10 @@ def test_mutating_route_entry_count_pinned() -> None:
     MutatingUser-gated): 135 → 136.
     HITL-3 (ADR-F071) adds 1 mutating route (PUT
     /practice-areas/{key}/hitl-policy, AdminUser-gated — passes the drift guard
-    automatically, no allowlist entry): 136 → 137."""
-    assert len(_mutating_routes()) == 137
+    automatically, no allowlist entry): 136 → 137.
+    B-4 (ADR-F067 D2/D3) adds 4 mutating org-playbook routes (POST propose,
+    MutatingUser-gated; POST approve/reject/revoke, AdminUser-gated): 137 → 141."""
+    assert len(_mutating_routes()) == 141
 
 
 @pytest.mark.unit
@@ -161,13 +163,15 @@ def test_api_v1_path_count_pinned() -> None:
     B-3 (ADR-F067 D1) adds 2 paths (POST/DELETE
     /practice-areas/{key}/knowledge-bases): 182 → 184.
     HITL-2 (ADR-F071) adds 1 path (POST /agents/runs/{run_id}/resume): 184 → 185.
-    HITL-3 (ADR-F071) adds 1 path (PUT /practice-areas/{key}/hitl-policy): 185 → 186."""
+    HITL-3 (ADR-F071) adds 1 path (PUT /practice-areas/{key}/hitl-policy): 185 → 186.
+    B-4 (ADR-F067 D2/D3) adds 6 paths (playbooks propose + proposals;
+    admin/org-playbooks + approve/reject/revoke): 186 → 192."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 186
+    assert len(paths) == 192
 
 
 @pytest.mark.unit
@@ -177,13 +181,16 @@ def test_swapped_routers_expose_no_ungated_write() -> None:
     /user-skills/{skill_id}/propose — the author-side org-skill propose).
     HITL-2 (ADR-F071) adds POST /agents/runs/{run_id}/resume (MutatingUser):
     69 → 70. HITL-3 (ADR-F071) adds PUT /practice-areas/{key}/hitl-policy but it
-    is AdminUser-gated, so this get_mutating_user count is UNCHANGED at 70."""
+    is AdminUser-gated, so this get_mutating_user count is UNCHANGED at 70.
+    B-4 (ADR-F067 D2/D3) adds POST /playbooks/{playbook_id}/propose — the
+    author-side org-playbook propose (MutatingUser): 70 → 71 (approve/reject/
+    revoke are AdminUser, so they do not add to this count)."""
     gated = sum(
         1
         for _m, _p, route in _mutating_routes()
         if "get_mutating_user" in _auth_callables(route.dependant)
     )
-    assert gated == 70
+    assert gated == 71
 
 
 # ---------------------------------------------------------------------------

@@ -511,6 +511,20 @@ class _OrgSkillSnapshot(Protocol):
     def description(self) -> str | None: ...
 
 
+class _OrgPlaybookSnapshot(Protocol):
+    """Structural type for an approved ``org_playbook_versions`` snapshot (ADR-F067 D2/D3, B-4).
+
+    Only the fields the availability chokepoint needs to build a panel entry: the frozen header
+    ``name`` / ``contract_type`` / ``description`` (the capability label). The map is keyed by
+    ``playbook_id`` as a string. The frozen positions (the served content) are resolved separately
+    at the render seam (``composition._resolve_practice_playbook_render``); this protocol carries
+    nothing model-facing."""
+
+    name: str
+    contract_type: str
+    description: str
+
+
 class _KnowledgeBaseLike(Protocol):
     """Structural type for a ``knowledge_bases`` row (ADR-F067 D1, B-3).
 
@@ -641,7 +655,9 @@ def build_area_inventory(
     area_playbooks: Sequence[Playbook],
     tool_group_keys: Sequence[str],
     library_entries: Iterable[_LibraryEntry],
+    bound_playbook_keys: Sequence[str] = (),
     org_skill_snapshots: Mapping[str, _OrgSkillSnapshot] | None = None,
+    org_playbook_snapshots: Mapping[str, _OrgPlaybookSnapshot] | None = None,
     area_knowledge_bases: Sequence[_KnowledgeBaseLike] = (),
 ) -> CapabilityInventory:
     """Compute the area's available capabilities (pure — no I/O). ADR-F054 + ADR-F065 + ADR-F067.
@@ -700,21 +716,71 @@ def build_area_inventory(
 
     entries: list[CapabilityEntry] = []
 
-    # Playbooks — the company's preferred positions bound to this area (adopted ones only).
-    for pb in area_playbooks:
-        if (KIND_PLAYBOOK, str(pb.id)) not in adopted:
+    # Playbooks — the company's preferred positions bound to this area. FULL SKILLS PARITY
+    # (ADR-F067 B-4): resolution is keyed on the BOUND (kind, key) set INDEPENDENT of the live
+    # ``playbooks`` row. An org-authored playbook resolves from its APPROVED snapshot (so an author
+    # soft-deleting the source row cannot yank an admin-approved capability — only an admin revoke
+    # can); a built-in (shipped seed, ``created_by IS NULL``) resolves from the live row
+    # (``source`` stays None); anything else — an org playbook never/not-yet approved or revoked
+    # (absent from the snapshot map: the D3.8 revoke signal for playbooks), or a deleted built-in —
+    # is dropped fail-closed with a structured warning. ``bound_playbook_keys`` is the parity
+    # enumeration source (the area's ``practice_area_playbooks`` ids, independent of live-row
+    # existence); it defaults to the live ``area_playbooks`` ids so non-B-4 call sites keep today's
+    # behavior for shipped playbooks. ``org_playbook_snapshots`` is OPTIONAL/``{}``-default —
+    # fail-closed exactly like ``org_skill_snapshots``.
+    playbook_snapshots = org_playbook_snapshots or {}
+    live_playbook_by_id = {str(pb.id): pb for pb in area_playbooks}
+    playbook_keys = list(bound_playbook_keys) if bound_playbook_keys else list(live_playbook_by_id)
+    playbook_entries: list[CapabilityEntry] = []
+    unresolved_playbooks: list[str] = []
+    seen_playbook_keys: set[str] = set()
+    for key in playbook_keys:
+        if key in seen_playbook_keys:
             continue
-        label = f"{pb.name} ({pb.contract_type})" if pb.contract_type else pb.name
-        entries.append(
+        seen_playbook_keys.add(key)
+        if (KIND_PLAYBOOK, key) not in adopted:
+            continue
+        pb_snapshot = playbook_snapshots.get(key)
+        if pb_snapshot is not None:
+            label = (
+                f"{pb_snapshot.name} ({pb_snapshot.contract_type})"
+                if pb_snapshot.contract_type
+                else pb_snapshot.name
+            )
+            description = pb_snapshot.description or None
+        else:
+            pb = live_playbook_by_id.get(key)
+            # A SHIPPED built-in has created_by IS NULL; a fixture SimpleNamespace with no
+            # ``created_by`` attribute is treated as built-in too (getattr default None), so the
+            # pure-inventory tests that pass bare playbook stand-ins keep resolving live.
+            if pb is not None and getattr(pb, "created_by", None) is None:
+                label = f"{pb.name} ({pb.contract_type})" if pb.contract_type else pb.name
+                description = pb.description or None
+            else:
+                unresolved_playbooks.append(key)
+                continue
+        playbook_entries.append(
             CapabilityEntry(
                 kind=KIND_PLAYBOOK,
-                key=str(pb.id),
+                key=key,
                 label=label,
-                description=(pb.description or None),
+                description=description,
                 available=True,
                 default_enabled=True,
                 toggleable=True,
             )
+        )
+    # Stable panel order (name-ascending), matching today's ``order_by(Playbook.name)``.
+    entries.extend(sorted(playbook_entries, key=lambda e: (e.label.lower(), e.key)))
+    if unresolved_playbooks:
+        logger.warning(
+            "adopted+bound playbook resolves in neither a live built-in row nor an approved "
+            "org snapshot; dropped from availability (fail-closed)",
+            extra={
+                "event": "org_playbook_unresolved_skipped",
+                "count": len(unresolved_playbooks),
+                "keys": sorted(unresolved_playbooks),
+            },
         )
 
     # Knowledge collections (ADR-F067 D1, B-3) — the area's bound

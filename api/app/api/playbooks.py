@@ -80,15 +80,24 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from sqlalchemy import delete, select
+from pydantic import BaseModel
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.agents.playbook_proposal import (
+    ORG_PLAYBOOK_MAX_BYTES,
+    content_size_bytes,
+    freeze_playbook_snapshot,
+)
 from app.api.dependencies import ActiveUser, MutatingUser, tenant_admin_visibility
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db, get_session_factory
 from app.models.document import Document
 from app.models.file import File as FileModel
+from app.models.org_playbook_version import OrgPlaybookVersion
 from app.models.playbook import (
     EasyPlaybookGeneration,
     Playbook,
@@ -255,6 +264,218 @@ async def create_playbook(
         },
     )
     return PlaybookSchema.model_validate(playbook, from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Org-playbook harness — propose an OWNED playbook for org-wide adoption
+# (ADR-F067 D2/D3, B-4). Mirrors the org-skill author surface
+# (app.api.user_skills.propose_user_skill / list_user_skill_proposals) for
+# kind=playbook: freeze -> immutable content-hashed snapshot -> admin review.
+# There is NO frontmatter allowlist (playbooks are GUIDANCE-DATA behind the
+# existing PRACTICE_PLAYBOOK fence); validation is the size cap + the
+# one-open-proposal guard. The admin approve/reject/revoke half lives in
+# app.api.admin (/admin/org-playbooks).
+# ---------------------------------------------------------------------------
+
+
+class OrgPlaybookProposalResponse(BaseModel):
+    """Author-facing status view of one org-playbook proposal (ADR-F067 D2/D3, B-4).
+
+    A status row (state machine + hash + size + count) — it deliberately does NOT carry the
+    positions payload (the author already owns the source playbook), mirroring
+    ``OrgSkillProposalResponse``. The full frozen positions are the ADMIN review surface
+    (``OrgPlaybookVersionAdminRead`` in ``app.api.admin``)."""
+
+    id: uuid.UUID
+    playbook_id: uuid.UUID
+    version_no: int
+    state: str
+    content_hash: str
+    size_bytes: int
+    position_count: int
+    proposed_at: datetime
+    reviewed_at: datetime | None
+    review_note: str | None
+    revoked_at: datetime | None
+
+
+def _to_playbook_proposal_response(version: OrgPlaybookVersion) -> OrgPlaybookProposalResponse:
+    return OrgPlaybookProposalResponse(
+        id=version.id,
+        playbook_id=version.playbook_id,
+        version_no=version.version_no,
+        state=version.state,
+        content_hash=version.content_hash,
+        size_bytes=content_size_bytes(version),
+        position_count=version.position_count,
+        proposed_at=version.proposed_at,
+        reviewed_at=version.reviewed_at,
+        review_note=version.review_note,
+        revoked_at=version.revoked_at,
+    )
+
+
+async def _load_owned_playbook(
+    db: AsyncSession, *, playbook_id: uuid.UUID, user_id: uuid.UUID
+) -> Playbook:
+    """Load a playbook STRICTLY owner-scoped for propose (ADR-F067 D2, B-4) — 404 otherwise.
+
+    Propose is user-scope only ("their own artifact"): a built-in (``created_by IS NULL``), a
+    non-owned row, a soft-deleted row, or an unknown id all 404 identically (no existence leak).
+    This is deliberately NOT the admin-OR-owner edit gate (``_load_visible_playbook``) — that
+    would let an admin propose someone else's playbook. Positions are eager-loaded for freezing.
+    """
+    row = (
+        await db.execute(
+            select(Playbook)
+            .where(
+                Playbook.id == playbook_id,
+                Playbook.created_by == user_id,
+                Playbook.deleted_at.is_(None),
+            )
+            .options(selectinload(Playbook.positions))
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="playbook not found")
+    return row
+
+
+@router.post(
+    "/playbooks/{playbook_id}/propose",
+    response_model=OrgPlaybookProposalResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Propose a playbook for org-wide adoption (ADR-F067 D2/D3, B-4).",
+    responses={
+        404: {"description": "Playbook not found (including built-in and soft-deleted rows)"},
+        409: {"description": "An open proposal for this playbook already exists"},
+        422: {"description": "Frozen positions exceed the size cap"},
+    },
+)
+async def propose_playbook(
+    playbook_id: uuid.UUID,
+    request: Request,
+    user: MutatingUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> OrgPlaybookProposalResponse:
+    """POST /api/v1/playbooks/{id}/propose
+
+    Freezes the caller's OWN playbook (+ its ordered positions) into an immutable, canonical,
+    content-hashed snapshot (:func:`~app.agents.playbook_proposal.freeze_playbook_snapshot`) and
+    inserts a ``proposed`` row (ADR-F067 D2/D3, B-4). Unlike the org-skill harness there is NO
+    frontmatter allowlist — playbooks are GUIDANCE-DATA behind the existing PRACTICE_PLAYBOOK
+    data-only fence; validation is the D3.6 size cap (422) + the one-open-proposal-per-playbook
+    guard (409, with the partial-unique-index race also caught as an IntegrityError -> 409).
+    Audits ``library.propose`` with kind/key/version/hash/size/count only — never positions text.
+    """
+    row = await _load_owned_playbook(db, playbook_id=playbook_id, user_id=user.id)
+    content = freeze_playbook_snapshot(row)
+
+    if content.size_bytes > ORG_PLAYBOOK_MAX_BYTES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"org playbook content is {content.size_bytes} bytes, exceeding the "
+                f"{ORG_PLAYBOOK_MAX_BYTES}-byte cap"
+            ),
+        )
+
+    open_proposal = (
+        await db.execute(
+            select(OrgPlaybookVersion.id).where(
+                OrgPlaybookVersion.playbook_id == row.id,
+                OrgPlaybookVersion.state == "proposed",
+            )
+        )
+    ).scalar_one_or_none()
+    if open_proposal is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="an open proposal already exists for this playbook",
+        )
+
+    max_version_no = (
+        await db.execute(
+            select(func.max(OrgPlaybookVersion.version_no)).where(
+                OrgPlaybookVersion.playbook_id == row.id
+            )
+        )
+    ).scalar_one()
+    version_no = (max_version_no or 0) + 1
+
+    version = OrgPlaybookVersion(
+        playbook_id=row.id,
+        version_no=version_no,
+        name=content.name,
+        contract_type=content.contract_type,
+        description=content.description,
+        playbook_version=content.playbook_version,
+        positions=content.positions,
+        content_hash=content.content_hash,
+        source_playbook_id=row.id,
+        author_user_id=user.id,
+    )
+    db.add(version)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        # The one-open-proposal-per-playbook or (playbook_id, version_no) partial-unique index
+        # collided with a concurrent propose.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="a concurrent proposal for this playbook was just recorded — retry",
+        ) from None
+
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="library.propose",
+        resource_type="org_playbook_version",
+        resource_id=str(version.id),
+        request=request,
+        details={
+            "kind": "playbook",
+            "key": str(row.id),
+            "version": version_no,
+            "content_hash": content.content_hash,
+            "size_bytes": content.size_bytes,
+            "position_count": content.position_count,
+        },
+    )
+    await db.commit()
+    await db.refresh(version)
+    return _to_playbook_proposal_response(version)
+
+
+@router.get(
+    "/playbooks/{playbook_id}/proposals",
+    response_model=list[OrgPlaybookProposalResponse],
+    summary="This playbook's org-proposal version history, author-only (ADR-F067 D2/D3, B-4).",
+    responses={404: {"description": "Playbook not found"}},
+)
+async def list_playbook_proposals(
+    playbook_id: uuid.UUID,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[OrgPlaybookProposalResponse]:
+    """GET /api/v1/playbooks/{id}/proposals
+
+    The caller's own propose/approve/reject/revoke history for this playbook, newest version
+    first. STRICTLY owner-scoped (the SAME ``_load_owned_playbook`` gate as propose, NOT the
+    admin-visible read gate), with the ``author_user_id == user.id`` filter kept explicit on top.
+    """
+    row = await _load_owned_playbook(db, playbook_id=playbook_id, user_id=user.id)
+    stmt = (
+        select(OrgPlaybookVersion)
+        .where(
+            OrgPlaybookVersion.playbook_id == row.id,
+            OrgPlaybookVersion.author_user_id == user.id,
+        )
+        .order_by(OrgPlaybookVersion.version_no.desc())
+    )
+    versions = (await db.execute(stmt)).scalars().all()
+    return [_to_playbook_proposal_response(v) for v in versions]
 
 
 @router.patch(

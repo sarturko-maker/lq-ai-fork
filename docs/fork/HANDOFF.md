@@ -333,8 +333,41 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   (`build_area_subagents` ValueError → ValidationError), not 422; (5) the docker `web` rebuild hit a
 >   transient BuildKit-frontend registry EOF (`docker/dockerfile:1`) — a RETRY succeeded (network hiccup,
 >   not a code fault). **NEXT (Workstream B remaining spine): B-7a profile manifests → B-7b the wizard**
->   (absorbs ONBOARD-1/2 + G13/#473); B-2c org-skill red-team eval + B-4 org-playbooks still pending;
->   plus #490 GW-FILEIDS follow-up and P-2 registry mirror (only if VM egress blocked). Maintainer picks.
+>   (absorbs ONBOARD-1/2 + G13/#473); B-2c org-skill red-team eval still pending (B-4 org-playbooks
+>   DONE — see the B-4 block below); plus #490 GW-FILEIDS follow-up and P-2 registry mirror (only if
+>   VM egress blocked). Maintainer picks.
+> - **B-4 ✓ SHIPPED (branch `b4-org-playbooks`, off main `db383a6b`; ADR-F067 B-4 addendum; mig 0095;
+>   task #495) — org-authored PLAYBOOKS through the harness, `kind=playbook`.** The playbook twin of
+>   B-2a: propose (author) → admin approve/reject/revoke → immutable content-hashed positions snapshot
+>   → adopt → bind → the frozen positions inject as the Practice Playbook tier with `source='org'` +
+>   author/approver provenance. **Governance = FULL SKILLS PARITY (maintainer decision 2026-07-09):**
+>   an org playbook resolves from its APPROVED snapshot keyed by `playbook_id` INDEPENDENT of the live
+>   row (an author soft-deleting the source row CANNOT yank an admin-approved capability — only an admin
+>   revoke removes it); the catalog/adopt path lists ONLY built-in (`created_by IS NULL`, resolve live,
+>   `source=None`) + approved-org playbooks (un-approved never appears org-wide). NO frontmatter allowlist
+>   (playbooks are GUIDANCE-DATA behind the existing `PRACTICE_PLAYBOOK_PROMPT` fence — the D3.3 layer
+>   collapses; every other D3 control holds). Files: mig 0095 `org_playbook_versions` (clone of 0091,
+>   re-keyed slug→playbook_id, `positions` JSONB) + `OrgPlaybookVersion` ORM; `app/agents/playbook_proposal.py`
+>   (freeze/`canonicalize_positions` deterministic hash + `load_approved_org_playbook_versions` +
+>   `frozen_playbook_from_version`); `playbooks.py` propose/proposals (owner 404-not-403); `admin.py`
+>   list/approve/reject/revoke `/admin/org-playbooks` (operator-403, two-step supersede-flush) + catalog
+>   gating + `source='org'`; `library.py` member provenance; `capabilities.py` full-parity `bound_playbook_keys`
+>   + `org_playbook_snapshots` fail-closed loop; `composition.py` + `matter_capabilities.py` (both inventory
+>   consumers) + `_resolve_practice_playbook_render`; `playbook_context.py` provenance line + FENCE DEFANG
+>   for org content (built-ins byte-identical). Drift guards bumped: mutation_rbac 137→141 / 186→192 / 70→71,
+>   test_endpoints + test_openapi +6 routes. Gate: ruff + `mypy app` (231 files) clean; blast-radius pytest
+>   **151 passed / 1 skipped**; full api suite <PENDING — running>. Web layer (propose action + review-queue
+>   positions renderer + provenance badge) delegated to a parallel agent. Live acceptance (build→propose→
+>   approve→adopt→bind→agent cites the position; edit live→still old until re-approval) = maintainer browser
+>   session. Plan: `docs/fork/plans/B4-org-playbooks.md`.
+> - Slice traps (B-4): (1) mypy unifies same-named loop vars across the skill+playbook loops — the playbook
+>   loop var MUST differ (`pb_snapshot`/`pb_snap`) or you get spurious `_OrgSkillSnapshot`-vs-`_OrgPlaybookSnapshot`
+>   type errors; (2) pure-inventory tests pass bare `SimpleNamespace` playbooks with NO `created_by` attr →
+>   `build_area_inventory` MUST use `getattr(pb, "created_by", None)` (treats them as built-in); (3) `content_hash`
+>   sorts positions by `(position_order, canonical-JSON)` — NEVER by `id` (id-order makes semantically-equal
+>   input hash differently); the canonicalizer is TOTAL over malformed `fallback_tiers`; (4) org content is
+>   DEFANGED (whitespace + 3+ hyphen runs collapsed) before the fence — built-ins are NOT (byte-identical);
+>   (5) `ruff format` written as ROOT pollutes the tree — run the container `--user $(id -u):$(id -g)`.
 > - **AZ-6 ✓ BUILT (branch `az-6-keyless-managed-identity`, rebased on main `1b8237e1`; ADR-F072 proposed;
 >   task #494) — keyless Azure OpenAI auth via the VM's managed identity. Maintainer pivot 2026-07-09.
 >   PENDING the maintainer's PRE-PUSH diff review — committed locally (`c61195b5`), NOT pushed, NO PR yet

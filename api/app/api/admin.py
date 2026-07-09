@@ -54,6 +54,10 @@ from app.agents.capabilities import (
     RECOMMENDED_LIBRARY_SETS,
     TOOL_GROUP_REGISTRY,
 )
+from app.agents.playbook_proposal import (
+    content_size_bytes as playbook_content_size_bytes,
+    load_approved_org_playbook_versions,
+)
 from app.api.dependencies import AdminUser, OperatorUser, tenant_admin_visibility
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
@@ -64,6 +68,7 @@ from app.models.audit import AuditLog
 from app.models.document import Document as DocumentORM
 from app.models.file import File as FileORM
 from app.models.knowledge import KnowledgeBase
+from app.models.org_playbook_version import OrgPlaybookVersion
 from app.models.org_skill import OrgSkillVersion
 from app.models.playbook import Playbook as PlaybookORM
 from app.models.practice_area import OrgLibraryEntry
@@ -1617,8 +1622,13 @@ async def _validate_catalog_key(db: AsyncSession, request: Request, kind: str, k
         ):
             raise HTTPException(status_code=422, detail=f"Skill {key!r} is not in the registry.")
     elif kind == KIND_PLAYBOOK:
-        live_ids = {str(pb.id) for pb in await _live_playbooks(db)}
-        if key not in live_ids:
+        # ADR-F067 B-4 (full skills parity): only a SHIPPED built-in (created_by IS NULL) or an
+        # APPROVED org playbook is adoptable — a user's un-approved playbook must go through
+        # propose -> approve first (so it never appears org-wide as a badge-less, built-in-looking
+        # adoptable entry that would silently fail-close when bound).
+        live_builtin_ids = {str(pb.id) for pb in await _live_playbooks(db) if pb.created_by is None}
+        approved_org_ids = set((await load_approved_org_playbook_versions(db)).keys())
+        if key not in live_builtin_ids and key not in approved_org_ids:
             raise HTTPException(
                 status_code=422, detail=f"Playbook {key!r} is not an available playbook."
             )
@@ -1734,17 +1744,41 @@ async def _deployment_inventory(
             )
         )
 
+    # ADR-F067 B-4 (full skills parity): the playbook catalog = SHIPPED built-ins (created_by IS
+    # NULL, resolved LIVE, source=None) + APPROVED org playbooks (resolved from the immutable
+    # snapshot, source='org' with author/version/approver — INDEPENDENT of the live row, which
+    # may be soft-deleted). A user's un-approved org playbook appears NOWHERE (not adoptable).
+    approved_pb_snapshots = {
+        str(v.playbook_id): (v, author_email, approver_email)
+        for v, author_email, approver_email in await _approved_org_playbook_snapshots(db)
+    }
     playbook_entries = [
         _read(
             KIND_PLAYBOOK,
             str(pb.id),
             playbook_display_label(pb),
             pb.description or None,
-            # source=None: playbooks are DB rows with no provenance field today — the
-            # web shows a provenance badge only when `source` is present (D-A).
         )
         for pb in await _live_playbooks(db)
+        if pb.created_by is None
     ]
+    for key, (pb_snap, pb_author_email, pb_approver_email) in approved_pb_snapshots.items():
+        label = (
+            f"{pb_snap.name} ({pb_snap.contract_type})" if pb_snap.contract_type else pb_snap.name
+        )
+        playbook_entries.append(
+            _read(
+                KIND_PLAYBOOK,
+                key,
+                label,
+                pb_snap.description or None,
+                source="org",
+                author=pb_author_email,
+                version=pb_snap.playbook_version,
+                approver=pb_approver_email,
+            )
+        )
+    playbook_entries.sort(key=lambda e: (e.label.lower(), e.capability_key))
 
     knowledge_entries = [
         _read(
@@ -2287,5 +2321,351 @@ async def revoke_org_skill_version(
     author_email = await _org_skill_user_email(db, version.author_user_id)
     approver_email = await _org_skill_user_email(db, version.reviewed_by)
     return _to_org_skill_admin_read(
+        version, author_email=author_email, approver_email=approver_email
+    )
+
+
+# ---------------------------------------------------------------------------
+# Org-playbook harness — admin review/approve/reject/revoke (ADR-F067 D2/D3, B-4).
+# The playbook twin of the org-skills admin surface above, for kind=playbook: same
+# state machine, same two-step supersede-then-flush against the one-approved-per-key
+# partial index, same ADR-F064 operator exclusion, same body-free audit. The review
+# read (OrgPlaybookVersionAdminRead) carries the FULL frozen positions (the admin must
+# read the exact bytes before approving, D3.1) — but the audit rows stay content-free.
+# The per-kind handlers are intentionally CLONED (not merged with the skill handlers):
+# the content payload, size computation and audit key differ, and a generic over two
+# ORM classes fights SQLAlchemy/mypy typing (recorded, ADR-F067 B-4 addendum).
+# ---------------------------------------------------------------------------
+
+
+class OrgPlaybookVersionAdminRead(BaseModel):
+    """One ``org_playbook_versions`` row, FULL content — the admin review view (ADR-F067 B-4).
+
+    Carries the frozen ``positions`` (the reviewer must read the exact bytes before approving,
+    D3.1) plus the header snapshot. ``approver_email`` is ``reviewed_by`` resolved to an email
+    (set once approved OR rejected). This is the ONE content-exposing read; the audit rows stay
+    body-free."""
+
+    id: _uuid_mod.UUID
+    playbook_id: _uuid_mod.UUID
+    version_no: int
+    state: str
+    name: str
+    contract_type: str
+    description: str
+    playbook_version: str
+    author_user_id: _uuid_mod.UUID | None
+    author_email: str | None
+    proposed_at: datetime
+    reviewed_by: _uuid_mod.UUID | None
+    approver_email: str | None
+    reviewed_at: datetime | None
+    review_note: str | None
+    revoked_at: datetime | None
+    content_hash: str
+    size_bytes: int
+    position_count: int
+    positions: list[dict]
+
+
+class OrgPlaybookVersionsListResponse(BaseModel):
+    """``GET /admin/org-playbooks`` response — every version (optionally state-filtered)."""
+
+    versions: list[OrgPlaybookVersionAdminRead]
+
+
+class OrgPlaybookRejectRequest(BaseModel):
+    """``POST /admin/org-playbooks/{id}/reject`` body. ``extra='forbid'``.
+
+    ``note`` rides only this row's ``review_note`` column — the audit row carries ``has_note``
+    (a bool), never the text (the audit contract, CLAUDE.md)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note: str | None = Field(default=None, max_length=2000)
+
+
+async def _approved_org_playbook_snapshots(
+    db: AsyncSession,
+) -> list[tuple[OrgPlaybookVersion, str | None, str | None]]:
+    """Every ``approved`` org-playbook snapshot with its author's AND approver's email each
+    resolved via one batched join (never a raw user id in admin-facing text — ADR-F067 D3.5).
+    The playbook twin of :func:`_approved_org_skill_snapshots`."""
+    author = aliased(UserORM)
+    approver = aliased(UserORM)
+    stmt = (
+        select(OrgPlaybookVersion, author.email, approver.email)
+        .outerjoin(author, OrgPlaybookVersion.author_user_id == author.id)
+        .outerjoin(approver, OrgPlaybookVersion.reviewed_by == approver.id)
+        .where(OrgPlaybookVersion.state == "approved")
+        .order_by(OrgPlaybookVersion.playbook_id)
+    )
+    return [
+        (v, author_email, approver_email)
+        for v, author_email, approver_email in (await db.execute(stmt)).all()
+    ]
+
+
+def _to_org_playbook_admin_read(
+    version: OrgPlaybookVersion, *, author_email: str | None, approver_email: str | None = None
+) -> OrgPlaybookVersionAdminRead:
+    return OrgPlaybookVersionAdminRead(
+        id=version.id,
+        playbook_id=version.playbook_id,
+        version_no=version.version_no,
+        state=version.state,
+        name=version.name,
+        contract_type=version.contract_type,
+        description=version.description,
+        playbook_version=version.playbook_version,
+        author_user_id=version.author_user_id,
+        author_email=author_email,
+        proposed_at=version.proposed_at,
+        reviewed_by=version.reviewed_by,
+        approver_email=approver_email,
+        reviewed_at=version.reviewed_at,
+        review_note=version.review_note,
+        revoked_at=version.revoked_at,
+        content_hash=version.content_hash,
+        size_bytes=playbook_content_size_bytes(version),
+        position_count=version.position_count,
+        positions=list(version.positions or []),
+    )
+
+
+async def _org_playbook_version_for_transition(
+    db: AsyncSession, version_id: _uuid_mod.UUID, *, expected_state: str
+) -> OrgPlaybookVersion:
+    """Load an org-playbook version FOR UPDATE and assert its state before a transition — the
+    playbook twin of :func:`_org_skill_version_for_transition` (the row lock closes the
+    check-then-write TOCTOU on concurrent transitions; 404 unknown id, 409 wrong state)."""
+    version = (
+        await db.execute(
+            select(OrgPlaybookVersion).where(OrgPlaybookVersion.id == version_id).with_for_update()
+        )
+    ).scalar_one_or_none()
+    if version is None:
+        raise NotFound("Org playbook version not found.")
+    if version.state != expected_state:
+        raise Conflict(
+            f"Version is {version.state!r}, not {expected_state!r}.",
+            details={"state": version.state},
+        )
+    return version
+
+
+@router.get(
+    "/org-playbooks",
+    response_model=OrgPlaybookVersionsListResponse,
+    summary="The org-playbooks review queue — every version, optionally state-filtered (admin).",
+)
+async def list_org_playbook_versions(
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    state: Literal["proposed", "approved", "rejected", "superseded", "revoked"] | None = Query(
+        default=None
+    ),
+) -> OrgPlaybookVersionsListResponse:
+    """GET /api/v1/admin/org-playbooks — every org-playbook proposal/snapshot (ADR-F067 B-4),
+    newest-proposed first; ``state`` optionally narrows to one state (FastAPI 422s an
+    unrecognised value against the ``Literal``)."""
+    if not tenant_admin_visibility(admin):  # ADR-F064: tenant-authored content
+        raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
+    author = aliased(UserORM)
+    approver = aliased(UserORM)
+    stmt = (
+        select(OrgPlaybookVersion, author.email, approver.email)
+        .outerjoin(author, OrgPlaybookVersion.author_user_id == author.id)
+        .outerjoin(approver, OrgPlaybookVersion.reviewed_by == approver.id)
+    )
+    if state is not None:
+        stmt = stmt.where(OrgPlaybookVersion.state == state)
+    stmt = stmt.order_by(OrgPlaybookVersion.proposed_at.desc(), OrgPlaybookVersion.id.desc())
+    rows = (await db.execute(stmt)).all()
+    return OrgPlaybookVersionsListResponse(
+        versions=[
+            _to_org_playbook_admin_read(v, author_email=author_email, approver_email=approver_email)
+            for v, author_email, approver_email in rows
+        ]
+    )
+
+
+@router.post(
+    "/org-playbooks/{version_id}/approve",
+    response_model=OrgPlaybookVersionAdminRead,
+    summary="Approve a playbook proposal — pins the immutable snapshot (ADR-F067 B-4).",
+    responses={
+        404: {"description": "Version not found"},
+        409: {"description": "Version is not in 'proposed' state"},
+    },
+)
+async def approve_org_playbook_version(
+    version_id: _uuid_mod.UUID,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> OrgPlaybookVersionAdminRead:
+    """POST /api/v1/admin/org-playbooks/{id}/approve
+
+    409 unless ``state == 'proposed'``. Supersedes any prior ``approved`` row of the same
+    ``playbook_id`` in the SAME transaction as the flip — the
+    ``ux_org_playbook_versions_playbook_approved`` partial-unique index forces the two-step
+    (lock + demote + FLUSH the prior to ``'superseded'``, THEN flip this one to ``'approved'`` and
+    flush). Self-approval by the proposing admin is permitted (the audit row makes it visible)."""
+    if not tenant_admin_visibility(admin):  # ADR-F064: tenant-authored content
+        raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
+    version = await _org_playbook_version_for_transition(db, version_id, expected_state="proposed")
+
+    prior = (
+        await db.execute(
+            select(OrgPlaybookVersion)
+            .where(
+                OrgPlaybookVersion.playbook_id == version.playbook_id,
+                OrgPlaybookVersion.state == "approved",
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    superseded_version_no: int | None = None
+    if prior is not None:
+        prior.state = "superseded"
+        superseded_version_no = prior.version_no
+        await db.flush()
+
+    now = datetime.now(UTC)
+    version.state = "approved"
+    version.reviewed_by = admin.id
+    version.reviewed_at = now
+    await db.flush()
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="library.approve",
+        resource_type="org_playbook_version",
+        resource_id=str(version.id),
+        request=request,
+        details={
+            "kind": "playbook",
+            "key": str(version.playbook_id),
+            "version": version.version_no,
+            "content_hash": version.content_hash,
+            "size_bytes": playbook_content_size_bytes(version),
+            "position_count": version.position_count,
+            "superseded_version": superseded_version_no,
+        },
+    )
+    await db.commit()
+    await db.refresh(version)
+    author_email = await _org_skill_user_email(db, version.author_user_id)
+    approver_email = await _org_skill_user_email(db, version.reviewed_by)
+    return _to_org_playbook_admin_read(
+        version, author_email=author_email, approver_email=approver_email
+    )
+
+
+@router.post(
+    "/org-playbooks/{version_id}/reject",
+    response_model=OrgPlaybookVersionAdminRead,
+    summary="Reject a playbook proposal (ADR-F067 B-4).",
+    responses={
+        404: {"description": "Version not found"},
+        409: {"description": "Version is not in 'proposed' state"},
+    },
+)
+async def reject_org_playbook_version(
+    version_id: _uuid_mod.UUID,
+    payload: OrgPlaybookRejectRequest,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> OrgPlaybookVersionAdminRead:
+    """POST /api/v1/admin/org-playbooks/{id}/reject — 409 unless ``state == 'proposed'``. The
+    audit row carries ``has_note`` only; the note text itself is never audited (CLAUDE.md's
+    content-free audit contract)."""
+    if not tenant_admin_visibility(admin):  # ADR-F064: tenant-authored content
+        raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
+    version = await _org_playbook_version_for_transition(db, version_id, expected_state="proposed")
+
+    version.state = "rejected"
+    version.reviewed_by = admin.id
+    version.reviewed_at = datetime.now(UTC)
+    version.review_note = payload.note
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="library.reject",
+        resource_type="org_playbook_version",
+        resource_id=str(version.id),
+        request=request,
+        details={
+            "kind": "playbook",
+            "key": str(version.playbook_id),
+            "version": version.version_no,
+            "content_hash": version.content_hash,
+            "size_bytes": playbook_content_size_bytes(version),
+            "has_note": payload.note is not None,
+        },
+    )
+    await db.commit()
+    await db.refresh(version)
+    author_email = await _org_skill_user_email(db, version.author_user_id)
+    approver_email = await _org_skill_user_email(db, version.reviewed_by)
+    return _to_org_playbook_admin_read(
+        version, author_email=author_email, approver_email=approver_email
+    )
+
+
+@router.post(
+    "/org-playbooks/{version_id}/revoke",
+    response_model=OrgPlaybookVersionAdminRead,
+    summary="Revoke an approved playbook snapshot (ADR-F067 D3.8 fail-close).",
+    responses={
+        404: {"description": "Version not found"},
+        409: {"description": "Version is not in 'approved' state"},
+    },
+)
+async def revoke_org_playbook_version(
+    version_id: _uuid_mod.UUID,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> OrgPlaybookVersionAdminRead:
+    """POST /api/v1/admin/org-playbooks/{id}/revoke
+
+    409 unless ``state == 'approved'``. Does NOT delete the ``org_library_entries`` or
+    ``practice_area_playbooks`` rows (ADR-F067 D3.8) — the runtime fail-closes at
+    ``build_area_inventory`` (a structured warning, not a 500) next run, and the member Library
+    read shows the now-dangling entry. Under full skills parity this is the ONLY path that
+    removes an approved org playbook (an author soft-deleting the source row cannot)."""
+    if not tenant_admin_visibility(admin):  # ADR-F064: tenant-authored content
+        raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
+    version = await _org_playbook_version_for_transition(db, version_id, expected_state="approved")
+
+    version.state = "revoked"
+    version.revoked_by = admin.id
+    version.revoked_at = datetime.now(UTC)
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="library.revoke",
+        resource_type="org_playbook_version",
+        resource_id=str(version.id),
+        request=request,
+        details={
+            "kind": "playbook",
+            "key": str(version.playbook_id),
+            "version": version.version_no,
+            "content_hash": version.content_hash,
+            "size_bytes": playbook_content_size_bytes(version),
+        },
+    )
+    await db.commit()
+    await db.refresh(version)
+    author_email = await _org_skill_user_email(db, version.author_user_id)
+    approver_email = await _org_skill_user_email(db, version.reviewed_by)
+    return _to_org_playbook_admin_read(
         version, author_email=author_email, approver_email=approver_email
     )

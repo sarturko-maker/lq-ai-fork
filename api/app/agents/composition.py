@@ -69,6 +69,10 @@ from app.agents.matter_roster_tools import (
 )
 from app.agents.memory_backend import AgentRuntimeContext, build_memory_backend
 from app.agents.playbook_context import render_practice_playbook
+from app.agents.playbook_proposal import (
+    frozen_playbook_from_version,
+    load_approved_org_playbook_versions,
+)
 from app.agents.redline_service import RedlineService, build_redline_service
 from app.agents.review_edited_document_tools import build_review_edited_document_tools
 from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
@@ -81,6 +85,7 @@ from app.config import get_settings
 from app.db.session import get_session_factory
 from app.models.agent_run import AgentRun
 from app.models.knowledge import KnowledgeBase
+from app.models.org_playbook_version import OrgPlaybookVersion
 from app.models.org_skill import OrgSkillVersion
 from app.models.organization_profile import OrganizationProfile
 from app.models.playbook import Playbook
@@ -148,6 +153,58 @@ async def _resolve_org_skill_files(
         )
         for slug, version in wanted.items()
     }
+
+
+async def _resolve_practice_playbook_render(
+    db: AsyncSession,
+    org_playbook_snapshots: Mapping[str, OrgPlaybookVersion],
+    enabled_playbook_keys: Sequence[str],
+    live_playbook_by_id: Mapping[str, Playbook],
+) -> list[Any]:
+    """Build the render list for the Practice Playbook tier (ADR-F067 B-4).
+
+    An org-authored playbook renders from its APPROVED snapshot — the frozen positions plus the
+    D3.5 provenance banner — never the live, editable ``playbooks`` row (the TOCTOU-closing
+    guarantee, and why a soft-deleted org source row cannot change what the agent reads). A
+    built-in playbook renders from its live row (shipped/trusted, byte-identical to before B-4).
+    Order follows ``enabled_playbook_keys`` (the inventory's name-sorted order). Author/approver
+    EMAILS are resolved in ONE batched ``SELECT`` (never raw user IDs in model-facing text;
+    ``"unknown"`` when the FK was nulled or the user is gone)."""
+    wanted = {
+        key: org_playbook_snapshots[key]
+        for key in enabled_playbook_keys
+        if key in org_playbook_snapshots
+    }
+    ids = {
+        uid
+        for version in wanted.values()
+        for uid in (version.author_user_id, version.reviewed_by)
+        if uid is not None
+    }
+    emails: dict[uuid.UUID, str] = {}
+    if ids:
+        rows = await db.execute(select(User.id, User.email).where(User.id.in_(ids)))
+        emails = {row.id: row.email for row in rows}
+
+    def label(uid: uuid.UUID | None) -> str:
+        return (emails.get(uid) if uid is not None else None) or "unknown"
+
+    render_items: list[Any] = []
+    for key in enabled_playbook_keys:
+        version = wanted.get(key)
+        if version is not None:
+            render_items.append(
+                frozen_playbook_from_version(
+                    version,
+                    author_label=label(version.author_user_id),
+                    approver_label=label(version.reviewed_by),
+                )
+            )
+            continue
+        pb = live_playbook_by_id.get(key)
+        if pb is not None:
+            render_items.append(pb)
+    return render_items
 
 
 def _skill_registry_from_app_state() -> SkillRegistry | None:
@@ -772,13 +829,36 @@ async def compose_and_execute_run(
                             # slug the filesystem registry also knows is shadowed (shipped wins,
                             # D2) with a structured warning.
                             org_snapshots = await load_approved_org_skill_versions(db)
+                            # ADR-F067 B-4: the APPROVED org-authored playbook snapshots (keyed by
+                            # playbook_id::text) + the area's BOUND playbook keys
+                            # (practice_area_playbooks ids). The bound-key set is the FULL-PARITY
+                            # enumeration source, independent of the live `playbooks` row — so a
+                            # soft-deleted org playbook still resolves from its approved snapshot
+                            # and only an admin revoke removes it.
+                            org_playbook_snapshots = await load_approved_org_playbook_versions(db)
+                            bound_playbook_keys = [
+                                str(pid)
+                                for pid in (
+                                    (
+                                        await db.execute(
+                                            select(PracticeAreaPlaybook.playbook_id).where(
+                                                PracticeAreaPlaybook.practice_area_id == area.id
+                                            )
+                                        )
+                                    )
+                                    .scalars()
+                                    .all()
+                                )
+                            ]
                             inventory = build_area_inventory(
                                 bound_skill_names=bound_skill_names,
                                 registry=registry,
                                 area_playbooks=area_playbooks,
+                                bound_playbook_keys=bound_playbook_keys,
                                 tool_group_keys=area_tool_group_keys,
                                 library_entries=library_entries,
                                 org_skill_snapshots=org_snapshots,
+                                org_playbook_snapshots=org_playbook_snapshots,
                                 area_knowledge_bases=area_knowledge_bases,
                             )
                             enabled_skills = inventory.enabled_keys("skill", toggles)
@@ -790,12 +870,19 @@ async def compose_and_execute_run(
                                 uuid.UUID(key)
                                 for key in inventory.enabled_keys(KIND_KNOWLEDGE, toggles)
                             )
-                            enabled_playbook_keys = set(inventory.enabled_keys("playbook", toggles))
-                            enabled_playbooks = [
-                                pb for pb in area_playbooks if str(pb.id) in enabled_playbook_keys
-                            ]
+                            # ADR-F067 B-4: render org playbooks from their APPROVED snapshot (never
+                            # the live row), built-ins from the live row. enabled_keys returns the
+                            # inventory's name-sorted order; the resolver preserves it.
+                            enabled_playbook_key_list = inventory.enabled_keys("playbook", toggles)
+                            live_playbook_by_id = {str(pb.id): pb for pb in area_playbooks}
+                            practice_playbook_items = await _resolve_practice_playbook_render(
+                                db,
+                                org_playbook_snapshots,
+                                enabled_playbook_key_list,
+                                live_playbook_by_id,
+                            )
                             practice_playbook_block = (
-                                render_practice_playbook(enabled_playbooks) or None
+                                render_practice_playbook(practice_playbook_items) or None
                             )
                             # ADR-F067 D2/D3: serve the approved-snapshot BYTES (provenance
                             # banner prefixed at serve time) for every ENABLED, adopted+bound

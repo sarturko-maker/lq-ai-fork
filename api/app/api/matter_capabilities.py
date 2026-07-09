@@ -31,6 +31,7 @@ from app.agents.capabilities import (
     build_area_inventory,
     empty_inventory,
 )
+from app.agents.playbook_proposal import load_approved_org_playbook_versions
 from app.api.dependencies import ActiveUser, MutatingUser
 from app.api.projects import _load_visible_project
 from app.audit import audit_action
@@ -149,13 +150,34 @@ async def _resolve_inventory(
     # bytes) and feed them to the same chokepoint; a slug the registry also knows is
     # shadowed (shipped wins) with a structured warning, never shown twice.
     org_snapshots = await load_approved_org_skill_versions(db)
+    # ADR-F067 B-4: the panel must resolve org-authored playbooks EXACTLY as the agent does —
+    # from the APPROVED snapshot (never the live row), keyed on the BOUND set independent of the
+    # live row. Load the approved snapshots + the raw binding keys and feed the same chokepoint,
+    # or the panel and the agent would disagree on what an org playbook resolves to.
+    org_playbook_snapshots = await load_approved_org_playbook_versions(db)
+    bound_playbook_keys = [
+        str(pid)
+        for pid in (
+            (
+                await db.execute(
+                    select(PracticeAreaPlaybook.playbook_id).where(
+                        PracticeAreaPlaybook.practice_area_id == area.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    ]
     inventory = build_area_inventory(
         bound_skill_names=bound_skill_names,
         registry=_registry_or_none(request),
         area_playbooks=area_playbooks,
+        bound_playbook_keys=bound_playbook_keys,
         tool_group_keys=tool_group_keys,
         library_entries=library_entries,
         org_skill_snapshots=org_snapshots,
+        org_playbook_snapshots=org_playbook_snapshots,
         area_knowledge_bases=area_knowledge_bases,
     )
     return inventory, area.key, area.unit_label
