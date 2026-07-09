@@ -7,7 +7,9 @@
  */
 import { apiRequest } from './client';
 import type {
+	FallbackTier,
 	OrgSkillVersionState,
+	PositionSeverity,
 	UsageResponse,
 	UsageQuery,
 	AdminUserListResponse,
@@ -167,10 +169,9 @@ export async function listInvites(): Promise<InviteListResponse> {
 
 /** POST /api/v1/admin/users/invites/{id}/resend — revoke + reissue (409 if accepted). */
 export async function resendInvite(inviteId: string): Promise<InviteResponse> {
-	return apiRequest<InviteResponse>(
-		`/admin/users/invites/${encodeURIComponent(inviteId)}/resend`,
-		{ method: 'POST' }
-	);
+	return apiRequest<InviteResponse>(`/admin/users/invites/${encodeURIComponent(inviteId)}/resend`, {
+		method: 'POST'
+	});
 }
 
 /** DELETE /api/v1/admin/users/invites/{id} — revoke a pending invite (204). */
@@ -292,10 +293,9 @@ export async function removeLibraryEntry(
 	kind: 'skill' | 'tool' | 'playbook' | 'knowledge',
 	key: string
 ): Promise<void> {
-	await apiRequest<void>(
-		`/admin/library/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`,
-		{ method: 'DELETE' }
-	);
+	await apiRequest<void>(`/admin/library/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`, {
+		method: 'DELETE'
+	});
 }
 
 // ----- Org-skills review queue (B-2b, ADR-F067 D2/D3) -----
@@ -382,6 +382,122 @@ export async function rejectOrgSkillVersion(
 export async function revokeOrgSkillVersion(id: string): Promise<OrgSkillVersionAdminRead> {
 	return apiRequest<OrgSkillVersionAdminRead>(
 		`/admin/org-skills/${encodeURIComponent(id)}/revoke`,
+		{ method: 'POST' }
+	);
+}
+
+// ----- Org-playbooks review queue (B-4, ADR-F067 D2/D3) -----
+
+/**
+ * One FROZEN position inside an `org_playbook_versions` snapshot — the review
+ * surface's content payload (the playbook analogue of `raw_yaml`/`body`).
+ *
+ * These bytes come from untrusted JSONB (any authenticated author's playbook,
+ * frozen at propose time), so the review renderer treats every free-text field
+ * as escaped plain text — never trusted markup (CLAUDE.md injection rule). The
+ * declared shape mirrors the backend's canonical position; the renderer still
+ * guards defensively (missing/malformed arrays).
+ */
+export interface OrgPlaybookPositionRead {
+	issue: string;
+	description: string;
+	standard_language: string;
+	fallback_tiers: FallbackTier[];
+	redline_strategy: string;
+	severity_if_missing: PositionSeverity;
+	detection_keywords: string[];
+	detection_examples: string[];
+	position_order: number;
+}
+
+/**
+ * One `org_playbook_versions` row, FULL content — the admin review view
+ * (`GET /admin/org-playbooks`, the approve/reject/revoke echo). The playbook
+ * analogue of {@link OrgSkillVersionAdminRead}; `positions` (the frozen
+ * snapshot) replaces `raw_yaml`/`body`.
+ *
+ * `playbook_id` is the stable adoption key (the Library keys org playbooks by
+ * `str(playbook_id)`), independent of the live `playbooks` row. `playbook_version`
+ * is the frozen capability label (distinct from `version_no`, the monotonic
+ * proposal counter). The one deliberate content-exposing read — AdminUser-gated,
+ * operator-excluded (ADR-F064), not audited.
+ */
+export interface OrgPlaybookVersionAdminRead {
+	id: string;
+	playbook_id: string;
+	version_no: number;
+	/** The shared ``OrgSkillVersionState`` union — identical closed set across
+	 *  the skill and playbook harnesses. */
+	state: OrgSkillVersionState;
+	name: string;
+	contract_type: string;
+	description: string | null;
+	playbook_version: string;
+	author_user_id: string | null;
+	author_email: string | null;
+	proposed_at: string;
+	reviewed_by: string | null;
+	/** `reviewed_by` resolved to an email, mirroring `author_email`. `null`
+	 *  until the row has been reviewed. */
+	approver_email: string | null;
+	reviewed_at: string | null;
+	review_note: string | null;
+	revoked_at: string | null;
+	content_hash: string;
+	size_bytes: number;
+	position_count: number;
+	positions: OrgPlaybookPositionRead[];
+}
+
+export interface OrgPlaybookVersionsListResponse {
+	versions: OrgPlaybookVersionAdminRead[];
+}
+
+/**
+ * GET /api/v1/admin/org-playbooks — the review queue, optionally state-filtered.
+ * Newest-proposed first. AdminUser-gated; ADR-F064 excludes the platform
+ * operator (tenant-authored content) — 403 (the queue section hides).
+ */
+export async function listOrgPlaybookVersions(
+	state?: OrgSkillVersionState
+): Promise<OrgPlaybookVersionsListResponse> {
+	const qs = state ? `?state=${encodeURIComponent(state)}` : '';
+	return apiRequest<OrgPlaybookVersionsListResponse>(`/admin/org-playbooks${qs}`);
+}
+
+/**
+ * POST /api/v1/admin/org-playbooks/{id}/approve — pins the immutable snapshot.
+ * 409 unless the row is `proposed`.
+ */
+export async function approveOrgPlaybookVersion(id: string): Promise<OrgPlaybookVersionAdminRead> {
+	return apiRequest<OrgPlaybookVersionAdminRead>(
+		`/admin/org-playbooks/${encodeURIComponent(id)}/approve`,
+		{ method: 'POST' }
+	);
+}
+
+/**
+ * POST /api/v1/admin/org-playbooks/{id}/reject — `note` rides the response's
+ * `review_note`; 409 unless the row is `proposed`.
+ */
+export async function rejectOrgPlaybookVersion(
+	id: string,
+	note?: string
+): Promise<OrgPlaybookVersionAdminRead> {
+	return apiRequest<OrgPlaybookVersionAdminRead>(
+		`/admin/org-playbooks/${encodeURIComponent(id)}/reject`,
+		{ method: 'POST', body: { note: note && note.trim() !== '' ? note : undefined } }
+	);
+}
+
+/**
+ * POST /api/v1/admin/org-playbooks/{id}/revoke — 409 unless the row is `approved`.
+ * Does NOT remove the matching Library row or practice-area bindings (ADR-F067
+ * D3.8 fail-close) — they surface as unavailable until removed/replaced.
+ */
+export async function revokeOrgPlaybookVersion(id: string): Promise<OrgPlaybookVersionAdminRead> {
+	return apiRequest<OrgPlaybookVersionAdminRead>(
+		`/admin/org-playbooks/${encodeURIComponent(id)}/revoke`,
 		{ method: 'POST' }
 	);
 }

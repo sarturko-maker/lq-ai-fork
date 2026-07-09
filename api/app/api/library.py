@@ -26,7 +26,7 @@ from __future__ import annotations
 import uuid as _uuid_mod
 from collections.abc import Iterable
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
@@ -41,11 +41,11 @@ from app.agents.capabilities import (
     KIND_TOOL,
     TOOL_GROUP_REGISTRY,
 )
+from app.agents.playbook_proposal import load_approved_org_playbook_versions
 from app.api.admin import playbook_display_label
 from app.api.dependencies import ActiveUser
 from app.db.session import get_db
 from app.models.knowledge import KnowledgeBase
-from app.models.org_skill import OrgSkillVersion
 from app.models.playbook import Playbook as PlaybookORM
 from app.models.practice_area import OrgLibraryEntry
 from app.models.user import User as UserORM
@@ -110,12 +110,18 @@ def _registry_or_none(request: Request) -> SkillRegistry | None:
     return holder.current() if holder is not None else None
 
 
+class _HasReviewedBy(Protocol):
+    """An approved snapshot row with a ``reviewed_by`` FK — org skill OR org playbook (B-4)."""
+
+    reviewed_by: _uuid_mod.UUID | None
+
+
 async def _approver_emails_for_snapshots(
-    db: AsyncSession, snapshots: Iterable[OrgSkillVersion]
+    db: AsyncSession, snapshots: Iterable[_HasReviewedBy]
 ) -> dict[_uuid_mod.UUID, str]:
-    """Batch-resolve ``reviewed_by`` -> email for a set of approved org-skill
-    snapshots (B-2b, D3.5) — one query for the whole Library response rather
-    than an N+1 per entry, mirroring ``app.api.admin``'s join technique."""
+    """Batch-resolve ``reviewed_by`` -> email for a set of approved org snapshots (skill OR
+    playbook — B-2b/B-4, D3.5) — one query for the whole Library response rather than an N+1
+    per entry, mirroring ``app.api.admin``'s join technique."""
     reviewer_ids = {s.reviewed_by for s in snapshots if s.reviewed_by is not None}
     if not reviewer_ids:
         return {}
@@ -176,6 +182,14 @@ async def get_library(
     # an admin reviewed and approved the content is not the same disclosure as who wrote it.
     org_snapshots_by_slug = await load_approved_org_skill_versions(db)
     approver_emails = await _approver_emails_for_snapshots(db, org_snapshots_by_slug.values())
+    # ADR-F067 B-4: the same for approved org PLAYBOOK snapshots — a source='org' badge + approver
+    # on the member card (author stays unexposed, mirroring skills). Resolved from the snapshot
+    # INDEPENDENT of the live row (full parity), so a soft-deleted-but-approved org playbook still
+    # renders honestly.
+    org_playbook_snapshots_by_id = await load_approved_org_playbook_versions(db)
+    playbook_approver_emails = await _approver_emails_for_snapshots(
+        db, org_playbook_snapshots_by_id.values()
+    )
 
     entries: list[LibraryEntryRead] = []
     for row in rows:
@@ -217,11 +231,26 @@ async def get_library(
                     if snap.reviewed_by is not None:
                         approver = approver_emails.get(snap.reviewed_by)
         elif kind == KIND_PLAYBOOK:
-            pb = playbooks_by_id.get(key)
-            if pb is not None:
-                label = playbook_display_label(pb)
-                description = pb.description or None
-                # source stays None: playbooks carry no provenance field today (D-A).
+            # ADR-F067 B-4 (full parity): an APPROVED org playbook resolves from its snapshot
+            # (source='org' + approver, independent of the live row); a built-in resolves LIVE
+            # (source=None). An un-approved org key (no snapshot, non-built-in) stays dangling.
+            snap_pb = org_playbook_snapshots_by_id.get(key)
+            if snap_pb is not None:
+                label = (
+                    f"{snap_pb.name} ({snap_pb.contract_type})"
+                    if snap_pb.contract_type
+                    else snap_pb.name
+                )
+                description = snap_pb.description or None
+                source = "org"
+                if snap_pb.reviewed_by is not None:
+                    approver = playbook_approver_emails.get(snap_pb.reviewed_by)
+            else:
+                pb = playbooks_by_id.get(key)
+                if pb is not None and pb.created_by is None:
+                    label = playbook_display_label(pb)
+                    description = pb.description or None
+                    # source stays None: built-in playbooks carry no provenance field (D-A).
         else:  # KIND_KNOWLEDGE
             kb = knowledge_bases_by_id.get(key)
             if kb is not None:

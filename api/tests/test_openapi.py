@@ -145,6 +145,14 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/org-skills/{version_id}/approve",
         "/api/v1/admin/org-skills/{version_id}/reject",
         "/api/v1/admin/org-skills/{version_id}/revoke",
+        # B-4 (fork, ADR-F067 D2/D3) — org-playbooks harness: author propose +
+        # history, admin review queue + transitions
+        "/api/v1/playbooks/{playbook_id}/propose",
+        "/api/v1/playbooks/{playbook_id}/proposals",
+        "/api/v1/admin/org-playbooks",
+        "/api/v1/admin/org-playbooks/{version_id}/approve",
+        "/api/v1/admin/org-playbooks/{version_id}/reject",
+        "/api/v1/admin/org-playbooks/{version_id}/revoke",
         # SETUP-3a (ADR-F061) — unauthenticated lifecycle endpoints
         "/api/v1/auth/accept-invite",
         "/api/v1/auth/password-reset-request",
@@ -429,7 +437,9 @@ async def test_openapi_paths_match_sketch() -> None:
     #   (/practice-areas/{key}/knowledge-bases + .../{kb_id} = 2 new paths, 182 -> 184).
     # +1: HITL-2 (ADR-F071) — POST /agents/runs/{run_id}/resume (184 -> 185).
     # +1: HITL-3 (ADR-F071) — PUT /practice-areas/{key}/hitl-policy (185 -> 186).
-    assert len(actual) == 186  # +3: ADR-F054 capability panel (GET/PUT
+    # +6: B-4 (ADR-F067 D2/D3) — org-playbooks harness: playbooks propose + proposals,
+    #   admin/org-playbooks queue + approve/reject/revoke (186 -> 192).
+    assert len(actual) == 192  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

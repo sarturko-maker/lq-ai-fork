@@ -19,7 +19,7 @@
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import type { LibraryEntry } from '$lib/lq-ai/api/library';
-	import type { OrgSkillVersionAdminRead } from '$lib/lq-ai/api/admin';
+	import type { OrgPlaybookVersionAdminRead, OrgSkillVersionAdminRead } from '$lib/lq-ai/api/admin';
 	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 	import type { OrgSkillVersionState } from '$lib/lq-ai/types';
 
@@ -32,6 +32,7 @@
 	import ModalShell from '$lib/lq-ai/components/primitives/ModalShell.svelte';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
+	import PlaybookPositionsReadonly from '$lib/lq-ai/components/PlaybookPositionsReadonly.svelte';
 
 	import { describeMutationError, formatDateTime } from '$lib/lq-ai/admin/page-helpers';
 	import {
@@ -250,6 +251,141 @@
 		}
 	}
 
+	// ----- Playbook review queue (B-4, ADR-F067 D2/D3) — the parallel queue.
+	// Same generic chrome as the skill queue above (state-filter pills,
+	// monotonic-request-id load guard, ADR-F064 operator-403→hide, content-hash
+	// receipt, Approve / Reject-with-note / Revoke). Only the per-row CONTENT
+	// renderer differs: the frozen POSITIONS render read-only (via
+	// PlaybookPositionsReadonly) instead of raw_yaml/body. -----
+
+	let pbQueueState = $state<OrgSkillVersionState>(DEFAULT_QUEUE_STATE);
+	let pbQueueVersions = $state<OrgPlaybookVersionAdminRead[]>([]);
+	let pbQueueLoading = $state(true);
+	let pbQueueError = $state<string | null>(null);
+	let pbQueueActionError = $state<string | null>(null);
+	/** ADR-F064: the platform operator is 403'd off /admin/org-playbooks by
+	 *  design (tenant-authored content) — the whole section silently hides. */
+	let pbQueueForbidden = $state(false);
+	let pbQueueEverLoaded = $state(false);
+	let pbQueueRequestId = 0;
+	/** id of the version currently expanded to its frozen positions — one at a time. */
+	let pbExpandedId = $state<string | null>(null);
+	let pbActionBusyId = $state<string | null>(null);
+
+	async function loadPbQueue() {
+		const myId = ++pbQueueRequestId;
+		pbQueueLoading = true;
+		pbQueueError = null;
+		try {
+			const resp = await adminApi.listOrgPlaybookVersions(pbQueueState);
+			if (myId !== pbQueueRequestId) return; // superseded by a newer call
+			pbQueueVersions = resp.versions;
+		} catch (e) {
+			if (myId !== pbQueueRequestId) return;
+			if (e instanceof LQAIApiError && e.status === 403) {
+				pbQueueForbidden = true; // ADR-F064 operator exclusion — hide, no error UI.
+			} else {
+				pbQueueError = describeMutationError(e, 'Failed to load the playbook review queue.');
+			}
+		} finally {
+			if (myId === pbQueueRequestId) {
+				pbQueueLoading = false;
+				pbQueueEverLoaded = true;
+			}
+		}
+	}
+
+	function selectPbQueueState(state: OrgSkillVersionState) {
+		if (state === pbQueueState) return;
+		pbQueueState = state;
+		pbExpandedId = null;
+		pbQueueActionError = null;
+		void loadPbQueue();
+	}
+
+	function togglePbExpanded(id: string) {
+		pbExpandedId = pbExpandedId === id ? null : id;
+	}
+
+	async function approvePb(version: OrgPlaybookVersionAdminRead) {
+		pbActionBusyId = version.id;
+		pbQueueActionError = null;
+		try {
+			await adminApi.approveOrgPlaybookVersion(version.id);
+			await loadPbQueue();
+		} catch (e) {
+			pbQueueActionError = describeMutationError(e, 'Could not approve that playbook proposal.');
+		} finally {
+			pbActionBusyId = null;
+		}
+	}
+
+	// ----- Playbook revoke confirm modal -----
+
+	let pbRevokeTarget = $state<OrgPlaybookVersionAdminRead | null>(null);
+	let pbRevokeModalOpen = $state(false);
+	let pbRevokeBusy = $state(false);
+	let pbRevokeError = $state<string | null>(null);
+
+	function openPbRevoke(version: OrgPlaybookVersionAdminRead) {
+		pbRevokeTarget = version;
+		pbRevokeError = null;
+		pbRevokeModalOpen = true;
+	}
+
+	async function confirmPbRevoke() {
+		if (!pbRevokeTarget) return;
+		pbRevokeBusy = true;
+		pbRevokeError = null;
+		try {
+			await adminApi.revokeOrgPlaybookVersion(pbRevokeTarget.id);
+			pbRevokeModalOpen = false;
+			pbRevokeTarget = null;
+			await loadPbQueue();
+		} catch (e) {
+			pbRevokeError = describeMutationError(
+				e,
+				'Could not revoke that playbook version. Please retry.'
+			);
+		} finally {
+			pbRevokeBusy = false;
+		}
+	}
+
+	// ----- Playbook reject-with-note modal -----
+
+	let pbRejectTarget = $state<OrgPlaybookVersionAdminRead | null>(null);
+	let pbRejectModalOpen = $state(false);
+	let pbRejectNote = $state('');
+	let pbRejectBusy = $state(false);
+	let pbRejectError = $state<string | null>(null);
+
+	function openPbReject(version: OrgPlaybookVersionAdminRead) {
+		pbRejectTarget = version;
+		pbRejectNote = '';
+		pbRejectError = null;
+		pbRejectModalOpen = true;
+	}
+
+	async function confirmPbReject() {
+		if (!pbRejectTarget) return;
+		pbRejectBusy = true;
+		pbRejectError = null;
+		try {
+			await adminApi.rejectOrgPlaybookVersion(pbRejectTarget.id, pbRejectNote);
+			pbRejectModalOpen = false;
+			pbRejectTarget = null;
+			await loadPbQueue();
+		} catch (e) {
+			pbRejectError = describeMutationError(
+				e,
+				'Could not reject that playbook proposal. Please retry.'
+			);
+		} finally {
+			pbRejectBusy = false;
+		}
+	}
+
 	onMount(async () => {
 		if (!$auth.user) {
 			goto('/lq-ai/login');
@@ -260,7 +396,7 @@
 			goto('/lq-ai');
 			return;
 		}
-		await Promise.all([load(), loadQueue()]);
+		await Promise.all([load(), loadQueue(), loadPbQueue()]);
 	});
 </script>
 
@@ -278,173 +414,322 @@
 	     Hidden entirely (no error, no empty state) when the queue fetch 403s: the platform
 	     operator is excluded from tenant-authored content by design (ADR-F064). ----- -->
 	{#if queueEverLoaded && !queueForbidden}
-	<section class="mt-6" aria-label="Review queue" data-testid="lq-admin-review-queue">
-		<SectionHeader
-			size="section"
-			title="Review queue"
-			subtitle="Org-authored skills your team proposed for wider adoption."
-			class="mb-3"
-		/>
+		<section class="mt-6" aria-label="Review queue" data-testid="lq-admin-review-queue">
+			<SectionHeader
+				size="section"
+				title="Review queue"
+				subtitle="Org-authored skills your team proposed for wider adoption."
+				class="mb-3"
+			/>
 
-		<div class="mb-3 flex flex-wrap gap-2" role="group" aria-label="Filter by state">
-			{#each STATE_FILTER_PILLS as pill (pill.value)}
-				<Button
-					type="button"
-					size="sm"
-					variant={pill.value === queueState ? 'default' : 'outline'}
-					aria-pressed={pill.value === queueState}
-					onclick={() => selectQueueState(pill.value)}
-					data-testid={`lq-admin-review-queue-filter-${pill.value}`}
-				>
-					{pill.label}
-				</Button>
-			{/each}
-		</div>
-
-		{#if queueActionError}
-			<div class="mb-3"><Alert intent="error">{queueActionError}</Alert></div>
-		{/if}
-
-		{#if queueLoading}
-			<p class="text-sm text-muted-foreground">Loading…</p>
-		{:else if queueError}
-			<Alert intent="error">{queueError}</Alert>
-		{:else if queueVersions.length === 0}
-			<p class="text-sm text-muted-foreground" data-testid="lq-admin-review-queue-empty">
-				{queueEmptyMessage(queueState)}
-			</p>
-		{:else}
-			<div class="flex flex-col gap-3">
-				{#each queueVersions as version (version.id)}
-					<div
-						class="rounded-lg border border-border p-3"
-						data-testid={`lq-admin-org-skill-${version.id}`}
+			<div class="mb-3 flex flex-wrap gap-2" role="group" aria-label="Filter by state">
+				{#each STATE_FILTER_PILLS as pill (pill.value)}
+					<Button
+						type="button"
+						size="sm"
+						variant={pill.value === queueState ? 'default' : 'outline'}
+						aria-pressed={pill.value === queueState}
+						onclick={() => selectQueueState(pill.value)}
+						data-testid={`lq-admin-review-queue-filter-${pill.value}`}
 					>
-						<div class="flex flex-wrap items-start justify-between gap-3">
-							<div class="min-w-0">
-								<button
-									type="button"
-									class="text-sm font-medium text-foreground hover:underline"
-									onclick={() => toggleExpanded(version.id)}
-									data-testid={`lq-admin-org-skill-${version.id}-toggle`}
-								>
-									{version.slug} · v{version.version_no}
-								</button>
-								<p class="mt-0.5 text-xs text-muted-foreground">
-									{version.author_email ?? 'Unknown author'} · proposed {formatDateTime(
-										version.proposed_at
-									)} · {formatSizeBytes(version.size_bytes)} · {truncateHash(version.content_hash)}
-								</p>
-								{#if version.approver_email}
-									<p class="mt-0.5 text-xs text-muted-foreground">
-										{#if version.reviewed_at}
-											Reviewed by {version.approver_email} on {formatDateTime(version.reviewed_at)}
-										{:else}
-											Reviewed by {version.approver_email}
-										{/if}
-									</p>
-								{/if}
-								{#if version.state === 'rejected' && version.review_note}
-									<p class="mt-1 text-xs text-muted-foreground">Note: {version.review_note}</p>
-								{/if}
-							</div>
-							<div class="flex shrink-0 items-center gap-2">
-								{#if version.state === 'proposed'}
-									<Button
-										type="button"
-										size="sm"
-										disabled={actionBusyId === version.id}
-										onclick={() => approve(version)}
-										data-testid={`lq-admin-org-skill-${version.id}-approve`}
-									>
-										{actionBusyId === version.id ? 'Approving…' : 'Approve'}
-									</Button>
-									<Button
-										type="button"
-										size="sm"
-										variant="outline"
-										disabled={actionBusyId === version.id}
-										onclick={() => openReject(version)}
-										data-testid={`lq-admin-org-skill-${version.id}-reject`}
-									>
-										Reject
-									</Button>
-								{:else if version.state === 'approved'}
-									<Button
-										type="button"
-										size="sm"
-										variant="destructive"
-										onclick={() => openRevoke(version)}
-										data-testid={`lq-admin-org-skill-${version.id}-revoke`}
-									>
-										Revoke
-									</Button>
-								{/if}
-							</div>
-						</div>
-
-						{#if expandedId === version.id}
-							<div class="mt-3 border-t border-border pt-3">
-								<div class="mb-2 flex gap-2">
-									<Button
-										type="button"
-										size="sm"
-										variant={expandedView === 'raw' ? 'default' : 'outline'}
-										onclick={() => (expandedView = 'raw')}
-										data-testid={`lq-admin-org-skill-${version.id}-view-raw`}
-									>
-										Raw
-									</Button>
-									<Button
-										type="button"
-										size="sm"
-										variant={expandedView === 'rendered' ? 'default' : 'outline'}
-										onclick={() => (expandedView = 'rendered')}
-										data-testid={`lq-admin-org-skill-${version.id}-view-rendered`}
-									>
-										Rendered
-									</Button>
-								</div>
-								<!-- Full content_hash — the D2 immutability receipt: what the admin
-								     approves is exactly this hash's bytes, so it belongs on the
-								     review surface (the row shows the truncated form). -->
-								<p class="mb-2 text-xs text-muted-foreground">
-									Content hash:
-									<span
-										class="font-mono break-all select-all"
-										data-testid={`lq-admin-org-skill-${version.id}-hash`}>{version.content_hash}</span
-									>
-								</p>
-								{#if expandedView === 'raw'}
-									<p class="mb-1 text-xs text-muted-foreground">
-										The review source of truth — exact bytes, frontmatter then body.
-									</p>
-									<pre
-										class="max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap"
-										data-testid={`lq-admin-org-skill-${version.id}-source`}>{version.raw_yaml}
-
-{version.body}</pre>
-								{:else}
-									<p class="mb-1 text-xs text-muted-foreground">
-										Frontmatter (raw) + body rendered as the agent would read it.
-									</p>
-									<pre
-										class="mb-2 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{version.raw_yaml}</pre>
-									<div
-										class="prose prose-sm dark:prose-invert max-w-none rounded-md border border-border p-3"
-										data-testid={`lq-admin-org-skill-${version.id}-rendered`}
-									>
-										<!-- eslint-disable-next-line svelte/no-at-html-tags — renderModelMarkdown-sanitized -->
-										{@html renderModelMarkdown(version.body)}
-									</div>
-								{/if}
-							</div>
-						{/if}
-					</div>
+						{pill.label}
+					</Button>
 				{/each}
 			</div>
-		{/if}
-	</section>
+
+			{#if queueActionError}
+				<div class="mb-3"><Alert intent="error">{queueActionError}</Alert></div>
+			{/if}
+
+			{#if queueLoading}
+				<p class="text-sm text-muted-foreground">Loading…</p>
+			{:else if queueError}
+				<Alert intent="error">{queueError}</Alert>
+			{:else if queueVersions.length === 0}
+				<p class="text-sm text-muted-foreground" data-testid="lq-admin-review-queue-empty">
+					{queueEmptyMessage(queueState)}
+				</p>
+			{:else}
+				<div class="flex flex-col gap-3">
+					{#each queueVersions as version (version.id)}
+						<div
+							class="rounded-lg border border-border p-3"
+							data-testid={`lq-admin-org-skill-${version.id}`}
+						>
+							<div class="flex flex-wrap items-start justify-between gap-3">
+								<div class="min-w-0">
+									<button
+										type="button"
+										class="text-sm font-medium text-foreground hover:underline"
+										onclick={() => toggleExpanded(version.id)}
+										data-testid={`lq-admin-org-skill-${version.id}-toggle`}
+									>
+										{version.slug} · v{version.version_no}
+									</button>
+									<p class="mt-0.5 text-xs text-muted-foreground">
+										{version.author_email ?? 'Unknown author'} · proposed {formatDateTime(
+											version.proposed_at
+										)} · {formatSizeBytes(version.size_bytes)} · {truncateHash(
+											version.content_hash
+										)}
+									</p>
+									{#if version.approver_email}
+										<p class="mt-0.5 text-xs text-muted-foreground">
+											{#if version.reviewed_at}
+												Reviewed by {version.approver_email} on {formatDateTime(
+													version.reviewed_at
+												)}
+											{:else}
+												Reviewed by {version.approver_email}
+											{/if}
+										</p>
+									{/if}
+									{#if version.state === 'rejected' && version.review_note}
+										<p class="mt-1 text-xs text-muted-foreground">Note: {version.review_note}</p>
+									{/if}
+								</div>
+								<div class="flex shrink-0 items-center gap-2">
+									{#if version.state === 'proposed'}
+										<Button
+											type="button"
+											size="sm"
+											disabled={actionBusyId === version.id}
+											onclick={() => approve(version)}
+											data-testid={`lq-admin-org-skill-${version.id}-approve`}
+										>
+											{actionBusyId === version.id ? 'Approving…' : 'Approve'}
+										</Button>
+										<Button
+											type="button"
+											size="sm"
+											variant="outline"
+											disabled={actionBusyId === version.id}
+											onclick={() => openReject(version)}
+											data-testid={`lq-admin-org-skill-${version.id}-reject`}
+										>
+											Reject
+										</Button>
+									{:else if version.state === 'approved'}
+										<Button
+											type="button"
+											size="sm"
+											variant="destructive"
+											onclick={() => openRevoke(version)}
+											data-testid={`lq-admin-org-skill-${version.id}-revoke`}
+										>
+											Revoke
+										</Button>
+									{/if}
+								</div>
+							</div>
+
+							{#if expandedId === version.id}
+								<div class="mt-3 border-t border-border pt-3">
+									<div class="mb-2 flex gap-2">
+										<Button
+											type="button"
+											size="sm"
+											variant={expandedView === 'raw' ? 'default' : 'outline'}
+											onclick={() => (expandedView = 'raw')}
+											data-testid={`lq-admin-org-skill-${version.id}-view-raw`}
+										>
+											Raw
+										</Button>
+										<Button
+											type="button"
+											size="sm"
+											variant={expandedView === 'rendered' ? 'default' : 'outline'}
+											onclick={() => (expandedView = 'rendered')}
+											data-testid={`lq-admin-org-skill-${version.id}-view-rendered`}
+										>
+											Rendered
+										</Button>
+									</div>
+									<!-- Full content_hash — the D2 immutability receipt: what the admin
+								     approves is exactly this hash's bytes, so it belongs on the
+								     review surface (the row shows the truncated form). -->
+									<p class="mb-2 text-xs text-muted-foreground">
+										Content hash:
+										<span
+											class="font-mono break-all select-all"
+											data-testid={`lq-admin-org-skill-${version.id}-hash`}
+											>{version.content_hash}</span
+										>
+									</p>
+									{#if expandedView === 'raw'}
+										<p class="mb-1 text-xs text-muted-foreground">
+											The review source of truth — exact bytes, frontmatter then body.
+										</p>
+										<pre
+											class="max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap"
+											data-testid={`lq-admin-org-skill-${version.id}-source`}>{version.raw_yaml}
+
+{version.body}</pre>
+									{:else}
+										<p class="mb-1 text-xs text-muted-foreground">
+											Frontmatter (raw) + body rendered as the agent would read it.
+										</p>
+										<pre
+											class="mb-2 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{version.raw_yaml}</pre>
+										<div
+											class="prose prose-sm dark:prose-invert max-w-none rounded-md border border-border p-3"
+											data-testid={`lq-admin-org-skill-${version.id}-rendered`}
+										>
+											<!-- eslint-disable-next-line svelte/no-at-html-tags — renderModelMarkdown-sanitized -->
+											{@html renderModelMarkdown(version.body)}
+										</div>
+									{/if}
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</section>
+	{/if}
+
+	<!-- ----- Playbook review queue (B-4, ADR-F067 D2/D3) — the parallel queue.
+	     Same operator-403-hide (ADR-F064) posture as the skill queue above. The
+	     per-row content is the FROZEN positions rendered read-only, never the
+	     live editable playbook. ----- -->
+	{#if pbQueueEverLoaded && !pbQueueForbidden}
+		<section class="mt-6" aria-label="Playbook review queue" data-testid="lq-admin-pb-review-queue">
+			<SectionHeader
+				size="section"
+				title="Playbook review queue"
+				subtitle="Org-authored playbooks your team proposed for wider adoption."
+				class="mb-3"
+			/>
+
+			<div class="mb-3 flex flex-wrap gap-2" role="group" aria-label="Filter playbooks by state">
+				{#each STATE_FILTER_PILLS as pill (pill.value)}
+					<Button
+						type="button"
+						size="sm"
+						variant={pill.value === pbQueueState ? 'default' : 'outline'}
+						aria-pressed={pill.value === pbQueueState}
+						onclick={() => selectPbQueueState(pill.value)}
+						data-testid={`lq-admin-pb-review-queue-filter-${pill.value}`}
+					>
+						{pill.label}
+					</Button>
+				{/each}
+			</div>
+
+			{#if pbQueueActionError}
+				<div class="mb-3"><Alert intent="error">{pbQueueActionError}</Alert></div>
+			{/if}
+
+			{#if pbQueueLoading}
+				<p class="text-sm text-muted-foreground">Loading…</p>
+			{:else if pbQueueError}
+				<Alert intent="error">{pbQueueError}</Alert>
+			{:else if pbQueueVersions.length === 0}
+				<p class="text-sm text-muted-foreground" data-testid="lq-admin-pb-review-queue-empty">
+					{queueEmptyMessage(pbQueueState)}
+				</p>
+			{:else}
+				<div class="flex flex-col gap-3">
+					{#each pbQueueVersions as version (version.id)}
+						<div
+							class="rounded-lg border border-border p-3"
+							data-testid={`lq-admin-org-playbook-${version.id}`}
+						>
+							<div class="flex flex-wrap items-start justify-between gap-3">
+								<div class="min-w-0">
+									<button
+										type="button"
+										class="text-sm font-medium text-foreground hover:underline"
+										onclick={() => togglePbExpanded(version.id)}
+										data-testid={`lq-admin-org-playbook-${version.id}-toggle`}
+									>
+										{version.name} · v{version.version_no}
+									</button>
+									<p class="mt-0.5 text-xs text-muted-foreground">
+										{version.author_email ?? 'Unknown author'} · proposed {formatDateTime(
+											version.proposed_at
+										)} · {formatSizeBytes(version.size_bytes)} · {truncateHash(
+											version.content_hash
+										)}
+									</p>
+									{#if version.approver_email}
+										<p class="mt-0.5 text-xs text-muted-foreground">
+											{#if version.reviewed_at}
+												Reviewed by {version.approver_email} on {formatDateTime(
+													version.reviewed_at
+												)}
+											{:else}
+												Reviewed by {version.approver_email}
+											{/if}
+										</p>
+									{/if}
+									{#if version.state === 'rejected' && version.review_note}
+										<p class="mt-1 text-xs text-muted-foreground">Note: {version.review_note}</p>
+									{/if}
+								</div>
+								<div class="flex shrink-0 items-center gap-2">
+									{#if version.state === 'proposed'}
+										<Button
+											type="button"
+											size="sm"
+											disabled={pbActionBusyId === version.id}
+											onclick={() => approvePb(version)}
+											data-testid={`lq-admin-org-playbook-${version.id}-approve`}
+										>
+											{pbActionBusyId === version.id ? 'Approving…' : 'Approve'}
+										</Button>
+										<Button
+											type="button"
+											size="sm"
+											variant="outline"
+											disabled={pbActionBusyId === version.id}
+											onclick={() => openPbReject(version)}
+											data-testid={`lq-admin-org-playbook-${version.id}-reject`}
+										>
+											Reject
+										</Button>
+									{:else if version.state === 'approved'}
+										<Button
+											type="button"
+											size="sm"
+											variant="destructive"
+											onclick={() => openPbRevoke(version)}
+											data-testid={`lq-admin-org-playbook-${version.id}-revoke`}
+										>
+											Revoke
+										</Button>
+									{/if}
+								</div>
+							</div>
+
+							{#if pbExpandedId === version.id}
+								<div class="mt-3 border-t border-border pt-3">
+									<p class="mb-2 text-xs text-muted-foreground">
+										{version.contract_type} · {version.position_count} position{version.position_count ===
+										1
+											? ''
+											: 's'}
+									</p>
+									<!-- Full content_hash — the D2 immutability receipt: what the admin
+								     approves is exactly this hash's bytes (the row shows the truncated form). -->
+									<p class="mb-2 text-xs text-muted-foreground">
+										Content hash:
+										<span
+											class="font-mono break-all select-all"
+											data-testid={`lq-admin-org-playbook-${version.id}-hash`}
+											>{version.content_hash}</span
+										>
+									</p>
+									<div data-testid={`lq-admin-org-playbook-${version.id}-positions`}>
+										<PlaybookPositionsReadonly positions={version.positions} />
+									</div>
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</section>
 	{/if}
 
 	{#if loading}
@@ -520,7 +805,11 @@
 	{/if}
 </PageShell>
 
-<ModalShell bind:open={removeModalOpen} title="Remove from your Library?" contentClass="sm:max-w-md">
+<ModalShell
+	bind:open={removeModalOpen}
+	title="Remove from your Library?"
+	contentClass="sm:max-w-md"
+>
 	{#if removeTarget}
 		{@const areaNames = whereUsedFor(whereUsedMap, removeTarget)}
 		<div class="flex flex-col gap-2 text-sm">
@@ -613,9 +902,9 @@
 				{revokeTarget.slug} · v{revokeTarget.version_no}, approved for org-wide use.
 			</p>
 			<p class="text-muted-foreground">
-				Agents across your company stop loading this skill immediately — it fails closed at the
-				next run. The Library entry and any practice-area bindings stay visible but show as
-				unavailable until you remove or replace them. The author keeps their personal copy.
+				Agents across your company stop loading this skill immediately — it fails closed at the next
+				run. The Library entry and any practice-area bindings stay visible but show as unavailable
+				until you remove or replace them. The author keeps their personal copy.
 			</p>
 			{#if revokeError}
 				<Alert intent="error">{revokeError}</Alert>
@@ -640,6 +929,97 @@
 			data-testid="lq-admin-org-skill-revoke-confirm"
 		>
 			{revokeBusy ? 'Revoking…' : 'Revoke'}
+		</Button>
+	{/snippet}
+</ModalShell>
+
+<ModalShell
+	bind:open={pbRejectModalOpen}
+	title="Reject this playbook proposal?"
+	contentClass="sm:max-w-md"
+>
+	{#if pbRejectTarget}
+		<div class="flex flex-col gap-3 text-sm">
+			<p class="text-foreground">
+				{pbRejectTarget.name} · v{pbRejectTarget.version_no}, proposed by {pbRejectTarget.author_email ??
+					'an unknown author'}.
+			</p>
+			<FormControl id="lq-admin-pb-review-queue-reject-note" label="Note to the author" optional>
+				<Textarea
+					id="lq-admin-pb-review-queue-reject-note"
+					bind:value={pbRejectNote}
+					rows={4}
+					maxlength={2000}
+					placeholder="Why this isn't ready yet…"
+					disabled={pbRejectBusy}
+					data-testid="lq-admin-pb-review-queue-reject-note"
+				/>
+			</FormControl>
+			{#if pbRejectError}
+				<Alert intent="error">{pbRejectError}</Alert>
+			{/if}
+		</div>
+	{/if}
+	{#snippet footer()}
+		<Button
+			type="button"
+			variant="ghost"
+			disabled={pbRejectBusy}
+			onclick={() => (pbRejectModalOpen = false)}
+			data-testid="lq-admin-pb-review-queue-reject-cancel"
+		>
+			Cancel
+		</Button>
+		<Button
+			type="button"
+			variant="destructive"
+			disabled={pbRejectBusy}
+			onclick={confirmPbReject}
+			data-testid="lq-admin-pb-review-queue-reject-confirm"
+		>
+			{pbRejectBusy ? 'Rejecting…' : 'Reject'}
+		</Button>
+	{/snippet}
+</ModalShell>
+
+<ModalShell
+	bind:open={pbRevokeModalOpen}
+	title={pbRevokeTarget ? `Revoke ${pbRevokeTarget.name}?` : 'Revoke this version?'}
+	contentClass="sm:max-w-md"
+>
+	{#if pbRevokeTarget}
+		<div class="flex flex-col gap-2 text-sm">
+			<p class="text-foreground">
+				{pbRevokeTarget.name} · v{pbRevokeTarget.version_no}, approved for org-wide use.
+			</p>
+			<p class="text-muted-foreground">
+				Agents across your company stop loading this playbook immediately — it fails closed at the
+				next run. The Library entry and any practice-area bindings stay visible but show as
+				unavailable until you remove or replace them. The author keeps their personal copy.
+			</p>
+			{#if pbRevokeError}
+				<Alert intent="error">{pbRevokeError}</Alert>
+			{/if}
+		</div>
+	{/if}
+	{#snippet footer()}
+		<Button
+			type="button"
+			variant="ghost"
+			disabled={pbRevokeBusy}
+			onclick={() => (pbRevokeModalOpen = false)}
+			data-testid="lq-admin-org-playbook-revoke-cancel"
+		>
+			Cancel
+		</Button>
+		<Button
+			type="button"
+			variant="destructive"
+			disabled={pbRevokeBusy}
+			onclick={confirmPbRevoke}
+			data-testid="lq-admin-org-playbook-revoke-confirm"
+		>
+			{pbRevokeBusy ? 'Revoking…' : 'Revoke'}
 		</Button>
 	{/snippet}
 </ModalShell>

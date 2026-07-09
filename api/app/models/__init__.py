@@ -29,6 +29,7 @@ from app.models.enhance_prompt import EnhancePromptInteraction
 from app.models.file import File
 from app.models.inference import InferenceRoutingLog
 from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
+from app.models.org_playbook_version import OrgPlaybookVersion
 from app.models.org_skill import OrgSkillVersion
 from app.models.organization_profile import OrganizationProfile
 from app.models.playbook import Playbook, PlaybookExecution, PlaybookPosition
@@ -69,6 +70,7 @@ __all__ = [
     "KnowledgeBaseFile",
     "MatterMemoryEntry",
     "Message",
+    "OrgPlaybookVersion",
     "OrgSkillVersion",
     "OrganizationProfile",
     "Playbook",

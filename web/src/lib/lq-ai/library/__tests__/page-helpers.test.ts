@@ -39,9 +39,9 @@ describe('provenanceBadge', () => {
 	});
 
 	it('renders a community badge with author + version appended', () => {
-		expect(
-			provenanceBadge({ source: 'community', author: 'Jamie Tso', version: '1.0.0' })
-		).toBe('Community · Jamie Tso · v1.0.0');
+		expect(provenanceBadge({ source: 'community', author: 'Jamie Tso', version: '1.0.0' })).toBe(
+			'Community · Jamie Tso · v1.0.0'
+		);
 	});
 
 	it('renders author-only (no version) correctly', () => {
@@ -68,9 +68,9 @@ describe('provenanceBadge', () => {
 
 	// B-2b (ADR-F067 D2/D3, D3.5 wire gap) — org-authored provenance badge.
 	it('renders "Org-authored · {author} · approved by {approver}" for an org skill', () => {
-		expect(
-			provenanceBadge({ source: 'org', author: 'Jamie Tso', approver: 'Alex Admin' })
-		).toBe('Org-authored · Jamie Tso · approved by Alex Admin');
+		expect(provenanceBadge({ source: 'org', author: 'Jamie Tso', approver: 'Alex Admin' })).toBe(
+			'Org-authored · Jamie Tso · approved by Alex Admin'
+		);
 	});
 
 	it('omits the approved-by clause when approver is absent', () => {
@@ -86,15 +86,31 @@ describe('provenanceBadge', () => {
 	});
 
 	it('renders the bare source label when neither author nor approver is present', () => {
-		expect(provenanceBadge({ source: 'org', author: null, approver: null })).toBe(
-			'Org-authored'
-		);
+		expect(provenanceBadge({ source: 'org', author: null, approver: null })).toBe('Org-authored');
 	});
 
 	it('never appends a version bit for an org skill even when version is present', () => {
 		expect(
 			provenanceBadge({ source: 'org', author: 'Jamie Tso', version: '1.0.0', approver: null })
 		).toBe('Org-authored · Jamie Tso');
+	});
+
+	// B-4 (ADR-F067 D2/D3) — an approved org-authored PLAYBOOK entry gets the
+	// same badge automatically (provenanceBadge is kind-generic; the backend now
+	// emits source='org'+author+approver for approved org playbooks).
+	it('renders the org badge for an approved org playbook entry (kind-generic, B-4)', () => {
+		expect(
+			provenanceBadge(
+				entry({
+					kind: 'playbook',
+					key: 'pb-1',
+					source: 'org',
+					author: 'Jamie Tso',
+					version: '2',
+					approver: 'Alex Admin'
+				})
+			)
+		).toBe('Org-authored · Jamie Tso · approved by Alex Admin');
 	});
 });
 

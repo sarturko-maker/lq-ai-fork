@@ -347,6 +347,14 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/admin/org-skills/{version_id}/approve"),
     ("POST", "/api/v1/admin/org-skills/{version_id}/reject"),
     ("POST", "/api/v1/admin/org-skills/{version_id}/revoke"),
+    # B-4 (ADR-F067 D2/D3) — org-playbooks harness: propose + proposals + review + transitions.
+    # Dedicated coverage in tests/test_org_playbook_harness_api.py.
+    ("POST", "/api/v1/playbooks/{playbook_id}/propose"),
+    ("GET", "/api/v1/playbooks/{playbook_id}/proposals"),
+    ("GET", "/api/v1/admin/org-playbooks"),
+    ("POST", "/api/v1/admin/org-playbooks/{version_id}/approve"),
+    ("POST", "/api/v1/admin/org-playbooks/{version_id}/reject"),
+    ("POST", "/api/v1/admin/org-playbooks/{version_id}/revoke"),
     # Wave D.2 — sandbox ensure, skills autocomplete, user-skill versions, KB files
     ("POST", "/api/v1/projects/sandbox/ensure"),
     ("GET", "/api/v1/skills/autocomplete"),

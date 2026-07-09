@@ -328,3 +328,62 @@ worth recording, all within the D1 envelope:
    catalog / member Library / matter panel) shipped in B-3.
    **B-3b shipped 2026-07-08 (PR #247):** the Store/Library knowledge sections, the area-detail
    bind card, and the matter-panel TS type honesty landed — web-only, no `api/` changes.
+
+## Implementation addendum — B-4 (2026-07-09, appended; the decisions above are unchanged)
+
+The org-authored **playbook** harness for kind=playbook landed as slice B-4 (migration 0095,
+`org_playbook_versions`). It applies D2/D3 to a GUIDANCE-DATA kind. The calls that DIVERGE from the
+skill harness (and would surprise a future reader) are recorded here.
+
+1. **No frontmatter allowlist — the D3.3 layer collapses to nothing.** A playbook is a
+   pre-validated CLOSED Pydantic shape (`PlaybookCreate`/`PositionCreate` are `extra='forbid'`) and
+   is rendered behind the ALREADY-existing `PRACTICE_PLAYBOOK_PROMPT` data-only fence
+   (`composition.py:380`). There is no free-form key bag, no `allowed-tools` steering surface (D1
+   classes it GUIDANCE-DATA, not INSTRUCTION), so the closed-schema check has no analogue and is
+   deliberately dropped. Every OTHER D3 control still applies in full: mandatory human approve,
+   immutable content-hash-pinned snapshot, the D3.6 size cap (32 KiB over the canonical positions
+   payload), provenance-at-point-of-use, revoke fail-close, body-free audit.
+
+2. **The snapshot is keyed by `playbook_id` (a stable UUID), not a slug — and it is a PLAIN column,
+   not an FK.** Like `org_skill_versions.slug`, the adoption key must survive the source row's
+   deletion. `content_hash` is sha256 over a CANONICAL positions+header JSON
+   (`playbook_proposal.canonicalize_positions`: positions ordered by `(position_order, canonical
+   JSON)` — never by `id`, which would make semantically-equal input hash differently; fallback
+   tiers by `rank`; keys sorted; total over malformed untrusted tiers). There is no slug-collision /
+   no-shadowing question (each row is unambiguously built-in or org by its own `created_by`).
+
+3. **FULL SKILLS PARITY (maintainer decision, 2026-07-09) — the runtime renders the approved
+   SNAPSHOT, never the live row, and resolves it INDEPENDENT of the live row.** `build_area_inventory`
+   gains a `bound_playbook_keys` enumeration source (the area's `practice_area_playbooks` ids) plus
+   an optional `org_playbook_snapshots` map (fail-closed `{}` default): a built-in
+   (`created_by IS NULL`) resolves LIVE (`source=None`); an org-authored playbook resolves from its
+   approved snapshot; anything else (never/not-yet approved, revoked, or a deleted built-in) is
+   dropped fail-closed with the `org_playbook_unresolved_skipped` warning (the D3.8 revoke signal for
+   playbooks). Consequences: an author soft-deleting their source playbook CANNOT yank an
+   admin-approved capability (only an admin revoke removes it), and the catalog/adopt path lists only
+   built-in + approved-org playbooks (a user's un-approved playbook never appears org-wide). The
+   render seam (`composition._resolve_practice_playbook_render`) feeds the frozen positions of org
+   playbooks — plus a per-playbook `> Provenance: …` line (D3.5, injected in-tier since a playbook
+   has no SKILL.md body to prefix) — to the SAME `render_practice_playbook` as built-in live rows.
+   Both callers of the pure inventory (`composition` + `matter_capabilities`) pass the snapshot map,
+   so the cockpit panel and the agent never disagree.
+
+4. **Fence-delimiter hardening.** B-4 is the first slice routing ANY authenticated author's text
+   through the Practice Playbook fence, so `render_practice_playbook` DEFANGS every rendered field of
+   an org snapshot (collapse whitespace — no embedded newline can start a `----- END … -----` marker
+   line; shorten 3+ hyphen runs — no run can form a marker rule). Built-in (shipped/trusted) rows are
+   NOT defanged, so their output stays byte-identical to pre-B-4.
+
+5. **Per-kind transition handlers are intentionally CLONED, not merged.** The
+   approve/reject/revoke handlers (incl. the FOR-UPDATE lock and the mandatory two-step
+   supersede-then-flush against the one-approved-per-key partial index) are near-duplicates of the
+   skill handlers, differing only in the ORM model, the content/size computation, and the audit key
+   (`kind='playbook'`, `resource_type='org_playbook_version'`). A generic over two ORM classes fights
+   SQLAlchemy/mypy typing and would touch the shipped skill path; the duplication is a deliberate
+   trade recorded here (audit rows stay body-free either way).
+
+6. **Upgrade-day behavior change (no backfill).** An org-authored playbook already adopted+bound in a
+   pre-B-4 deployment (no snapshot yet) fail-closes on the first run after B-4 until an admin
+   proposes+approves it — the literal "invisible until re-approval" invariant, made visible on
+   upgrade day. No shipped playbook is bound by default and fresh orgs are unaffected; a one-time
+   auto-approve backfill was deliberately declined.

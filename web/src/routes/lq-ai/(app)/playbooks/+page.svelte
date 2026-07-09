@@ -1,16 +1,24 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
 	import { titleFor } from '$lib/lq-ai/branding/store';
-	import { listPlaybooks } from '$lib/lq-ai/api/playbooks';
+	import { listPlaybooks, listPlaybookProposals, proposePlaybook } from '$lib/lq-ai/api/playbooks';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
+	import { auth } from '$lib/lq-ai/auth/store';
 	import PlaybookDisclaimerBanner from '$lib/lq-ai/components/PlaybookDisclaimerBanner.svelte';
 	import PlaybookExecuteModal from '$lib/lq-ai/components/PlaybookExecuteModal.svelte';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
-	import type { Playbook } from '$lib/lq-ai/types';
+	import type { OrgSkillVersionState, Playbook } from '$lib/lq-ai/types';
 
-	import { sortPlaybooksByName, formatVersion } from './page-helpers';
+	import {
+		canProposePlaybook,
+		describeMutationError,
+		formatVersion,
+		isOpenProposalConflict,
+		proposePlaybookSuccessMessage,
+		sortPlaybooksByName
+	} from './page-helpers';
 
 	let playbooks: Playbook[] = [];
 	let loading = false;
@@ -18,16 +26,96 @@
 
 	let selectedPlaybook: Playbook | null = null;
 
+	// ADR-F067 D2/D3 (B-4) — "Propose to Library" row action, mirroring the
+	// skill harness's B-2b propose flow.
+	$: currentUserId = $auth.user?.id ?? null;
+	let proposingId: string | null = null;
+	let proposeSuccess: string | null = null;
+	let proposeSuccessTimer: ReturnType<typeof setTimeout> | null = null;
+	let actionError: string | null = null;
+	// Rows locked after an "open proposal already exists" 409 — disabled +
+	// tooltip until the caller reloads (deliberately NOT precomputed).
+	let lockedRowIds = new Set<string>();
+	let lockedTooltips = new Map<string, string>();
+	// Inline proposal-STATUS chip per row (playbooks have no [id]/edit history
+	// route). Lazily fetched for OWNED rows only after the table renders — a
+	// bounded N+1 (a user authors few playbooks), best-effort, failures silent.
+	let proposalStatus = new Map<string, { state: OrgSkillVersionState; version_no: number }>();
+
 	async function load(): Promise<void> {
 		loading = true;
 		listError = null;
 		try {
 			const fetched = await listPlaybooks();
 			playbooks = sortPlaybooksByName(fetched);
+			void loadProposalStatuses(playbooks);
 		} catch (err) {
 			listError = err instanceof LQAIApiError ? err.message : 'Failed to load playbooks.';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadProposalStatuses(rows: Playbook[]): Promise<void> {
+		const uid = $auth.user?.id ?? null;
+		const owned = rows.filter((p) => canProposePlaybook(p, uid));
+		await Promise.all(
+			owned.map(async (p) => {
+				try {
+					const proposals = await listPlaybookProposals(p.id);
+					if (proposals.length > 0) {
+						const latest = proposals[0]; // GET returns newest version first
+						proposalStatus = new Map(proposalStatus).set(p.id, {
+							state: latest.state,
+							version_no: latest.version_no
+						});
+					}
+				} catch {
+					// Best-effort — a missing/forbidden history just yields no chip.
+				}
+			})
+		);
+	}
+
+	async function propose(p: Playbook): Promise<void> {
+		proposingId = p.id;
+		actionError = null;
+		try {
+			const res = await proposePlaybook(p.id);
+			if (proposeSuccessTimer) clearTimeout(proposeSuccessTimer);
+			proposeSuccess = proposePlaybookSuccessMessage(p.name, res);
+			proposeSuccessTimer = setTimeout(() => {
+				proposeSuccess = null;
+				proposeSuccessTimer = null;
+			}, 8000);
+			proposalStatus = new Map(proposalStatus).set(p.id, {
+				state: res.state,
+				version_no: res.version_no
+			});
+		} catch (e) {
+			console.error('playbooks: propose failed', e);
+			actionError = describeMutationError(e, 'Failed to propose this playbook to the Library.');
+			if (isOpenProposalConflict(e)) {
+				lockedRowIds = new Set(lockedRowIds).add(p.id);
+				lockedTooltips = new Map(lockedTooltips).set(p.id, actionError);
+			}
+		} finally {
+			proposingId = null;
+		}
+	}
+
+	function statusLabel(state: OrgSkillVersionState): string {
+		switch (state) {
+			case 'proposed':
+				return 'Proposed';
+			case 'approved':
+				return 'Approved';
+			case 'rejected':
+				return 'Rejected';
+			case 'superseded':
+				return 'Superseded';
+			case 'revoked':
+				return 'Revoked';
 		}
 	}
 
@@ -40,6 +128,10 @@
 	}
 
 	onMount(load);
+
+	onDestroy(() => {
+		if (proposeSuccessTimer) clearTimeout(proposeSuccessTimer);
+	});
 </script>
 
 <svelte:head>
@@ -68,6 +160,21 @@
 
 		<PlaybookDisclaimerBanner />
 
+		{#if actionError}
+			<div class="lq-playbooks-page__error" role="alert" data-testid="lq-playbook-action-error">
+				{actionError}
+			</div>
+		{/if}
+		{#if proposeSuccess}
+			<div
+				class="lq-playbooks-page__success"
+				role="status"
+				data-testid="lq-playbook-propose-success"
+			>
+				{proposeSuccess}
+			</div>
+		{/if}
+
 		{#if loading}
 			<div class="lq-playbooks-page__state" data-testid="lq-playbooks-loading">Loading…</div>
 		{:else if listError}
@@ -92,7 +199,20 @@
 					{#each playbooks as p (p.id)}
 						<tr data-testid="lq-playbook-row" data-playbook-id={p.id}>
 							<td class="lq-playbooks-table__name">
-								<div class="lq-playbooks-table__name-text">{p.name}</div>
+								<div class="lq-playbooks-table__name-text">
+									{p.name}
+									{#if proposalStatus.has(p.id)}
+										{@const st = proposalStatus.get(p.id)}
+										{#if st}
+											<span
+												class="lq-playbook-status lq-playbook-status--{st.state}"
+												data-testid="lq-playbook-proposal-status"
+											>
+												{statusLabel(st.state)} · v{st.version_no}
+											</span>
+										{/if}
+									{/if}
+								</div>
 								{#if p.description}
 									<div class="lq-playbooks-table__desc">{p.description}</div>
 								{/if}
@@ -100,6 +220,22 @@
 							<td class="lq-playbooks-table__compact">{p.contract_type}</td>
 							<td class="lq-playbooks-table__compact">{formatVersion(p.version)}</td>
 							<td class="lq-playbooks-table__actions">
+								{#if canProposePlaybook(p, currentUserId)}
+									<button
+										type="button"
+										class="lq-playbooks-table__propose"
+										data-testid="lq-playbook-propose"
+										on:click={() => propose(p)}
+										disabled={proposingId === p.id || lockedRowIds.has(p.id)}
+										title={lockedRowIds.has(p.id) ? lockedTooltips.get(p.id) : undefined}
+									>
+										{proposingId === p.id
+											? 'Proposing…'
+											: lockedRowIds.has(p.id)
+												? 'Proposal open'
+												: 'Propose to Library'}
+									</button>
+								{/if}
 								<button
 									type="button"
 									class="lq-playbooks-table__apply"
@@ -170,6 +306,14 @@
 		background: var(--status-failed-wash);
 		border: 1px solid var(--destructive);
 	}
+	.lq-playbooks-page__success {
+		padding: 0.75rem 1rem;
+		color: var(--foreground);
+		background: var(--muted);
+		border: 1px solid var(--border);
+		border-radius: 0.5rem;
+		font-size: 0.875rem;
+	}
 	.lq-playbooks-table {
 		width: 100%;
 		border-collapse: collapse;
@@ -226,5 +370,39 @@
 	}
 	.lq-playbooks-table__apply:hover {
 		opacity: 0.9;
+	}
+	.lq-playbooks-table__propose {
+		padding: 0.375rem 0.75rem;
+		margin-right: 0.375rem;
+		background: transparent;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		border-radius: 0.375rem;
+		cursor: pointer;
+		font-size: 0.875rem;
+		font-weight: 500;
+	}
+	.lq-playbooks-table__propose:hover {
+		background: var(--muted);
+	}
+	.lq-playbooks-table__propose:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
+	.lq-playbook-status {
+		display: inline-flex;
+		align-items: center;
+		margin-left: 0.5rem;
+		padding: 1px 8px;
+		border-radius: var(--lq-radius-pill, 999px);
+		font-size: 0.6875rem;
+		font-weight: 500;
+		vertical-align: middle;
+		background: var(--muted);
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+	}
+	.lq-playbook-status--approved {
+		color: var(--foreground);
 	}
 </style>
