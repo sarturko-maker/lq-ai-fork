@@ -187,6 +187,19 @@ skill subsets — in a form, never a JSON textarea (replaces SETUP-4b's D6 roste
   step in the run timeline reflects the edit (fan-out remains model-chosen — a shape-miss is a
   finding per ADR-F015, not a failure).
 - **Dependencies:** none (existing PATCH path). Parallel with everything.
+- **Status: SHIPPED (2026-07-09, branch `b5-subagent-roster-ui`).** Web-only, **zero `api/` change, no
+  migration, no new route**. The raw `agent_config` JSON textarea → a per-sub-agent form (name /
+  "When to use this sub-agent" = `description` / Instructions = `system_prompt` / a skills checklist
+  bounded to `area.bound_skills`, ADR-F017); Add/Remove rows. Save is one whole-object PATCH via
+  `rosterToAgentConfig`, PRESERVING the by-reference `playbooks`/`mcp_servers` passthrough; a forged
+  `model`/`tools` key is structurally impossible from the form and still **400** at the boundary (the
+  validator raises `ValueError` → `ValidationError` → HTTP 400, NOT 422 — the "422" in the verification
+  note above is corrected). Pure helpers in `page-helpers.ts`
+  (`agentConfigToRoster`/`serializeSubagents`/`rosterToAgentConfig`/`rosterDirty`/`rosterErrors` +
+  immutable transforms), 69-test suite; `parseRosterDraft` (D6) retired. No new ADR (UX over the
+  unchanged F010/F016/F017 contract). Gate: svelte-check 0 · vitest 113 files/1311 · slice eslint clean;
+  deterministic Cypress `b5-subagent-roster.cy.ts`; the maintainer's behavioural-marker fan-out UAT is
+  the live acceptance, on record. Plan: `docs/fork/plans/B5-subagent-roster-ui.md`.
 
 ## B-6 — human-in-the-loop: research spike → ADR → policy slice
 

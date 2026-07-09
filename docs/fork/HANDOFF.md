@@ -297,6 +297,44 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   "unused selector" — tint via the parent + `currentColor`. (3) adding a REQUIRED field to
 >   `PracticeArea` (TS) breaks every `area()` test fixture (3 files) — update them. (4) the app's
 >   `ValidationError` → 400, NOT 422 (the pydantic-boundary 422 is a different path).
+> - **HITL-3 MERGED as PR #251 `0fac8b2b` (2026-07-09, CI 3/3 green: API 20m/Gateway/Web).** Local main
+>   fetched to `0fac8b2b`; merged remote branch `b6-hitl-3-confirm-card` left up (delete blocked by
+>   auto-classifier — harmless). Real-model `apply_redline` browser UAT stays the maintainer's session.
+> - **B-5 ✓ SHIPPED (branch `b5-subagent-roster-ui`, off main `0fac8b2b`; task pending; plan
+>   `docs/fork/plans/B5-subagent-roster-ui.md`) — the sub-agent roster admin form. WEB-ONLY: zero `api/`
+>   change, no migration, no new route, no new ADR.** Surfaces ADR-F034's fan-out roster (replaces
+>   SETUP-4b's D6 raw-`agent_config`-JSON textarea on `admin/areas/[key]` with a per-sub-agent form):
+>   name / "When to use this sub-agent" (`description`) / Instructions (`system_prompt`) / a skills
+>   checklist bounded to `area.bound_skills` (ADR-F017); Add/Remove rows; controlled inputs
+>   (`value`+`oninput`/`onchange`, immutable state — the HITL card's pattern). Save is ONE whole-object
+>   PATCH via `rosterToAgentConfig(draft, area.agent_config)` — the serialized roster spliced into a COPY
+>   of the current config, so by-reference `playbooks`/`mcp_servers` PASSTHROUGH survives; a forged
+>   `model`/`tools` key is structurally impossible from the form and still **400** at the boundary. The
+>   validator `build_area_subagents` (`area_agent.py`) already runs at the PATCH boundary (write-time 400,
+>   not run-time) so NO backend touch — existing `test_practice_areas.py` roster tests (forged-model 400,
+>   skill-outside-area 400, subset accept, round-trip) are the standing contract proof. Pure helpers in
+>   `page-helpers.ts` (`agentConfigToRoster` KEEPS `system_prompt` unlike the cockpit `areaSubagents`
+>   projection; `serializeSubagents` trims + omits-empty-skills; `rosterToAgentConfig`; `rosterDirty`
+>   round-trip/whitespace-normalised; `rosterErrors` = required fields + skills⊆bound + client-only
+>   unique-name gate; immutable add/remove/update/toggleSkill) — **69-test** `[key]` suite; `parseRosterDraft`
+>   (D6) + `RosterParseResult` RETIRED. Gate: **svelte-check 0 · vitest 113 files/1311 (baseline 1290;
+>   +25 −4) · slice eslint clean**; web container rebuilt+healthy; deterministic Cypress
+>   `b5-subagent-roster.cy.ts` (seeded roster renders as rows → edit instructions → PATCH body asserts
+>   edited system_prompt + all 3 subs + playbooks passthrough + NO model/tools → Add surfaces the
+>   required-field gate) — NOT run headed here (same login-creds blocker as HITL-3; runs green with
+>   `LQAI_ADMIN_PASSWORD`). Evidence `docs/fork/evidence/b5-subagent-roster/`. **Maintainer live gate:**
+>   the behavioural-marker fan-out UAT (edit clause-drafter's instructions → coached fan-out matter →
+>   marker shows inside the clause-drafter delegation boundary; the edited `system_prompt` is server-side
+>   config, NEVER on the wire, so timeline proof is behavioural — ADR-F015 findings-only).
+> - Slice traps (B-5): (1) `agent_config` PATCH is WHOLE-OBJECT replace — read-modify-write to preserve
+>   `playbooks`/`mcp_servers`; (2) the cockpit `areaSubagents` reader DROPS `system_prompt` — do NOT reuse
+>   it as the edit model (server requires it); (3) skills checklist binds to `area.bound_skills` (NOT the
+>   Library catalog); empty bound set ⇒ no skill-bearing sub-agent; (4) shape violations → **400**
+>   (`build_area_subagents` ValueError → ValidationError), not 422; (5) the docker `web` rebuild hit a
+>   transient BuildKit-frontend registry EOF (`docker/dockerfile:1`) — a RETRY succeeded (network hiccup,
+>   not a code fault). **NEXT (Workstream B remaining spine): B-7a profile manifests → B-7b the wizard**
+>   (absorbs ONBOARD-1/2 + G13/#473); B-2c org-skill red-team eval + B-4 org-playbooks still pending;
+>   plus #490 GW-FILEIDS follow-up and P-2 registry mirror (only if VM egress blocked). Maintainer picks.
 > - **B-6 HITL-2 ✓ SHIPPED (branch `hitl-2-resume`, mig 0094, ADR-F071 HITL-2 addendum; task #491;
 >   contract = scratchpad `hitl2-contract.md`) — the resume round-trip, backend-only.**
 >   `POST /api/v1/agents/runs/{run_id}/resume` (owner-404; closed-enum body

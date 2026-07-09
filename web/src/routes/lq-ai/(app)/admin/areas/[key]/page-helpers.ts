@@ -68,31 +68,195 @@ export function diffPatch(
 	return patch;
 }
 
-export interface RosterParseResult {
-	/** Parsed object on success; `null` when the textarea fails the parse gate. */
-	value: Record<string, unknown> | null;
-	error: string | null;
+/**
+ * B-5 (surfaces ADR-F034's roster; validated by `build_area_subagents`,
+ * ADR-F010/F017) — one editable sub-agent row. Mirrors the SERVER allowlist:
+ * `name`/`description`/`system_prompt` are required non-empty strings and
+ * `skills` is the sub-agent's own subset of the AREA's bound skills. Deliberately
+ * carries NO `model` (ADR-F010 gateway-bypass fence) and NO `tools` key — the
+ * form can never emit either, so a forged one is structurally impossible.
+ *
+ * NOTE this KEEPS `system_prompt` — unlike the read-only cockpit `areaSubagents`
+ * projection, which drops it. `system_prompt` is the required "instructions" field.
+ */
+export interface SubagentDraft {
+	name: string;
+	description: string;
+	/** The plain-language instructions — the server's required `system_prompt`. */
+	system_prompt: string;
+	/** The sub-agent's skill subset (⊆ the area's bound skills, ADR-F017). */
+	skills: string[];
+}
+
+function asStringArray(v: unknown): string[] {
+	return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 }
 
 /**
- * D6 — client-side JSON.parse gate for the roster textarea. An empty textarea
- * is treated as `{}` (no subagents); anything that doesn't parse to a plain
- * JSON object is a client-side error (Save stays disabled) — the server's own
- * shape/ADR-F010 validation (400) is authoritative and surfaced verbatim on save.
+ * Read the editable sub-agent rows out of an area's opaque `agent_config`
+ * (`Record<string, unknown>` on the wire — the server validates the true shape at
+ * PATCH time, so parse DEFENSIVELY). Every object entry is kept (even a malformed
+ * one, so the admin can repair it) with missing string fields defaulted to `''`;
+ * a missing/odd-shaped config yields `[]` (the common empty-roster case).
  */
-export function parseRosterDraft(text: string): RosterParseResult {
-	const trimmed = text.trim();
-	if (trimmed === '') return { value: {}, error: null };
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(trimmed);
-	} catch {
-		return { value: null, error: 'Invalid JSON.' };
+export function agentConfigToRoster(
+	agentConfig: Record<string, unknown> | null | undefined
+): SubagentDraft[] {
+	const raw = agentConfig?.subagents;
+	if (!Array.isArray(raw)) return [];
+	const out: SubagentDraft[] = [];
+	for (const entry of raw) {
+		if (typeof entry !== 'object' || entry === null) continue;
+		const rec = entry as Record<string, unknown>;
+		out.push({
+			name: typeof rec.name === 'string' ? rec.name : '',
+			description: typeof rec.description === 'string' ? rec.description : '',
+			system_prompt: typeof rec.system_prompt === 'string' ? rec.system_prompt : '',
+			skills: asStringArray(rec.skills)
+		});
 	}
-	if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-		return { value: null, error: 'Must be a JSON object.' };
+	return out;
+}
+
+/**
+ * Serialize the draft rows to the wire shape `build_area_subagents` accepts:
+ * name/description/system_prompt trimmed; `skills` OMITTED when empty (matching
+ * the server's render-drop semantics — a skill-less sub-agent inherits the
+ * parent's tools). Key order is fixed so the JSON is stable for dirty-checking.
+ */
+export function serializeSubagents(draft: SubagentDraft[]): Array<Record<string, unknown>> {
+	return draft.map((s) => {
+		const entry: Record<string, unknown> = {
+			name: s.name.trim(),
+			description: s.description.trim(),
+			system_prompt: s.system_prompt.trim()
+		};
+		if (s.skills.length > 0) entry.skills = [...s.skills];
+		return entry;
+	});
+}
+
+/**
+ * Build the whole `agent_config` PATCH body: the serialized roster spliced into a
+ * COPY of the previous config, so any by-reference `playbooks`/`mcp_servers` keys
+ * (validated + stored server-side, not consumed by the renderer yet) are PRESERVED
+ * untouched — the form only owns `subagents`. An empty roster drops the key so the
+ * area's config collapses back to its passthrough (or `{}`).
+ */
+export function rosterToAgentConfig(
+	draft: SubagentDraft[],
+	prevConfig: Record<string, unknown>
+): Record<string, unknown> {
+	const next: Record<string, unknown> = { ...prevConfig };
+	const subs = serializeSubagents(draft);
+	if (subs.length > 0) next.subagents = subs;
+	else delete next.subagents;
+	return next;
+}
+
+/**
+ * True when the draft roster differs from what's stored — gates Save so no no-op
+ * PATCH is sent (parallels `hitlPolicyDirty`). Compares the two rosters through the
+ * SAME normalize pipeline (parse → serialize), so trimming/skill-omission/key-order
+ * never register as spurious edits; passthrough keys are ignored (the form doesn't
+ * touch them).
+ */
+export function rosterDirty(prevConfig: Record<string, unknown>, draft: SubagentDraft[]): boolean {
+	return (
+		JSON.stringify(serializeSubagents(draft)) !==
+		JSON.stringify(serializeSubagents(agentConfigToRoster(prevConfig)))
+	);
+}
+
+/**
+ * Client-side validation messages for the roster — Save is disabled while any
+ * exist; the server's 400 (`build_area_subagents` ValueError → `ValidationError`)
+ * stays authoritative and is surfaced verbatim on save. Mirrors the server rules:
+ * name/description/instructions required non-empty; every skill ⊆ the area's bound
+ * set (ADR-F017); plus a client-only unique-name rule (deepagents dispatches on the
+ * sub-agent `name`, so duplicates are genuinely broken — the server is permissive here).
+ */
+export function rosterErrors(draft: SubagentDraft[], boundSkills: string[]): string[] {
+	const bound = new Set(boundSkills);
+	const errors: string[] = [];
+	const nameCounts = new Map<string, number>();
+	draft.forEach((s, i) => {
+		const name = s.name.trim();
+		const label = name || `Sub-agent ${i + 1}`;
+		if (!name) errors.push(`${label}: a name is required.`);
+		if (!s.description.trim()) errors.push(`${label}: a description is required.`);
+		if (!s.system_prompt.trim()) errors.push(`${label}: instructions are required.`);
+		const unknownSkills = s.skills.filter((sk) => !bound.has(sk));
+		if (unknownSkills.length > 0) {
+			errors.push(`${label}: skill(s) not bound to this area — ${unknownSkills.join(', ')}.`);
+		}
+		if (name) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+	});
+	for (const [name, count] of nameCounts) {
+		if (count > 1) errors.push(`Sub-agent names must be unique — "${name}" is used ${count} times.`);
 	}
-	return { value: parsed as Record<string, unknown>, error: null };
+	return errors;
+}
+
+/** A blank sub-agent row (Add button). */
+export function emptySubagent(): SubagentDraft {
+	return { name: '', description: '', system_prompt: '', skills: [] };
+}
+
+/** Immutable transforms (runes reactivity needs a new array reference). */
+export function addSubagent(list: SubagentDraft[]): SubagentDraft[] {
+	return [...list, emptySubagent()];
+}
+
+export function removeSubagent(list: SubagentDraft[], index: number): SubagentDraft[] {
+	return list.filter((_, i) => i !== index);
+}
+
+export function updateSubagent(
+	list: SubagentDraft[],
+	index: number,
+	patch: Partial<SubagentDraft>
+): SubagentDraft[] {
+	return list.map((s, i) => (i === index ? { ...s, ...patch } : s));
+}
+
+export function toggleSubagentSkill(
+	list: SubagentDraft[],
+	index: number,
+	skill: string,
+	on: boolean
+): SubagentDraft[] {
+	return list.map((s, i) => {
+		if (i !== index) return s;
+		const has = s.skills.includes(skill);
+		if (on && !has) return { ...s, skills: [...s.skills, skill] };
+		if (!on && has) return { ...s, skills: s.skills.filter((x) => x !== skill) };
+		return s;
+	});
+}
+
+/**
+ * The skill checkboxes to render for one sub-agent: the area's bound skills FIRST
+ * (in order), then any skill ALREADY on the sub-agent that is no longer bound —
+ * e.g. the admin detached it after the roster was saved (detach never edits
+ * agent_config, so the stored roster keeps the now-dangling name and `rosterErrors`
+ * flags it, blocking Save). Rendering the orphan (`bound: false`, checked) gives the
+ * admin an inline control to UN-check it and clear the ADR-F017 error, instead of
+ * being soft-locked with no checkbox for it. Bound skills stay selectable as before.
+ */
+export function subagentSkillRows(
+	boundSkills: string[],
+	subSkills: string[]
+): Array<{ name: string; bound: boolean }> {
+	const seen = new Set(boundSkills);
+	const rows = boundSkills.map((name) => ({ name, bound: true }));
+	for (const name of subSkills) {
+		if (!seen.has(name)) {
+			rows.push({ name, bound: false });
+			seen.add(name);
+		}
+	}
+	return rows;
 }
 
 /** Label for a bound key (skill name / tool-group key) — the catalog's label

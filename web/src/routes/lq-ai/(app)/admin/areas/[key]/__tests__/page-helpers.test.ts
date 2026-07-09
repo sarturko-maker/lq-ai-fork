@@ -9,18 +9,29 @@ import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type { DeploymentCapabilitiesResponse } from '$lib/lq-ai/api/admin';
 import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 import {
+	addSubagent,
+	agentConfigToRoster,
 	bindingLabel,
 	degradedBindingKeys,
 	diffPatch,
+	emptySubagent,
 	findAreaByKey,
 	formatDeleteConflict,
 	hasMultipleLedgerBearingGroups,
 	hitlEnabledTools,
 	hitlPolicyDirty,
 	orgSkillBadges,
-	parseRosterDraft,
 	pickerEmptyState,
-	unboundOptions
+	removeSubagent,
+	rosterDirty,
+	rosterErrors,
+	rosterToAgentConfig,
+	serializeSubagents,
+	subagentSkillRows,
+	toggleSubagentSkill,
+	unboundOptions,
+	updateSubagent,
+	type SubagentDraft
 } from '../page-helpers';
 
 function area(over: Partial<PracticeArea> = {}): PracticeArea {
@@ -193,29 +204,273 @@ describe('diffPatch', () => {
 	});
 });
 
-describe('parseRosterDraft (D6)', () => {
-	it('treats an empty textarea as an empty object', () => {
-		expect(parseRosterDraft('')).toEqual({ value: {}, error: null });
-		expect(parseRosterDraft('   ')).toEqual({ value: {}, error: null });
+describe('agentConfigToRoster (B-5)', () => {
+	it('parses subagent rows, KEEPING system_prompt (unlike the cockpit projection)', () => {
+		expect(
+			agentConfigToRoster({
+				subagents: [
+					{
+						name: 'clause-drafter',
+						description: 'Draft one clause.',
+						system_prompt: 'You are a drafter.',
+						skills: ['surgical-redline']
+					}
+				]
+			})
+		).toEqual([
+			{
+				name: 'clause-drafter',
+				description: 'Draft one clause.',
+				system_prompt: 'You are a drafter.',
+				skills: ['surgical-redline']
+			}
+		]);
 	});
 
-	it('parses a valid JSON object', () => {
-		expect(parseRosterDraft('{"subagents": []}')).toEqual({
-			value: { subagents: [] },
-			error: null
+	it('returns [] for an empty/missing/odd-shaped config', () => {
+		expect(agentConfigToRoster({})).toEqual([]);
+		expect(agentConfigToRoster(null)).toEqual([]);
+		expect(agentConfigToRoster(undefined)).toEqual([]);
+		expect(agentConfigToRoster({ subagents: 'nope' })).toEqual([]);
+	});
+
+	it('defaults missing string fields to empty and filters non-string skills', () => {
+		expect(agentConfigToRoster({ subagents: [{ name: 'x' }] })).toEqual([
+			{ name: 'x', description: '', system_prompt: '', skills: [] }
+		]);
+		expect(
+			agentConfigToRoster({ subagents: [{ name: 'y', skills: ['a', 2, null, 'b'] }] })[0].skills
+		).toEqual(['a', 'b']);
+	});
+
+	it('skips non-object entries but keeps a malformed object row for repair', () => {
+		expect(agentConfigToRoster({ subagents: ['str', 42, null, { description: 'no name' }] })).toEqual([
+			{ name: '', description: 'no name', system_prompt: '', skills: [] }
+		]);
+	});
+});
+
+describe('serializeSubagents (B-5)', () => {
+	it('trims the required fields and OMITS empty skills', () => {
+		expect(
+			serializeSubagents([{ name: '  drafter  ', description: ' d ', system_prompt: ' p ', skills: [] }])
+		).toEqual([{ name: 'drafter', description: 'd', system_prompt: 'p' }]);
+	});
+
+	it('includes skills when present', () => {
+		expect(
+			serializeSubagents([{ name: 'r', description: 'd', system_prompt: 'p', skills: ['nda-review'] }])
+		).toEqual([{ name: 'r', description: 'd', system_prompt: 'p', skills: ['nda-review'] }]);
+	});
+});
+
+describe('rosterToAgentConfig (B-5)', () => {
+	it('splices the roster into a copy, PRESERVING by-reference passthrough keys', () => {
+		const prev = {
+			subagents: [{ name: 'old', description: 'o', system_prompt: 'o' }],
+			playbooks: ['pb'],
+			mcp_servers: [{ ref: 'x' }]
+		};
+		expect(
+			rosterToAgentConfig([{ name: 'new', description: 'n', system_prompt: 'n', skills: [] }], prev)
+		).toEqual({
+			subagents: [{ name: 'new', description: 'n', system_prompt: 'n' }],
+			playbooks: ['pb'],
+			mcp_servers: [{ ref: 'x' }]
 		});
 	});
 
-	it('rejects invalid JSON', () => {
-		const result = parseRosterDraft('{not json');
-		expect(result.value).toBeNull();
-		expect(result.error).toBe('Invalid JSON.');
+	it('drops the subagents key entirely when the roster is empty (keeps passthrough)', () => {
+		expect(
+			rosterToAgentConfig([], {
+				subagents: [{ name: 'x', description: 'd', system_prompt: 'p' }],
+				playbooks: ['pb']
+			})
+		).toEqual({ playbooks: ['pb'] });
 	});
 
-	it('rejects a JSON array or scalar (must be an object)', () => {
-		expect(parseRosterDraft('[]').error).toBe('Must be a JSON object.');
-		expect(parseRosterDraft('"just a string"').error).toBe('Must be a JSON object.');
-		expect(parseRosterDraft('null').error).toBe('Must be a JSON object.');
+	it('does not mutate the previous config', () => {
+		const prev = { subagents: [{ name: 'x', description: 'd', system_prompt: 'p' }] };
+		rosterToAgentConfig([{ name: 'y', description: 'd', system_prompt: 'p', skills: [] }], prev);
+		expect((prev.subagents[0] as { name: string }).name).toBe('x');
+	});
+});
+
+describe('rosterDirty (B-5)', () => {
+	const stored = {
+		subagents: [
+			{
+				name: 'document-researcher',
+				description: 'Investigate.',
+				system_prompt: 'You are a researcher.',
+				skills: ['contract-qa']
+			}
+		]
+	};
+
+	it('is false when the draft round-trips the stored roster unchanged', () => {
+		expect(rosterDirty(stored, agentConfigToRoster(stored))).toBe(false);
+	});
+
+	it('is false for a whitespace-only edit (normalized away)', () => {
+		const draft = agentConfigToRoster(stored);
+		draft[0] = { ...draft[0], description: '  Investigate.  ' };
+		expect(rosterDirty(stored, draft)).toBe(false);
+	});
+
+	it('is true when a field actually changes', () => {
+		const draft = agentConfigToRoster(stored);
+		draft[0] = { ...draft[0], system_prompt: 'You are a SENIOR researcher.' };
+		expect(rosterDirty(stored, draft)).toBe(true);
+	});
+
+	it('is true when a sub-agent is added or removed', () => {
+		expect(rosterDirty(stored, [])).toBe(true);
+		expect(rosterDirty(stored, addSubagent(agentConfigToRoster(stored)))).toBe(true);
+	});
+
+	it('ignores passthrough keys (the form does not own them)', () => {
+		const withPassthrough = { ...stored, playbooks: ['pb'] };
+		expect(rosterDirty(withPassthrough, agentConfigToRoster(withPassthrough))).toBe(false);
+	});
+});
+
+describe('rosterErrors (B-5)', () => {
+	const bound = ['contract-qa', 'nda-review'];
+
+	it('is empty for a valid roster', () => {
+		expect(
+			rosterErrors(
+				[
+					{
+						name: 'drafter',
+						description: 'Draft.',
+						system_prompt: 'Do the thing.',
+						skills: ['nda-review']
+					}
+				],
+				bound
+			)
+		).toEqual([]);
+	});
+
+	it('flags each missing required field, labelled by position when unnamed', () => {
+		const errs = rosterErrors([{ name: '', description: '', system_prompt: '', skills: [] }], bound);
+		expect(errs).toContain('Sub-agent 1: a name is required.');
+		expect(errs).toContain('Sub-agent 1: a description is required.');
+		expect(errs).toContain('Sub-agent 1: instructions are required.');
+	});
+
+	it('uses the name in the label when present', () => {
+		expect(
+			rosterErrors([{ name: 'drafter', description: '', system_prompt: 'p', skills: [] }], bound)
+		).toEqual(['drafter: a description is required.']);
+	});
+
+	it('rejects a skill not bound to the area (ADR-F017)', () => {
+		expect(
+			rosterErrors(
+				[{ name: 'r', description: 'd', system_prompt: 'p', skills: ['contract-qa', 'ghost-skill'] }],
+				bound
+			)
+		).toEqual(['r: skill(s) not bound to this area — ghost-skill.']);
+	});
+
+	it('flags duplicate sub-agent names (client-only unique gate)', () => {
+		expect(
+			rosterErrors(
+				[
+					{ name: 'dup', description: 'd', system_prompt: 'p', skills: [] },
+					{ name: 'dup', description: 'd', system_prompt: 'p', skills: [] }
+				],
+				bound
+			)
+		).toContain('Sub-agent names must be unique — "dup" is used 2 times.');
+	});
+
+	it('counts trim-colliding names as duplicates (matches the on-wire trim)', () => {
+		expect(
+			rosterErrors(
+				[
+					{ name: 'dup', description: 'd', system_prompt: 'p', skills: [] },
+					{ name: '  dup  ', description: 'd', system_prompt: 'p', skills: [] }
+				],
+				bound
+			)
+		).toContain('Sub-agent names must be unique — "dup" is used 2 times.');
+	});
+
+	it('treats a whitespace-only name as missing (trimmed before the required check)', () => {
+		expect(
+			rosterErrors([{ name: '   ', description: 'd', system_prompt: 'p', skills: [] }], bound)
+		).toEqual(['Sub-agent 1: a name is required.']);
+	});
+});
+
+describe('subagentSkillRows (B-5)', () => {
+	it('lists the area bound skills (in order), all marked bound', () => {
+		expect(subagentSkillRows(['contract-qa', 'nda-review'], [])).toEqual([
+			{ name: 'contract-qa', bound: true },
+			{ name: 'nda-review', bound: true }
+		]);
+	});
+
+	it('appends an orphaned sub-agent skill (no longer bound) so it can be un-checked', () => {
+		expect(subagentSkillRows(['contract-qa'], ['contract-qa', 'nda-review'])).toEqual([
+			{ name: 'contract-qa', bound: true },
+			{ name: 'nda-review', bound: false }
+		]);
+	});
+
+	it('does not duplicate a skill that is both bound and on the sub-agent', () => {
+		expect(subagentSkillRows(['contract-qa'], ['contract-qa'])).toEqual([
+			{ name: 'contract-qa', bound: true }
+		]);
+	});
+
+	it('is empty when the area has no bound skills and the sub-agent has none', () => {
+		expect(subagentSkillRows([], [])).toEqual([]);
+	});
+});
+
+describe('roster transforms (B-5)', () => {
+	const base: SubagentDraft[] = [{ name: 'a', description: 'da', system_prompt: 'pa', skills: [] }];
+
+	it('emptySubagent is blank', () => {
+		expect(emptySubagent()).toEqual({ name: '', description: '', system_prompt: '', skills: [] });
+	});
+
+	it('addSubagent appends a blank row without mutating the input', () => {
+		const next = addSubagent(base);
+		expect(next).toHaveLength(2);
+		expect(next[1]).toEqual(emptySubagent());
+		expect(base).toHaveLength(1);
+	});
+
+	it('removeSubagent drops the indexed row immutably', () => {
+		const two = addSubagent(base);
+		expect(removeSubagent(two, 0)).toEqual([emptySubagent()]);
+		expect(two).toHaveLength(2);
+	});
+
+	it('updateSubagent patches one row immutably', () => {
+		const next = updateSubagent(base, 0, { name: 'renamed' });
+		expect(next[0].name).toBe('renamed');
+		expect(next[0].description).toBe('da');
+		expect(base[0].name).toBe('a');
+	});
+
+	it('toggleSubagentSkill adds then removes a skill immutably', () => {
+		const added = toggleSubagentSkill(base, 0, 'nda-review', true);
+		expect(added[0].skills).toEqual(['nda-review']);
+		expect(toggleSubagentSkill(added, 0, 'nda-review', false)[0].skills).toEqual([]);
+		expect(base[0].skills).toEqual([]);
+	});
+
+	it('toggleSubagentSkill is idempotent (no dup re-add, no-op absent remove)', () => {
+		const added = toggleSubagentSkill(base, 0, 'x', true);
+		expect(toggleSubagentSkill(added, 0, 'x', true)[0].skills).toEqual(['x']);
+		expect(toggleSubagentSkill(base, 0, 'x', false)[0].skills).toEqual([]);
 	});
 });
 
