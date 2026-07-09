@@ -132,6 +132,8 @@ function area(over: Partial<PracticeArea> = {}): PracticeArea {
 		default_tier_floor: null,
 		default_budget_profile: null,
 		agent_config: {},
+		hitl_policy: {},
+		hitl_eligible_tools: [],
 		bound_skills: [],
 		bound_tool_groups: [],
 		bound_playbooks: [],

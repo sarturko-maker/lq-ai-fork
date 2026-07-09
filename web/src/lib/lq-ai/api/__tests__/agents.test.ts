@@ -12,7 +12,15 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { cancelRun, createRun, getRun, getThread, listRuns, listThreads } from '../agents';
+import {
+	cancelRun,
+	createRun,
+	getRun,
+	getThread,
+	listRuns,
+	listThreads,
+	resumeRun
+} from '../agents';
 
 /** Minimal Response-shaped stub. apiRequest reads content-type to decide json/text. */
 function jsonResponseLike(status: number, body: unknown) {
@@ -168,6 +176,28 @@ describe('agents API client', () => {
 	it('cancelRun surfaces a 404 (cross-user / unknown run) as a typed error', async () => {
 		fetchMock.mockResolvedValueOnce(jsonResponseLike(404, { detail: 'run not found' }));
 		await expect(cancelRun('nope')).rejects.toMatchObject({ status: 404 });
+	});
+
+	it('resumeRun POSTs an approve decision to /agents/runs/{id}/resume (HITL-3)', async () => {
+		// Resume is run-per-resume: the 202 row is a FRESH run continuing the thread.
+		fetchMock.mockResolvedValueOnce(
+			jsonResponseLike(202, { id: 'run-2', status: 'running', thread_id: 't1' })
+		);
+		const run = await resumeRun('run-1', { type: 'approve' });
+		expect(run.id).toBe('run-2');
+		const [url, init] = firstCall(fetchMock);
+		expect(url).toMatch(/\/agents\/runs\/run-1\/resume$/);
+		expect(init.method).toBe('POST');
+		expect(init.body).toBe('{"decision":{"type":"approve"}}');
+	});
+
+	it('resumeRun forwards a reject decision with its free-text message', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponseLike(202, { id: 'run-3', status: 'running', thread_id: 't1' })
+		);
+		await resumeRun('run-1', { type: 'reject', message: 'not now' });
+		const [, init] = firstCall(fetchMock);
+		expect(init.body).toBe('{"decision":{"type":"reject","message":"not now"}}');
 	});
 
 	it('translates the 409 thread brakes into typed errors (plain-string detail)', async () => {

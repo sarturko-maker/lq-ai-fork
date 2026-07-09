@@ -407,6 +407,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # F1-S3 (fork) — practice-area config/admin (ADR-F002/F004/F010).
     # Dedicated coverage in tests/test_practice_areas.py.
     ("PATCH", "/api/v1/practice-areas/{key}"),
+    # HITL-3 (fork, ADR-F071) — admin stop-and-ask policy write. Dedicated
+    # coverage in tests/test_practice_areas.py.
+    ("PUT", "/api/v1/practice-areas/{key}/hitl-policy"),
     ("POST", "/api/v1/practice-areas/{key}/skills"),
     ("DELETE", "/api/v1/practice-areas/{key}/skills/{skill_name}"),
     # SETUP-4a (fork, ADR-F062) — practice-area CRUD + tool-group attach/detach.

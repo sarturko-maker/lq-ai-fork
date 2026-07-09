@@ -15,6 +15,8 @@ import {
 	findAreaByKey,
 	formatDeleteConflict,
 	hasMultipleLedgerBearingGroups,
+	hitlEnabledTools,
+	hitlPolicyDirty,
 	orgSkillBadges,
 	parseRosterDraft,
 	pickerEmptyState,
@@ -33,6 +35,8 @@ function area(over: Partial<PracticeArea> = {}): PracticeArea {
 		default_tier_floor: null,
 		default_budget_profile: null,
 		agent_config: {},
+		hitl_policy: {},
+		hitl_eligible_tools: [],
 		bound_skills: [],
 		bound_tool_groups: [],
 		bound_playbooks: [],
@@ -254,11 +258,26 @@ describe('unboundOptions', () => {
 
 	it('works with knowledge-style UUID keys (B-3b) — the helper is generic', () => {
 		const knowledgeOptions = [
-			{ key: '11111111-1111-1111-1111-111111111111', label: 'Precedent bank', description: null, in_library: true },
-			{ key: '22222222-2222-2222-2222-222222222222', label: 'Deal room', description: null, in_library: true }
+			{
+				key: '11111111-1111-1111-1111-111111111111',
+				label: 'Precedent bank',
+				description: null,
+				in_library: true
+			},
+			{
+				key: '22222222-2222-2222-2222-222222222222',
+				label: 'Deal room',
+				description: null,
+				in_library: true
+			}
 		];
 		expect(unboundOptions(knowledgeOptions, ['11111111-1111-1111-1111-111111111111'])).toEqual([
-			{ key: '22222222-2222-2222-2222-222222222222', label: 'Deal room', description: null, in_library: true }
+			{
+				key: '22222222-2222-2222-2222-222222222222',
+				label: 'Deal room',
+				description: null,
+				in_library: true
+			}
 		]);
 	});
 });
@@ -291,7 +310,9 @@ describe('degradedBindingKeys (G13(a))', () => {
 		// Same key 'shared-key' adopted in one kind's catalog, not in another's —
 		// callers pass one kind's catalog at a time, so each call is self-contained.
 		const toolCatalog = [{ key: 'shared-key', label: 'Tool', description: null, in_library: true }];
-		const skillCatalog = [{ key: 'shared-key', label: 'Skill', description: null, in_library: false }];
+		const skillCatalog = [
+			{ key: 'shared-key', label: 'Skill', description: null, in_library: false }
+		];
 		expect(degradedBindingKeys(toolCatalog, ['shared-key'])).toEqual(new Set());
 		expect(degradedBindingKeys(skillCatalog, ['shared-key'])).toEqual(new Set(['shared-key']));
 	});
@@ -319,14 +340,16 @@ describe('degradedBindingKeys (G13(a))', () => {
 		expect(degradedBindingKeys(kbCatalog, ['11111111-1111-1111-1111-111111111111'])).toEqual(
 			new Set()
 		);
-		expect(
-			degradedBindingKeys(kbCatalog, ['22222222-2222-2222-2222-222222222222'])
-		).toEqual(new Set(['22222222-2222-2222-2222-222222222222']));
+		expect(degradedBindingKeys(kbCatalog, ['22222222-2222-2222-2222-222222222222'])).toEqual(
+			new Set(['22222222-2222-2222-2222-222222222222'])
+		);
 	});
 });
 
 describe('pickerEmptyState (STORE-2)', () => {
-	const nonEmptyCatalog = [{ key: 'redlining', label: 'Redlining', description: null, in_library: true }];
+	const nonEmptyCatalog = [
+		{ key: 'redlining', label: 'Redlining', description: null, in_library: true }
+	];
 
 	it('returns null when the picker has options', () => {
 		expect(pickerEmptyState(nonEmptyCatalog, nonEmptyCatalog)).toBeNull();
@@ -351,6 +374,37 @@ describe('hasMultipleLedgerBearingGroups (D5)', () => {
 	it('is true with both redlining and ropa bound', () => {
 		expect(hasMultipleLedgerBearingGroups(['redlining', 'ropa'])).toBe(true);
 		expect(hasMultipleLedgerBearingGroups(['redlining', 'tabular', 'ropa'])).toBe(true);
+	});
+});
+
+describe('hitlEnabledTools (HITL-3, ADR-F071)', () => {
+	it('returns the true-valued keys, sorted', () => {
+		expect(hitlEnabledTools({ b: true, a: true, c: false })).toEqual(['a', 'b']);
+	});
+
+	it('returns [] when nothing is enabled', () => {
+		expect(hitlEnabledTools({})).toEqual([]);
+		expect(hitlEnabledTools({ x: false, y: false })).toEqual([]);
+	});
+});
+
+describe('hitlPolicyDirty (HITL-3, ADR-F071)', () => {
+	it('is false when the enabled sets match', () => {
+		expect(hitlPolicyDirty({ apply_redline: true }, { apply_redline: true })).toBe(false);
+	});
+
+	it('is true when the draft drops an enabled tool', () => {
+		expect(hitlPolicyDirty({ apply_redline: true }, {})).toBe(true);
+	});
+
+	it('is true when the draft adds an enabled tool', () => {
+		expect(
+			hitlPolicyDirty({ apply_redline: true }, { apply_redline: true, preview_redline: true })
+		).toBe(true);
+	});
+
+	it('ignores false-valued entries (not part of the enabled set)', () => {
+		expect(hitlPolicyDirty({}, { x: false })).toBe(false);
 	});
 });
 

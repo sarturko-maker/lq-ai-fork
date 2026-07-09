@@ -15,6 +15,7 @@ import {
 	subagentTypeOf,
 	isStaleRunning,
 	latestRunOf,
+	pendingHitlStep,
 	railItems,
 	railStates,
 	shouldContinuePolling,
@@ -252,6 +253,41 @@ describe('statusBadge', () => {
 			label: 'Stale',
 			tone: 'warn'
 		});
+	});
+
+	it('labels an awaiting_input (paused) run as needing the lawyer (HITL-3, ADR-F071)', () => {
+		expect(statusBadge(makeRun({ status: 'awaiting_input' }), T0)).toEqual({
+			label: 'Needs you',
+			tone: 'warn'
+		});
+	});
+});
+
+describe('pendingHitlStep (HITL-3, ADR-F071)', () => {
+	it('returns the hitl_request step for a paused (awaiting_input) run', () => {
+		const steps = [
+			makeStep({ seq: 1, kind: 'tool_call', name: 'apply_redline' }),
+			makeStep({ seq: 2, kind: 'hitl_request', name: 'apply_redline', summary: '[]' })
+		];
+		expect(pendingHitlStep(makeRun({ status: 'awaiting_input' }), steps)?.seq).toBe(2);
+	});
+
+	it('returns null when the run is not awaiting_input, even with a hitl_request step present', () => {
+		const steps = [makeStep({ seq: 1, kind: 'hitl_request', name: 'apply_redline' })];
+		expect(pendingHitlStep(makeRun({ status: 'running' }), steps)).toBeNull();
+	});
+
+	it('returns null when a paused run has no hitl_request step', () => {
+		const steps = [makeStep({ seq: 1, kind: 'model_turn' })];
+		expect(pendingHitlStep(makeRun({ status: 'awaiting_input' }), steps)).toBeNull();
+	});
+
+	it('returns the LAST hitl_request when several are present', () => {
+		const steps = [
+			makeStep({ id: 'h-1', seq: 1, kind: 'hitl_request', name: 'apply_redline' }),
+			makeStep({ id: 'h-2', seq: 2, kind: 'hitl_request', name: 'send_email' })
+		];
+		expect(pendingHitlStep(makeRun({ status: 'awaiting_input' }), steps)?.id).toBe('h-2');
 	});
 });
 

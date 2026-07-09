@@ -12,7 +12,8 @@
 import { apiRequest, apiStreamRequest } from './client';
 
 /** Lifecycle of a run (CHECK constraint on agent_runs.status). `awaiting_input` =
- * paused on a stop-and-ask policy (HITL-1, ADR-F071); resume UI is a later slice. */
+ * paused on a stop-and-ask policy (HITL-1, ADR-F071); the cockpit confirm card
+ * resolves it via `resumeRun` (HITL-3). */
 export type AgentRunStatus =
 	| 'running'
 	| 'completed'
@@ -99,6 +100,22 @@ export interface AgentRunCreate {
 	thread_id?: string | null;
 	/** Cost profile for the run — controls model tier ceiling and token budget. */
 	budget_profile?: 'economy' | 'balanced' | 'generous';
+}
+
+/**
+ * A human's approve/reject decision on a paused (`awaiting_input`) run —
+ * mirrors api `ResumeDecision` (HITL-2/3, ADR-F071). `message` is optional
+ * free-text context, only meaningful for a reject; it is validated (≤2000
+ * chars) not sanitized, and never logged/audited server-side.
+ */
+export interface ResumeDecision {
+	type: 'approve' | 'reject';
+	message?: string;
+}
+
+/** POST /agents/runs/{id}/resume body. */
+export interface AgentRunResume {
+	decision: ResumeDecision;
 }
 
 export interface AgentThread {
@@ -192,6 +209,23 @@ export async function getRun(id: string): Promise<AgentRunDetailResponse> {
  */
 export async function cancelRun(id: string): Promise<AgentRun> {
 	return apiRequest<AgentRun>(`/agents/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+}
+
+/**
+ * POST /api/v1/agents/runs/{id}/resume — answer a paused (`awaiting_input`)
+ * run's stop-and-ask with an approve/reject decision (HITL-2/3, ADR-F071).
+ * Resume is run-per-resume: a NEW run continues the thread on the same
+ * checkpoint, so the returned 202 row is that fresh run, NOT the paused one —
+ * the caller re-syncs by polling so the SETTLED rows decide the UI (ADR-F004),
+ * never an optimistic local mutation. Another user's run → 404, never 403; 409
+ * when the run isn't awaiting input / was superseded / the matter was archived
+ * / the thread is busy.
+ */
+export async function resumeRun(id: string, decision: ResumeDecision): Promise<AgentRun> {
+	return apiRequest<AgentRun>(`/agents/runs/${encodeURIComponent(id)}/resume`, {
+		method: 'POST',
+		body: { decision }
+	});
 }
 
 /** GET /api/v1/agents/runs — caller's runs, newest first. */

@@ -205,9 +205,11 @@ export function statusBadge(
 		case 'cap_exceeded':
 			return { label: 'Step cap reached', tone: 'warn' };
 		case 'awaiting_input':
-			// HITL-1 (ADR-F071): paused on a stop-and-ask policy; the confirm
-			// card is a later slice — a calm badge, never a crash.
-			return { label: 'Waiting', tone: 'neutral' };
+			// HITL-3 (ADR-F071): paused on a stop-and-ask policy, waiting for the
+			// lawyer's go-ahead. An attention (amber) tone + actionable label so the
+			// same badge on the cockpit rail / matter list / thread reads as "you're
+			// needed here" and deep-links to the in-conversation confirm card.
+			return { label: 'Needs you', tone: 'warn' };
 		default:
 			// Defensive: an unknown status (future widening) must never return
 			// undefined — callers index TONE_TO_DOT[badge.tone] during render.
@@ -322,6 +324,26 @@ export function visibleSteps(
 	if (!last || last.kind !== 'model_turn' || last.summary === null) return steps;
 	if (last.summary === boundedLikeServer(run.final_answer)) return steps.slice(0, -1);
 	return steps;
+}
+
+/**
+ * The pending stop-and-ask step for a paused run (HITL-3, ADR-F071): the last
+ * `hitl_request` row, whose `name` is the gated tool and `summary` is the
+ * bounded JSON digest of the gated call(s) the confirm card renders. Returns
+ * null unless the run is `awaiting_input` (a paused run always has one) — so a
+ * settled/replayed hitl_request row from an already-resolved turn never
+ * resurrects the card. Scanning from the end keeps it correct if a future turn
+ * ever carries more than one.
+ */
+export function pendingHitlStep(
+	run: Pick<AgentRun, 'status'>,
+	steps: AgentRunStep[]
+): AgentRunStep | null {
+	if (run.status !== 'awaiting_input') return null;
+	for (let i = steps.length - 1; i >= 0; i--) {
+		if (steps[i].kind === 'hitl_request') return steps[i];
+	}
+	return null;
 }
 
 /**

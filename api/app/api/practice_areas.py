@@ -34,6 +34,8 @@ from app.agents.capabilities import (
     KIND_SKILL,
     KIND_TOOL,
     TOOL_GROUP_REGISTRY,
+    area_hitl_eligible_tool_names,
+    hitl_eligible_tool_names,
 )
 from app.api.dependencies import ActiveUser, AdminUser
 from app.audit import audit_action
@@ -58,6 +60,7 @@ from app.schemas.practice_areas import (
     PlaybookAttachRequest,
     PracticeAreaConfigUpdate,
     PracticeAreaCreate,
+    PracticeAreaHitlPolicyUpdate,
     PracticeAreaListResponse,
     PracticeAreaRead,
     PracticeAreaReorderRequest,
@@ -261,6 +264,8 @@ def _to_read(
         default_tier_floor=area.default_tier_floor,
         default_budget_profile=area.default_budget_profile,
         agent_config=area.agent_config or {},
+        hitl_policy=area.hitl_policy or {},
+        hitl_eligible_tools=sorted(area_hitl_eligible_tool_names(bound_tool_groups)),
         bound_skills=bound_skills,
         bound_tool_groups=bound_tool_groups,
         bound_playbooks=bound_playbooks,
@@ -467,6 +472,64 @@ async def update_practice_area_config(
         practice_area_id=area.id,
         request=request,
         details={"fields": sorted(fields.keys())},
+    )
+    await db.commit()
+    await db.refresh(area)
+    return await _to_read_single(db, area)
+
+
+@router.put(
+    "/{key}/hitl-policy",
+    response_model=PracticeAreaRead,
+    summary="Set a practice area's stop-and-ask (HITL) policy (admin).",
+)
+async def update_practice_area_hitl_policy(
+    key: str,
+    payload: PracticeAreaHitlPolicyUpdate,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> PracticeAreaRead:
+    """PUT /api/v1/practice-areas/{key}/hitl-policy — replace the area's HITL
+    stop-and-ask policy (admin, HITL-3 / ADR-F071).
+
+    Every policy key must be a tool the run pipeline can grant
+    (``hitl_eligible_tool_names()``) — an unknown name is a 400 (a loud guard on
+    admin typos, matching the ``agent_config`` validation posture), never silently
+    persisted. HITL-1 is the lenient runtime side:
+    ``compile_hitl_policy`` drops any stale name (with a warning) and intersects
+    the surviving set with the run's ACTUAL grants, so an eligible-but-unbound
+    name simply never fires. PUT-replace, normalised to the enabled set: ``{}``
+    stays the zero-config default (no ``interrupt_on`` kwarg → byte-identical graph).
+    """
+    area = await _load_area_or_404(db, key)
+
+    eligible = hitl_eligible_tool_names()
+    unknown = sorted(name for name in payload.policy if name not in eligible)
+    if unknown:
+        # 400 (reject, don't sanitize): ValidationError mirrors the agent_config
+        # validation posture (an invalid admin config write, not a schema 422).
+        raise ValidationError(
+            "unknown tool name(s) in hitl_policy",
+            details={"field": "policy", "unknown": unknown},
+        )
+    # PUT-replace, normalised: false/omitted = not gated, so only {tool: true}
+    # survives — {} is the zero-config default (HITL-1 attaches no middleware).
+    area.hitl_policy = {name: True for name, enabled in payload.policy.items() if enabled}
+    area.updated_at = datetime.now(UTC)
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="practice_area.hitl_policy",
+        resource_type="practice_area",
+        resource_id=area.key,
+        practice_area_id=area.id,
+        request=request,
+        # Tool NAMES are app identifiers, not user data/secrets — the audit
+        # contract's "counts/types/IDs, never raw values" is about content; the
+        # gated-tool set is configuration the admin just authored.
+        details={"tools": sorted(area.hitl_policy.keys())},
     )
     await db.commit()
     await db.refresh(area)

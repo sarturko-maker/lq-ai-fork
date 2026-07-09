@@ -756,6 +756,24 @@ def test_hitl_eligible_names_exclude_deepagents_builtins() -> None:
         assert names <= eligible
 
 
+def test_area_hitl_eligible_tool_names_unions_only_bound_group_grants() -> None:
+    """The per-area gate-able set (HITL-3, the admin card's checklist) is the union
+    of ONLY the bound groups' grants: matter-scope tools are deliberately excluded
+    (pausing a read is rarely wanted) and an unknown/unbound key contributes nothing
+    — mirroring the lenient runtime compile."""
+    redlining = cap.REDLINING_GROUP.key
+    tabular = cap.TABULAR_GROUP.key
+    one = cap.area_hitl_eligible_tool_names([redlining])
+    assert one == _EXPECTED_GROUP_TOOL_NAMES[redlining]
+    two = cap.area_hitl_eligible_tool_names([redlining, tabular])
+    assert two == _EXPECTED_GROUP_TOOL_NAMES[redlining] | _EXPECTED_GROUP_TOOL_NAMES[tabular]
+    # A matter-scope tool is globally eligible but NOT offered in the card.
+    assert "search_documents" in cap.hitl_eligible_tool_names()
+    assert "search_documents" not in one
+    assert cap.area_hitl_eligible_tool_names(["not-a-group"]) == frozenset()
+    assert cap.area_hitl_eligible_tool_names([]) == frozenset()
+
+
 # --- playbook renderer -------------------------------------------------------
 def _position(
     issue: str, standard: str, *, fallbacks: list[dict] | None = None, severity: str = "high"

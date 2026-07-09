@@ -176,3 +176,67 @@ remain HITL-3.
    reject closes the turn without executing; skip-repair asserted on the resume path and NOT on
    the follow-up path; no-pending-interrupt → failed). Migration 0094 up/down/up on a throwaway
    pgvector. The LLM-driven confirm-card round-trip is HITL-3's live gate.
+
+## Addendum — HITL-3 (confirm card + admin policy write), 2026-07-09
+
+HITL-3 is the final rung: it makes the pause/resume loop usable by a lawyer who never touches
+the API, and gives the admin a switch for WHICH tools pause. Web-heavy + one admin endpoint +
+the LLM-driven live gate. No migration.
+
+1. **Confirm-card vocabulary (maintainer decision).** Title **"Waiting for your go-ahead"**;
+   buttons **Approve** · **Refuse**. "Refuse" (not "Cancel") reads as a deliberate, first-class
+   decision — distinct from cancelling, which abandons the whole ask (decision 6 above). The
+   backend enum stays `approve`/`reject`; the card is pure presentation.
+
+2. **The card renders off the SETTLED `hitl_request` step — NOT a transient frame; the api
+   needs no change.** ADR-F004 (settled rows decide) is load-bearing here: the card must persist
+   until the human answers and survive a page reload while the run sits `awaiting_input`, so it
+   reads the durable `hitl_request` step (`name` = gated tool, `summary` = the bounded
+   `[{tool,args}]` JSON digest — parsed DEFENSIVELY, rendered ESCAPED as untrusted model output).
+   HITL-1 already emits everything the card needs on the wire (proven by
+   `test_pause_wire_tail_carries_awaiting_input`), so HITL-3 adds **no new stream frame and no
+   backend change for the card**. Two one-line web validator widenings (`isStepKind` +
+   `parseRunPayload` in `run-stream.ts`) stop the generic `data-step`(hitl_request) /
+   `data-run`(awaiting_input) frames from being dropped, so the card also arrives + animates
+   (CSS mount keyframe, motion-guarded) on the LIVE stream, not only on the reconcile poll. A
+   dedicated `data-hitl-request` frame was rejected as redundant with the settled step and
+   against the ADR-F004 "transient frames are animation-only / a late subscriber may miss them"
+   invariant — the opposite of what a confirm card needs.
+
+3. **Actionable pending-approval chip — one edit, every surface.** `statusBadge('awaiting_input')`
+   flips from `{Waiting, neutral}` to **`{Needs you, warn}`** (amber attention). Because every
+   cockpit rail / matter-list / thread badge routes through `statusBadge` → `StatusPill`, the one
+   change propagates everywhere; the in-conversation card carries the actual Approve/Refuse
+   actions (the list rows hold only `last_run_status`, not the paused run id — a passive
+   deep-link indicator by construction).
+
+4. **Admin write: `PUT /practice-areas/{key}/hitl-policy` (AdminUser-gated).** PUT-replace: the
+   body is the COMPLETE desired `{tool: bool}` map; the stored column keeps only the enabled
+   entries, so `{}` stays the zero-config default (no `interrupt_on` → byte-identical graph).
+   Keys are validated against the GLOBAL `hitl_eligible_tool_names()`; an unknown name is
+   **rejected with a 400** (`ValidationError`, matching the `agent_config` admin-validation
+   posture — NOT a schema 422; the HITL-3 kickoff said "422" but the app's `ValidationError`
+   maps to 400, and consistency with the sibling admin write wins). The runtime side stays
+   lenient (HITL-1's `compile_hitl_policy` drops stale/unbound names with a warning and
+   intersects with the run's ACTUAL grants), so the strict write-time guard only catches typos.
+   One `practice_area.hitl_policy` audit row: the sorted enabled tool NAMES (app identifiers, not
+   user data). The admin card's checklist offers the AREA's gate-able DOMAIN tools —
+   `hitl_eligible_tools` on the read model = the union of the area's bound tool-group grants
+   (`area_hitl_eligible_tool_names`); matter-scope reads (search/read/memory) are globally
+   eligible but deliberately not surfaced (pausing a read is rarely wanted). There was NO
+   pre-existing "F067-D5 placeholder" card — HITL-3 creates the admin section outright.
+
+5. **Live gate (the MODULES-milestone proof).** A Commercial `hitl_policy={"apply_redline":true}`
+   stops `apply_redline`; the lawyer sees the card, clicks Approve; the redline applies and the
+   run completes — driven by a real gateway model (DeepSeek/Adeu path). This is the milestone's
+   acceptance evidence, run in the browser, not a unit test.
+
+6. **Verification (deterministic).** Backend: the admin PUT is proven on a real Postgres test DB
+   (sets + persists + audits; PUT-replace normalises `false`→absent; unknown tool → 400 and
+   nothing persisted; non-admin → 403; unknown area → 404), plus a `area_hitl_eligible_tool_names`
+   unit test. Web: the card's parse/vocabulary helpers, `resumeRun`, the widened validators,
+   `pendingHitlStep`, the `Needs you` badge, and the admin `hitlEnabledTools`/`hitlPolicyDirty`
+   helpers are unit-tested (module-script pattern, no `@testing-library/svelte`). The five
+   endpoint/RBAC drift guards move by the AdminUser route: `test_mutation_rbac` 136→137 +
+   185→186 (get_mutating_user `gated` UNCHANGED at 70), `test_openapi` 185→186 + EXPECTED_PATHS,
+   `test_endpoints` IMPLEMENTED_ROUTES.

@@ -66,6 +66,15 @@ class PracticeAreaRead(BaseModel):
     # None = inherit the deployment default (RUN_DEFAULT_BUDGET_PROFILE) / balanced.
     default_budget_profile: str | None
     agent_config: dict[str, Any]
+    # HITL-3 (ADR-F071): the area's stop-and-ask policy — ``{tool_name: true}``
+    # for each granted tool that must pause for the lawyer's go-ahead. ``{}``
+    # (the default) = nothing gated (the zero-config invariant). Exposed so the
+    # area-admin card can round-trip the current policy.
+    hitl_policy: dict[str, bool]
+    # HITL-3 (ADR-F071): the area's gate-able DOMAIN tools (the union of its bound
+    # tool groups' grants), sorted — the stop-and-ask checklist the admin card
+    # renders. A read-only projection of the area's grants, not stored state.
+    hitl_eligible_tools: list[str]
     bound_skills: list[str]
     bound_tool_groups: list[str]
     bound_playbooks: list[BoundPlaybook]
@@ -120,6 +129,38 @@ class PracticeAreaConfigUpdate(BaseModel):
         here, at the boundary (reject, don't sanitize)."""
         if value is None:
             raise ValueError("must be a non-empty string when provided (null is not allowed)")
+        return value
+
+
+class PracticeAreaHitlPolicyUpdate(BaseModel):
+    """Admin write of an area's stop-and-ask (HITL) policy — HITL-3 (ADR-F071).
+
+    PUT-replace semantics: ``policy`` is the COMPLETE desired map of gated tools
+    (``{tool_name: true}``); a tool absent — or present with ``false`` — is not
+    gated. The handler validates every key against ``hitl_eligible_tool_names()``
+    and rejects any unknown name with a 400 (a loud guard on admin typos, matching
+    the ``agent_config`` posture — HITL-1 only drops unknown names at compile time
+    with a warning). Only the enabled entries are
+    stored, so ``{}`` stays the zero-config default (no HITL middleware attached).
+    Bounds are defensive: a legitimate policy is a handful of known tool names.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    policy: dict[str, bool] = Field(default_factory=dict)
+
+    @field_validator("policy")
+    @classmethod
+    def _bound_policy(cls, value: dict[str, bool]) -> dict[str, bool]:
+        """Bound the map at the boundary (reject, don't sanitize): cap the entry
+        count and key length so a malformed payload can't be echoed back verbatim
+        in the 400 ``unknown`` detail. The eligible set is a small closed set, so
+        these ceilings never bind a real policy."""
+        if len(value) > 200:
+            raise ValueError("too many tools in hitl_policy (max 200)")
+        for key in value:
+            if len(key) > 200:
+                raise ValueError("tool name is too long")
         return value
 
 

@@ -36,7 +36,15 @@ export interface StreamRunPayload {
 }
 
 function isStepKind(value: unknown): value is AgentRunStepKind {
-	return value === 'model_turn' || value === 'tool_call' || value === 'tool_result';
+	return (
+		value === 'model_turn' ||
+		value === 'tool_call' ||
+		value === 'tool_result' ||
+		// HITL-3 (ADR-F071): the pause step arrives live as a generic data-step
+		// so the cockpit confirm card renders/animates on arrival, not only on
+		// the post-stream reconcile poll.
+		value === 'hitl_request'
+	);
 }
 
 /**
@@ -181,7 +189,11 @@ export function parseRunPayload(data: unknown): StreamRunPayload | null {
 		status !== 'completed' &&
 		status !== 'failed' &&
 		status !== 'cancelled' &&
-		status !== 'cap_exceeded'
+		status !== 'cap_exceeded' &&
+		// HITL-3 (ADR-F071): a pause settles the run to `awaiting_input` on the
+		// live terminal data-run tail — without this it was dropped and the
+		// pause surfaced only via the reconcile poll.
+		status !== 'awaiting_input'
 	) {
 		return null;
 	}
