@@ -27,15 +27,21 @@ Wire-format differences from OpenAI
   rolls features in/out per version and silent defaults would mask
   capability changes.
 
-Scope (M2-E1)
--------------
+Auth (M2-E1 + AZ-6)
+-------------------
 
-API-key auth only. DE-XXX (created at M2-E1 close) tracks the Azure AD
-managed-identity / service-principal path; that requires the
-``azure-identity`` SDK and a token cache, which we keep out of M2 to
-hold the M2-E1 budget at ~4 hr. Operators with AD-only Azure tenants
-either supply a long-lived API key (via ``api_key_env`` or
-``api_key_encrypted``) or wait for the AD-auth DE.
+Two paths, selected by the ``AZURE_OPENAI_USE_MANAGED_IDENTITY`` flag:
+
+* **API key (default, M2-E1).** ``api-key: <key>``; the key comes from
+  ``api_key_env`` / ``api_key_encrypted`` (or, since KV-1, Key Vault).
+* **Keyless managed identity (AZ-6, ADR-F072).** When the flag is set,
+  the adapter mints a short-lived Entra bearer token from the VM's
+  system-assigned managed identity (via IMDS, stdlib only — NO
+  ``azure-identity`` SDK) and sends ``Authorization: Bearer <token>``;
+  no static key is resolved or required. See :mod:`app.azure_identity`
+  for the token provider, the confirmed scope, and the honesty note.
+
+The flag defaults off, so the API-key path is byte-identical to today.
 
 Tier defaults: operators set ``tier: 3`` for the typical Azure OpenAI
 enterprise-agreement deployment (Azure carries ZDR + BAA under the
@@ -56,6 +62,12 @@ from typing import Any
 
 import httpx
 
+from app.azure_identity import (
+    USE_MANAGED_IDENTITY_ENV,
+    ManagedIdentityError,
+    TokenProvider,
+    build_managed_identity_provider,
+)
 from app.config import ProviderConfig
 from app.providers.base import (
     ProviderHealth,
@@ -102,6 +114,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         api_version: str,
         timeout_s: float = DEFAULT_TIMEOUT_SECONDS,
         client: httpx.AsyncClient | None = None,
+        token_provider: TokenProvider | None = None,
     ) -> None:
         super().__init__(
             name=name,
@@ -111,6 +124,9 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             client=client,
         )
         self._api_version = api_version
+        # AZ-6 (ADR-F072): when set, authenticate with a managed-identity bearer
+        # token instead of ``api-key``. ``None`` ⇒ the unchanged API-key path.
+        self._token_provider = token_provider
 
     # --- Construction --------------------------------------------------------
 
@@ -144,26 +160,37 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             raise ValueError(
                 f"AzureOpenAIAdapter requires provider.type='azure_openai'; got {provider.type!r}"
             )
-        if key_resolver is None:
-            env_lookup = env if env is not None else dict(os.environ)
-            key_resolver = ProviderKeyResolver(
-                master_key=env_lookup.get("LQ_AI_GATEWAY_MASTER_KEY") or None,
-                env=env_lookup,
+
+        env_lookup = env if env is not None else dict(os.environ)
+
+        # AZ-6 (ADR-F072): keyless managed-identity auth when the flag is set.
+        # ``None`` ⇒ the flag is unset and we take the unchanged API-key path
+        # below (byte-identical to today). When keyless, NO API key is resolved
+        # or required — the adapter mints a bearer token per refresh instead.
+        token_provider = build_managed_identity_provider(env_lookup)
+
+        api_key = ""
+        if token_provider is None:
+            if key_resolver is None:
+                key_resolver = ProviderKeyResolver(
+                    master_key=env_lookup.get("LQ_AI_GATEWAY_MASTER_KEY") or None,
+                    env=env_lookup,
+                )
+            effective_env = provider.api_key_env or (
+                None if provider.api_key_encrypted else "AZURE_OPENAI_API_KEY"
             )
-        effective_env = provider.api_key_env or (
-            None if provider.api_key_encrypted else "AZURE_OPENAI_API_KEY"
-        )
-        api_key = key_resolver.resolve(
-            provider_name=provider.name,
-            api_key_env=effective_env,
-            api_key_encrypted=provider.api_key_encrypted,
-        )
-        if not api_key:
-            raise ValueError(
-                f"Azure OpenAI provider {provider.name!r} requires either "
-                f"api_key_encrypted or environment variable "
-                f"{(effective_env or 'AZURE_OPENAI_API_KEY')!r} to be set"
+            api_key = key_resolver.resolve(
+                provider_name=provider.name,
+                api_key_env=effective_env,
+                api_key_encrypted=provider.api_key_encrypted,
             )
+            if not api_key:
+                raise ValueError(
+                    f"Azure OpenAI provider {provider.name!r} requires either "
+                    f"api_key_encrypted or environment variable "
+                    f"{(effective_env or 'AZURE_OPENAI_API_KEY')!r} to be set "
+                    f"(or set {USE_MANAGED_IDENTITY_ENV}=true for keyless managed identity)"
+                )
 
         extra = provider.model_extra or {}
         api_version_raw = extra.get("api_version")
@@ -183,6 +210,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             api_version=api_version_raw,
             timeout_s=timeout_s,
             client=client,
+            token_provider=token_provider,
         )
 
     # --- ProviderAdapter contract --------------------------------------------
@@ -204,22 +232,24 @@ class AzureOpenAIAdapter(OpenAIAdapter):
 
         body = _to_openai_request(request, model=model, stream=stream)
         path = self._chat_completions_path(deployment_id=model)
+        headers = await self._auth_headers_async()
 
         if stream:
             return _openai_stream_iter(
                 client=self._client,
                 body=body,
-                headers=self._auth_headers(),
+                headers=headers,
                 provider_name=self.name,
                 requested_model=model,
                 path=path,
             )
-        return await self._chat_completion_unary_azure(body, path, model=model)
+        return await self._chat_completion_unary_azure(body, path, headers, model=model)
 
     async def _chat_completion_unary_azure(
         self,
         body: dict[str, Any],
         path: str,
+        headers: dict[str, str],
         *,
         model: str,
     ) -> ChatCompletionResponse:
@@ -227,7 +257,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             response = await self._client.post(
                 path,
                 json=body,
-                headers=self._auth_headers(),
+                headers=headers,
             )
         except httpx.HTTPError as exc:
             raise ProviderNetworkError(
@@ -271,12 +301,13 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             body["user"] = request.user
 
         path = self._embeddings_path(deployment_id=model)
+        headers = await self._auth_headers_async()
 
         try:
             response = await self._client.post(
                 path,
                 json=body,
-                headers=self._auth_headers(),
+                headers=headers,
             )
         except httpx.HTTPError as exc:
             raise ProviderNetworkError(
@@ -301,12 +332,15 @@ class AzureOpenAIAdapter(OpenAIAdapter):
 
         start = time.monotonic()
         try:
+            headers = await self._auth_headers_async()
             response = await self._client.get(
                 self._models_path(),
-                headers=self._auth_headers(),
+                headers=headers,
                 timeout=min(self._timeout, 10.0),
             )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ProviderNetworkError) as exc:
+            # ProviderNetworkError also covers a managed-identity token-mint
+            # failure (IMDS unreachable/misconfigured) — the provider is unusable.
             return ProviderHealth(
                 name=self.name,
                 reachable=False,
@@ -340,6 +374,28 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         if self._api_key:
             headers["api-key"] = self._api_key
         return headers
+
+    async def _auth_headers_async(self) -> dict[str, str]:
+        """Auth headers for a request, minting/refreshing a managed-identity token
+        when keyless (AZ-6). Without a token provider this is the unchanged
+        ``api-key`` path (delegates to :meth:`_auth_headers`, byte-identical).
+
+        With a token provider, the token replaces the key entirely:
+        ``Authorization: Bearer <token>`` and NO ``api-key`` header. A token-mint
+        failure is surfaced as :class:`ProviderNetworkError` so it flows through
+        the same handling as any other provider-reachability failure (and never
+        leaks token material)."""
+
+        if self._token_provider is None:
+            return self._auth_headers()
+        try:
+            token = await self._token_provider.token()
+        except ManagedIdentityError as exc:
+            raise ProviderNetworkError(
+                f"failed to mint Azure managed-identity token: {type(exc).__name__}",
+                details={"provider": self.name},
+            ) from exc
+        return {"content-type": "application/json", "authorization": f"Bearer {token}"}
 
     def _chat_completions_path(self, *, deployment_id: str) -> str:
         return (

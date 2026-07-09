@@ -341,6 +341,81 @@ Verify:
 - Then run the §5.3 chat-completion smoke per enabled provider — a 200 with
   `pong` proves the Key-Vault-sourced key reached the upstream call.
 
+## 4c. Optional — keyless: authenticate azure-openai with the VM's managed identity (AZ-6)
+
+AZ-6 (ADR-F072) goes one step beyond §4b: instead of sourcing the *key* from Key
+Vault, it removes the static key entirely for the **azure-openai** provider. When
+enabled, the gateway mints a short-lived Entra **bearer token** from the VM's
+system-assigned managed identity (via IMDS) and sends `Authorization: Bearer …` to
+Azure OpenAI — no `api-key`, nothing on disk or in a vault. The token auto-expires
+(~1 h) and is refreshed in place, so key rotation is a non-event.
+
+**Honesty note.** Same host-vs-process caveat as §4b: managed identity removes the
+key, but any process on this VM can hit IMDS and mint the same host-scoped token.
+It narrows the blast radius (no long-lived exfiltratable key; auto-expiry; Azure
+RBAC + revocation) — it is not process isolation.
+
+**Scope.** Covers the `azure-openai` provider — Azure OpenAI/GPT and
+Mistral-on-Foundry served over the classic deployments route. It does NOT cover
+`azure-claude` (the Anthropic-on-Foundry `x-api-key` path); leave that on a key or
+Key Vault.
+
+Prerequisite — the identity needs **model inference**, not just vault read:
+
+```sh
+# 1. System-assigned identity on the VM (idempotent; skip if §4b already did it).
+az vm identity assign -g <your-sandbox-rg> -n <your-vm>
+VM_PRINCIPAL_ID=$(az vm show -g <your-sandbox-rg> -n <your-vm> \
+  --query identity.principalId -o tsv)
+
+# 2. Grant the VM identity the MODEL-INFERENCE role on the Foundry/AOAI RESOURCE
+#    (NOT the vault). "Cognitive Services OpenAI User" is the inference role;
+#    "Key Vault Secrets User" (§4b) does NOT grant model calls.
+AOAI_ID=$(az cognitiveservices account show \
+  -g <your-sandbox-rg> -n <your-foundry-resource> --query id -o tsv)
+az role assignment create --role "Cognitive Services OpenAI User" \
+  --assignee-object-id "$VM_PRINCIPAL_ID" \
+  --assignee-principal-type ServicePrincipal \
+  --scope "$AOAI_ID"
+```
+
+Wire it in `.env.prod` (all NON-secret):
+
+```sh
+AZURE_OPENAI_USE_MANAGED_IDENTITY=true
+# Optional — override the token audience. Default (correct for the classic
+# deployments route this adapter uses): https://cognitiveservices.azure.com.
+# Set https://ai.azure.com only if your deployment is on the newer /openai/v1/ route.
+# AZURE_OPENAI_IDENTITY_RESOURCE=https://cognitiveservices.azure.com
+```
+
+Then **remove** `AZURE_OPENAI_API_KEY` (and any `AZURE_OPENAI_KEY_SECRET_NAME` from
+§4b) — under managed identity neither is read for azure-openai. Recreate the gateway
+so it re-reads the env (a SIGHUP does not rebuild adapters):
+
+```sh
+dc up -d gateway
+```
+
+Verify:
+
+- `dc logs gateway | grep 'minted Azure managed-identity token'` — one INFO line
+  when the first azure-openai request mints the token
+  (`resource=https://cognitiveservices.azure.com`). No token value or length is
+  ever logged. A mint failure surfaces as a provider network error and the health
+  probe reports the provider unreachable.
+- Re-run the **§5.3 chat smoke** for `"model": "azure-openai/<your-gpt-deployment>"`
+  → a 200 with `pong` proves **GPT works through managed identity** (the minted
+  token reached the upstream call).
+- Re-run the **§5.4 tool-calling smoke** for `azure-openai` → `finish_reason:
+  "tool_calls"` + `get_weather` proves **tool-calling still works under token auth**
+  (auth is orthogonal to the tools translation — the request body is unchanged).
+
+A silent **401** from Azure inside the error envelope under managed identity almost
+always means a **scope/role** problem: the VM identity lacks "Cognitive Services
+OpenAI User" on the resource, or the audience is wrong for your route (try the
+`AZURE_OPENAI_IDENTITY_RESOURCE` override — `https://ai.azure.com` for `/openai/v1/`).
+
 ## 5. Per-provider smoke tests (synthetic only)
 
 The gateway publishes **no host port** in prod (Caddy fronts api + web only), so

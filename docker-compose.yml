@@ -119,6 +119,11 @@ services:
       AZURE_OPENAI_KEY_SECRET_NAME: ${AZURE_OPENAI_KEY_SECRET_NAME:-}
       AZURE_ANTHROPIC_KEY_SECRET_NAME: ${AZURE_ANTHROPIC_KEY_SECRET_NAME:-}
       AZURE_FOUNDRY_KEY_SECRET_NAME: ${AZURE_FOUNDRY_KEY_SECRET_NAME:-}
+      # AZ-6 (ADR-F072) — OPTIONAL keyless auth for azure-openai via the VM's
+      # managed identity (no static key). NON-secret; unset ⇒ the api-key path
+      # above is used, unchanged. See .env.example / runbook §4c.
+      AZURE_OPENAI_USE_MANAGED_IDENTITY: ${AZURE_OPENAI_USE_MANAGED_IDENTITY:-}
+      AZURE_OPENAI_IDENTITY_RESOURCE: ${AZURE_OPENAI_IDENTITY_RESOURCE:-}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       # B6 partial — Ollama (Mode-2 / Tier-1). Forwarded so the

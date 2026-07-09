@@ -335,6 +335,36 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   not a code fault). **NEXT (Workstream B remaining spine): B-7a profile manifests → B-7b the wizard**
 >   (absorbs ONBOARD-1/2 + G13/#473); B-2c org-skill red-team eval + B-4 org-playbooks still pending;
 >   plus #490 GW-FILEIDS follow-up and P-2 registry mirror (only if VM egress blocked). Maintainer picks.
+> - **AZ-6 ✓ BUILT (branch `az-6-keyless-managed-identity`, rebased on main `1b8237e1`; ADR-F072 proposed;
+>   task #494) — keyless Azure OpenAI auth via the VM's managed identity. Maintainer pivot 2026-07-09.
+>   PENDING the maintainer's PRE-PUSH diff review — committed locally (`c61195b5`), NOT pushed, NO PR yet
+>   (per the maintainer's "show me git status + full diff before any push").** Gateway-only, additive,
+>   flag-gated: when `AZURE_OPENAI_USE_MANAGED_IDENTITY=true` the `azure_openai` adapter mints a short-lived
+>   Entra bearer token from the VM's system-assigned managed identity (stdlib IMDS — NO azure-identity SDK,
+>   reuses KV-1's technique; **KV-1 left byte-identical**) and sends `Authorization: Bearer` instead of
+>   `api-key`; no key resolved/required. Flag unset ⇒ byte-identical. **SCOPE (confirmed vs current MS Learn
+>   — the silent-401 trap): IMDS `resource=` = the BARE audience `https://cognitiveservices.azure.com`, NO
+>   `/.default`** (that suffix is MSAL-scope-only); configurable via `AZURE_OPENAI_IDENTITY_RESOURCE` for the
+>   newer `/openai/v1/` route (`ai.azure.com`). **RBAC = "Cognitive Services OpenAI User"** (model inference),
+>   NOT Key Vault Secrets User. `gateway/app/azure_identity.py` (new) `ManagedIdentityTokenProvider`: token
+>   cached on `expires_on`, refreshed 5min early under an asyncio.Lock (once per refresh; mint in a worker
+>   thread); **serves the still-valid cached token if a refresh fails inside the skew** (review fix); mint
+>   failure → `ProviderNetworkError`; audience validated against an https-only regex before any URL; token
+>   NEVER logged. `azure_openai.py` gains `_auth_headers_async` + `from_config` flag wiring + health-check
+>   handling. Honesty note (ADR-F072): MI removes the on-disk key but the trust boundary is the HOST — any
+>   process on the VM can mint the same host-scoped token; not process isolation. **Scope = azure_openai ONLY
+>   (GPT + Mistral-on-Foundry); azure-claude (Anthropic x-api-key) NOT covered.** Gate: ruff + `mypy --strict`
+>   (41 files) clean; full containerized gateway suite **653 passed / 2 skipped** (baseline 648; +5 MI tests).
+>   Security-weighted review (4-dim, security lens 2 verifiers): security CLEAN; 1 should-fix + 1 nit FIXED,
+>   3 test nits added. Docs: ADR-F072, runbook §4c (role prereq + GPT + tool-calling synthetic smoke under
+>   token auth), .env/.env.prod/both composes plumbed. **Live proof = maintainer VM operator smoke** (§4c/§5;
+>   no Azure resource in dev/CI).
+> - Slice traps (AZ-6): (1) `Mapping.get()` returns `Any | None` → guard None before `int()` (narrow, do
+>   NOT `# type: ignore`) or mypy --strict flags it; (2) ruff joins the long IMDS URL literal to one line;
+>   (3) gateway gate runs in a `python:3.12-slim` container — `pip install .[dev]`, cwd=/repo/gateway so
+>   `import app`=source, run ruff from /repo (root config; gateway/pyproject has NO [tool.ruff]), mount `:ro`
+>   + `PYTHONDONTWRITEBYTECODE=1` + `RUFF/MYPY_CACHE_DIR=/tmp` to avoid root-owned pollution; (4) the fallback
+>   token TTL MUST exceed the refresh skew or the no-expiry path re-mints every request.
 > - **B-6 HITL-2 ✓ SHIPPED (branch `hitl-2-resume`, mig 0094, ADR-F071 HITL-2 addendum; task #491;
 >   contract = scratchpad `hitl2-contract.md`) — the resume round-trip, backend-only.**
 >   `POST /api/v1/agents/runs/{run_id}/resume` (owner-404; closed-enum body
