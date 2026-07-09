@@ -260,6 +260,43 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   added forward pointer), 2 rejected on sound grounds. **Follow-up (own ticket #490, GW-FILEIDS):**
 >   the api chat path emits `lq_ai_file_ids` but the gateway has NO consumer yet — either build gateway
 >   file-content injection or stop emitting it. Orthogonal to the leak fix.
+> - **B-6 HITL-3 ✓ SHIPPED (branch `b6-hitl-3-confirm-card`, ADR-F071 HITL-3 addendum; task #492) —
+>   the cockpit confirm card + admin stop-and-ask policy write. NO migration. Web-heavy + ONE admin
+>   endpoint.** Vocabulary LOCKED (maintainer): card title **"Waiting for your go-ahead"** / buttons
+>   **Approve · Refuse**. The card renders off the SETTLED `hitl_request` step (ADR-F004 — durable,
+>   survives reload; `name`=gated tool, `summary`=bounded `[{tool,args}]` digest parsed DEFENSIVELY,
+>   args rendered ESCAPED — untrusted). NO new stream frame + NO backend change for the card: HITL-1
+>   already emits the pause on the wire (`test_pause_wire_tail_...`); two one-line web validator
+>   widenings (`isStepKind`+`parseRunPayload` in `run-stream.ts`) stop the generic
+>   `data-step`(hitl_request)/`data-run`(awaiting_input) frames being dropped so the card also
+>   arrives+animates LIVE (CSS mount keyframe, motion-guarded). `HitlConfirmCard.svelte` (new;
+>   module-script logic unit-tested, RefusalMessageBubble pattern) + `resumeCurrentRun` (re-polls
+>   after `resumeRun`, never optimistic) wired into `ConversationPanel`; the pending step is filtered
+>   out of the timeline (`timelineSteps`) so it never doubles as a tool card. Actionable chip:
+>   `statusBadge('awaiting_input')` → **`{Needs you, warn}`** (amber) — one edit propagates to every
+>   `StatusPill` rail/matter/thread surface. Admin: **`PUT /practice-areas/{key}/hitl-policy`**
+>   (AdminUser), PUT-replace normalised to true-only (`{}`=zero-config), keys validated vs GLOBAL
+>   `hitl_eligible_tool_names()` → unknown = **400** (`ValidationError`, matching the `agent_config`
+>   posture — the kickoff said 422 but the app maps ValidationError→400; consistency wins). New
+>   read-model fields `hitl_policy` + `hitl_eligible_tools` (= area's bound-group grants via
+>   `area_hitl_eligible_tool_names`; matter-scope reads NOT offered). Admin checklist card added to
+>   `admin/areas/[key]` (net-new — there was NO F067-D5 placeholder). Audit `practice_area.hitl_policy`
+>   = tool NAMES only. Gate: **svelte-check 0 errors · vitest 113 files/1290 passed · slice eslint
+>   clean** (repo-wide eslint has pre-existing drift; the web gate is check+test:frontend, NOT lint) ·
+>   **ruff + `mypy app` (229) clean** · **api blast-radius 229 passed/1 skipped** (practice_areas +
+>   capabilities + hitl + composition + all 5 drift guards + area knowledge/playbooks). 5-lens
+>   adversarial review + per-finding verify: 4 refuted, 1 doc nit (stale "422" in a validator
+>   docstring) fixed. Live: deterministic Cypress `hitl3-confirm-card.cy.ts` (paused run → card →
+>   Approve → resume POST body → card dissolves; screenshots in `docs/fork/evidence/hitl3/`). Drift
+>   guards now **137/186/70** (test_mutation_rbac) + **186**/EXPECTED_PATHS (test_openapi) +
+>   IMPLEMENTED_ROUTES (test_endpoints). **NEXT = B-5 sub-agent roster UI** (per the B-ladder); the
+>   B-6 HITL milestone is COMPLETE. **Maintainer live gate REMAINS:** the real-model UAT (a Commercial
+>   agent emitting `apply_redline` → pauses → Approve applies) is browser UAT with you, on record.
+> - Slice traps (HITL-3): (1) `npm run format` reformats ~170 pre-existing-drift files — NEVER run it
+>   broadly; hand-fix or revert-non-slice. (2) a scoped CSS class on a lucide icon COMPONENT reads as
+>   "unused selector" — tint via the parent + `currentColor`. (3) adding a REQUIRED field to
+>   `PracticeArea` (TS) breaks every `area()` test fixture (3 files) — update them. (4) the app's
+>   `ValidationError` → 400, NOT 422 (the pydantic-boundary 422 is a different path).
 > - **B-6 HITL-2 ✓ SHIPPED (branch `hitl-2-resume`, mig 0094, ADR-F071 HITL-2 addendum; task #491;
 >   contract = scratchpad `hitl2-contract.md`) — the resume round-trip, backend-only.**
 >   `POST /api/v1/agents/runs/{run_id}/resume` (owner-404; closed-enum body

@@ -42,6 +42,14 @@ export interface PracticeArea {
 	default_budget_profile: 'economy' | 'balanced' | 'generous' | null;
 	/** Declarative agent config (subagents, by-reference playbooks/MCPs). */
 	agent_config: Record<string, unknown>;
+	/** HITL-3 (ADR-F071): the area's stop-and-ask policy — `{tool_name: true}`
+	 *  for each granted tool that pauses for the lawyer's go-ahead. `{}` = nothing
+	 *  gated (the zero-config default). */
+	hitl_policy: Record<string, boolean>;
+	/** HITL-3 (ADR-F071): the area's gate-able domain tools (sorted) — the
+	 *  stop-and-ask checklist; a read-only projection of the area's bound tool
+	 *  groups, not stored state. */
+	hitl_eligible_tools: string[];
 	/** Filesystem-canonical skill names bound to the area. */
 	bound_skills: string[];
 	/** Bound tool-group keys, REGISTRY-CANONICAL order (ADR-F062 D4) — never
@@ -105,6 +113,19 @@ export async function updatePracticeArea(
 	return apiRequest<PracticeArea>(`/practice-areas/${encodeURIComponent(key)}`, {
 		method: 'PATCH',
 		body
+	});
+}
+
+/** PUT /api/v1/practice-areas/{key}/hitl-policy — replace the area's stop-and-ask
+ *  policy (admin, HITL-3 / ADR-F071). `policy` is the COMPLETE desired map of gated
+ *  tools; an unknown tool name → 400. Returns the updated area. */
+export async function setHitlPolicy(
+	key: string,
+	policy: Record<string, boolean>
+): Promise<PracticeArea> {
+	return apiRequest<PracticeArea>(`/practice-areas/${encodeURIComponent(key)}/hitl-policy`, {
+		method: 'PUT',
+		body: { policy }
 	});
 }
 

@@ -261,6 +261,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/agents/matters",
         # F1-S3 (fork) — practice-area config/admin (ADR-F002/F004/F010)
         "/api/v1/practice-areas/{key}",
+        # HITL-3 (fork, ADR-F071) — admin stop-and-ask policy write
+        "/api/v1/practice-areas/{key}/hitl-policy",
         "/api/v1/practice-areas/{key}/skills",
         "/api/v1/practice-areas/{key}/skills/{skill_name}",
         # SETUP-4a (fork, ADR-F062) — practice-area tool-group attach/detach
@@ -426,7 +428,8 @@ async def test_openapi_paths_match_sketch() -> None:
     # +2: B-3 (ADR-F067 D1) — admin knowledge-collection attach/detach
     #   (/practice-areas/{key}/knowledge-bases + .../{kb_id} = 2 new paths, 182 -> 184).
     # +1: HITL-2 (ADR-F071) — POST /agents/runs/{run_id}/resume (184 -> 185).
-    assert len(actual) == 185  # +3: ADR-F054 capability panel (GET/PUT
+    # +1: HITL-3 (ADR-F071) — PUT /practice-areas/{key}/hitl-policy (185 -> 186).
+    assert len(actual) == 186  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

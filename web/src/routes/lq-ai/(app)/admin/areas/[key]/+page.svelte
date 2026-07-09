@@ -47,6 +47,7 @@
 		findAreaByKey,
 		formatDeleteConflict,
 		hasMultipleLedgerBearingGroups,
+		hitlPolicyDirty,
 		orgSkillBadges,
 		parseRosterDraft,
 		pickerEmptyState,
@@ -121,10 +122,20 @@
 	const groupOptions = $derived(area ? unboundOptions(toolCatalog, area.bound_tool_groups) : []);
 	const skillOptions = $derived(area ? unboundOptions(skillCatalog, area.bound_skills) : []);
 	const playbookOptions = $derived(
-		area ? unboundOptions(playbookCatalog, area.bound_playbooks.map((pb) => pb.id)) : []
+		area
+			? unboundOptions(
+					playbookCatalog,
+					area.bound_playbooks.map((pb) => pb.id)
+				)
+			: []
 	);
 	const knowledgeOptions = $derived(
-		area ? unboundOptions(knowledgeCatalog, area.bound_knowledge_bases.map((kb) => kb.id)) : []
+		area
+			? unboundOptions(
+					knowledgeCatalog,
+					area.bound_knowledge_bases.map((kb) => kb.id)
+				)
+			: []
 	);
 
 	async function load() {
@@ -174,6 +185,7 @@
 			draftTierFloor = area.default_tier_floor === null ? '' : String(area.default_tier_floor);
 			draftBudgetProfile = area.default_budget_profile ?? '';
 			draftRoster = JSON.stringify(area.agent_config ?? {}, null, 2);
+			hitlDraft = { ...(area.hitl_policy ?? {}) };
 		}
 	});
 
@@ -197,7 +209,8 @@
 			draftName = updated.name;
 			draftUnitLabel = updated.unit_label;
 			draftDoctrine = updated.profile_md ?? '';
-			draftTierFloor = updated.default_tier_floor === null ? '' : String(updated.default_tier_floor);
+			draftTierFloor =
+				updated.default_tier_floor === null ? '' : String(updated.default_tier_floor);
 			draftBudgetProfile = updated.default_budget_profile ?? '';
 		} catch (e) {
 			editError = describeMutationError(e, 'Failed to save changes.');
@@ -239,6 +252,34 @@
 	let knowledgeBusy = $state(false);
 	let knowledgeError = $state<string | null>(null);
 	let knowledgeSelection = $state('');
+
+	// ----- Stop-and-ask (HITL) policy — HITL-3 (ADR-F071) -----
+	// `hitlDraft` is the full boolean map keyed by the area's eligible tools; only
+	// the true entries are the policy. Reset from `area.hitl_policy` on area change
+	// (in the $effect below); saved via one PUT-replace.
+	let hitlBusy = $state(false);
+	let hitlError = $state<string | null>(null);
+	let hitlDraft = $state<Record<string, boolean>>({});
+	const hitlDirty = $derived(area ? hitlPolicyDirty(area.hitl_policy, hitlDraft) : false);
+
+	function toggleHitlTool(tool: string, enabled: boolean) {
+		hitlDraft = { ...hitlDraft, [tool]: enabled };
+	}
+
+	async function saveHitlPolicy() {
+		if (!area || !hitlDirty) return;
+		hitlBusy = true;
+		hitlError = null;
+		try {
+			const updated = await practiceAreasApi.setHitlPolicy(area.key, hitlDraft);
+			applyUpdated(updated);
+			hitlDraft = { ...updated.hitl_policy };
+		} catch (e) {
+			hitlError = describeMutationError(e, 'Failed to save the go-ahead policy.');
+		} finally {
+			hitlBusy = false;
+		}
+	}
 
 	async function attachGroup() {
 		if (!area || !groupSelection) return;
@@ -395,7 +436,11 @@
 </svelte:head>
 
 <PageShell size="wide" data-testid="lq-admin-area-page">
-	<a href="/lq-ai/admin/areas" class="text-sm text-muted-foreground hover:underline" data-testid="lq-admin-area-back-link">
+	<a
+		href="/lq-ai/admin/areas"
+		class="text-sm text-muted-foreground hover:underline"
+		data-testid="lq-admin-area-back-link"
+	>
 		&larr; Practice areas
 	</a>
 
@@ -540,7 +585,9 @@
 			{/if}
 			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-groups-list">
 				{#each area.bound_tool_groups as groupKey (groupKey)}
-					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+					<li
+						class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+					>
 						<span class="flex flex-wrap items-center gap-2">
 							<span class="text-sm text-foreground">{bindingLabel(toolCatalogAll, groupKey)}</span>
 							{@render degradedBindingChip(
@@ -607,7 +654,9 @@
 			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-skills-list">
 				{#each area.bound_skills as skillName (skillName)}
 					{@const orgBadge = orgSkillBadgeByKey.get(skillName)}
-					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+					<li
+						class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+					>
 						<span class="flex flex-wrap items-center gap-2">
 							<a
 								href="/lq-ai/skills/{encodeURIComponent(skillName)}"
@@ -686,7 +735,9 @@
 			<SectionHeader size="section" title="Playbooks" />
 			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-playbooks-list">
 				{#each area.bound_playbooks as pb (pb.id)}
-					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+					<li
+						class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+					>
 						<span class="flex flex-wrap items-center gap-2">
 							<span class="text-sm text-foreground">{pb.name}</span>
 							{@render degradedBindingChip(
@@ -755,7 +806,9 @@
 			<SectionHeader size="section" title="Knowledge collections" />
 			<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-knowledge-list">
 				{#each area.bound_knowledge_bases as kb (kb.id)}
-					<li class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+					<li
+						class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+					>
 						<span class="flex flex-wrap items-center gap-2">
 							<span class="text-sm text-foreground">{kb.name}</span>
 							{@render degradedBindingChip(
@@ -816,8 +869,56 @@
 			{/if}
 		</section>
 
+		<!-- ----- Stop-and-ask (HITL) policy — HITL-3 (ADR-F071) ----- -->
+		<section class="mt-6 space-y-3 rounded-lg border border-border p-4" aria-label="Stop-and-ask">
+			<SectionHeader size="section" title="Ask before acting" />
+			<p class="text-xs text-muted-foreground">
+				Choose which of this area's actions the agent must pause on — waiting for a lawyer's
+				go-ahead — before it runs them. Leave everything unchecked (the default) to let the agent
+				act on its own.
+			</p>
+			{#if area.hitl_eligible_tools.length === 0}
+				<p class="text-xs text-muted-foreground" data-testid="lq-admin-area-hitl-empty">
+					This area has no gate-able actions yet — attach a tool group above first.
+				</p>
+			{:else}
+				<ul class="flex flex-col gap-1.5" data-testid="lq-admin-area-hitl-list">
+					{#each area.hitl_eligible_tools as tool (tool)}
+						<li class="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
+							<label class="flex items-center gap-2 text-sm">
+								<input
+									type="checkbox"
+									class="size-4 accent-foreground"
+									checked={hitlDraft[tool] ?? false}
+									disabled={hitlBusy}
+									onchange={(e) => toggleHitlTool(tool, e.currentTarget.checked)}
+									data-testid={`lq-admin-area-hitl-toggle-${tool}`}
+								/>
+								<code class="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">{tool}</code>
+							</label>
+						</li>
+					{/each}
+				</ul>
+				{#if hitlError}
+					<Alert intent="error">{hitlError}</Alert>
+				{/if}
+				<Button
+					type="button"
+					variant="outline"
+					disabled={hitlBusy || !hitlDirty}
+					onclick={saveHitlPolicy}
+					data-testid="lq-admin-area-hitl-save"
+				>
+					{hitlBusy ? 'Saving…' : 'Save go-ahead policy'}
+				</Button>
+			{/if}
+		</section>
+
 		<!-- ----- Danger zone ----- -->
-		<section class="mt-6 space-y-3 rounded-lg border border-destructive/30 p-4" aria-label="Danger zone">
+		<section
+			class="mt-6 space-y-3 rounded-lg border border-destructive/30 p-4"
+			aria-label="Danger zone"
+		>
 			<SectionHeader size="section" title="Danger zone" />
 			{#if deleteError}
 				<Alert intent="error">{deleteError}</Alert>

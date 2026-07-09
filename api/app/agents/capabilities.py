@@ -323,6 +323,24 @@ def hitl_eligible_tool_names() -> frozenset[str]:
     return _MATTER_SCOPE_TOOL_NAMES | frozenset().union(*GROUP_TOOL_NAMES.values())
 
 
+def area_hitl_eligible_tool_names(bound_group_keys: Iterable[str]) -> frozenset[str]:
+    """The HITL-gate-eligible DOMAIN tools a specific area can grant (HITL-3).
+
+    The union of the grant sets of the area's bound tool groups — the actionable
+    domain tools (``apply_redline``, ``respond_to_counterparty``, ROPA/assessment
+    verbs, …) the area-admin card offers as a stop-and-ask checklist. A subset of
+    the global :func:`hitl_eligible_tool_names` the PUT validates against: the
+    always-built matter-scope tools (search/read/memory) are gate-able via the API
+    but deliberately NOT surfaced in the card — pausing before a read is rarely
+    wanted, and keeping the checklist to domain actions keeps it lawyer-legible.
+    Unknown group keys resolve to nothing (mirrors the lenient runtime compile).
+    """
+    names: set[str] = set()
+    for key in bound_group_keys:
+        names |= GROUP_TOOL_NAMES.get(key, frozenset())
+    return frozenset(names)
+
+
 # --- recommended Library sets (STORE-2 D-C) ----------------------------------
 #
 # The Store page's "Recommended for {area}" rail needs a runtime source for "what does

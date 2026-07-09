@@ -69,12 +69,18 @@
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import { renderModelMarkdown } from '$lib/lq-ai/sanitize-markdown';
 	import StepRow from './StepRow.svelte';
+	import HitlConfirmCard from './HitlConfirmCard.svelte';
 	import TabularPreview from './TabularPreview.svelte';
 	import { tabularGridIdsForTurn } from '$lib/lq-ai/agents/tabular-preview';
 	import { agentsApi, filesApi, matterFilesApi } from '$lib/lq-ai/api';
 	import { isRedlineOutput } from '$lib/lq-ai/api/editor';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
-	import type { AgentRun, AgentRunStep, AgentThreadDetailResponse } from '$lib/lq-ai/api/agents';
+	import type {
+		AgentRun,
+		AgentRunStep,
+		AgentThreadDetailResponse,
+		ResumeDecision
+	} from '$lib/lq-ai/api/agents';
 	import type { FileMeta, MatterFile, Project } from '$lib/lq-ai/types';
 	import {
 		MAX_POLL_FAILURES,
@@ -87,6 +93,7 @@
 		groupTurnSteps,
 		groupTurnTree,
 		matterName,
+		pendingHitlStep,
 		shouldContinuePollingThread,
 		splitThink,
 		statusBadge,
@@ -167,6 +174,10 @@
 	// PRIV-9a run-lock: the Stop control's in-flight + error state.
 	let cancelling = false;
 	let cancelError: string | null = null;
+	// HITL-3 (ADR-F071): the confirm card's in-flight + error state while an
+	// approve/reject decision is sent to POST /runs/{id}/resume.
+	let resuming = false;
+	let resumeError: string | null = null;
 	// The run id from createRun, before the first poll surfaces it — bridges the
 	// gap so Stop is targetable the instant the lock engages.
 	let pendingRunId: string | null = null;
@@ -494,6 +505,25 @@
 		if (currentThreadId) startPolling(currentThreadId);
 	}
 
+	// HITL-3 (ADR-F071): the confirm card's Approve/Refuse. Resume is run-per-
+	// resume — a NEW run continues the thread on the same checkpoint — so after
+	// the POST we re-sync by polling and let the SETTLED rows redraw the UI
+	// (ADR-F004), never an optimistic local mutation. The paused run's card
+	// disappears because polling replaces it with the fresh (running) run.
+	async function resumeCurrentRun(runId: string, decision: ResumeDecision) {
+		if (resuming) return;
+		resuming = true;
+		resumeError = null;
+		try {
+			await agentsApi.resumeRun(runId, decision);
+		} catch (e) {
+			resumeError = e instanceof Error ? e.message : 'Failed to send your decision';
+		} finally {
+			resuming = false;
+		}
+		if (currentThreadId) startPolling(currentThreadId);
+	}
+
 	// ---------------------------------------------------------------------
 	// SSE v2 — F0-S7 (ADR-F006 wire spec; ADR-F004 render-determinism)
 	// ---------------------------------------------------------------------
@@ -612,7 +642,7 @@
 					handleStreamPart(runId, part);
 				}
 			});
-		} catch (e) {
+		} catch {
 			if (abort.signal.aborted || gen !== pollGeneration) return;
 			// Transport failure: the stream is animation — fall back to the
 			// poll loop, which remains the contract (ADR-F004).
@@ -1013,6 +1043,9 @@
 			{@const turnHtml = answerHtmlFor(turn.run)}
 			{@const turnCost = formatRunCostUSD(turn.run.cost_usd)}
 			{@const turnGridIds = tabularGridIdsForTurn(turn.steps)}
+			{@const timelineSteps = turnSteps.filter((s) => s.kind !== 'hitl_request')}
+			{@const hitlStep =
+				i === detail.runs.length - 1 ? pendingHitlStep(turn.run, turn.steps) : null}
 			<section class="ag-run" data-testid="lq-ai-agents-run">
 				<header class="ag-run__head">
 					<p class="lq-text-body ag-run__prompt">{turn.run.prompt}</p>
@@ -1023,8 +1056,8 @@
 					{/if}
 				</header>
 
-				{#if turnSteps.length > 0}
-					{@const rows = groupTurnSteps(turnSteps)}
+				{#if timelineSteps.length > 0}
+					{@const rows = groupTurnSteps(timelineSteps)}
 					{@const segments = groupTurnTree(rows)}
 					{@const turnLive =
 						i === detail.runs.length - 1 && turn.run.status === 'running' && !stale}
@@ -1157,6 +1190,20 @@
 					<p class="lq-text-body-sm ag-error">
 						Run failed: {turn.run.error ?? 'unknown error'}
 					</p>
+				{/if}
+
+				{#if hitlStep}
+					<!-- HITL-3 (ADR-F071): the stop-and-ask confirm card. Renders off the
+					     SETTLED hitl_request step (durable, survives reload — ADR-F004);
+					     Approve/Refuse drive POST /runs/{id}/resume, then we re-poll so the
+					     fresh run replaces this paused one. -->
+					<HitlConfirmCard
+						step={hitlStep}
+						pending={resuming}
+						error={resumeError}
+						onApprove={() => resumeCurrentRun(turn.run.id, { type: 'approve' })}
+						onRefuse={() => resumeCurrentRun(turn.run.id, { type: 'reject' })}
+					/>
 				{/if}
 
 				<!-- F2 Tabular T2 (ADR-F055): one durable grid-preview card per grid this
@@ -1330,11 +1377,7 @@
 		<div class="ag-budget">
 			<label class="lq-text-label" for="ag-budget">Budget</label>
 			<div class="ag-matter__row">
-				<select
-					id="ag-budget"
-					data-testid="lq-ai-agents-budget-select"
-					bind:value={budgetProfile}
-				>
+				<select id="ag-budget" data-testid="lq-ai-agents-budget-select" bind:value={budgetProfile}>
 					<option value="">Default</option>
 					<option value="economy">Economy</option>
 					<option value="balanced">Balanced</option>

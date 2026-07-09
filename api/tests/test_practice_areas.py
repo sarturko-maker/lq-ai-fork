@@ -780,6 +780,112 @@ async def test_patch_unknown_area_is_404(client: AsyncClient, admin: User) -> No
     assert resp.status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# HITL-3 (ADR-F071) — admin stop-and-ask (hitl_policy) write.
+# ---------------------------------------------------------------------------
+
+
+async def test_read_exposes_hitl_policy_and_eligible_tools(client: AsyncClient, user: User) -> None:
+    """The read model surfaces the area's HITL policy (default ``{}``) and its
+    gate-able DOMAIN tools (the union of its bound tool groups' grants). Commercial
+    binds the redlining group, so ``apply_redline`` is offered."""
+    resp = await client.get("/api/v1/practice-areas", headers=_bearer(user))
+    assert resp.status_code == 200
+    commercial = next(a for a in resp.json()["practice_areas"] if a["key"] == "commercial")
+    assert commercial["hitl_policy"] == {}
+    assert "apply_redline" in commercial["hitl_eligible_tools"]
+    # Sorted + de-duplicated projection of the grants.
+    assert commercial["hitl_eligible_tools"] == sorted(set(commercial["hitl_eligible_tools"]))
+
+
+async def test_admin_put_hitl_policy_sets_and_persists(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    resp = await client.put(
+        "/api/v1/practice-areas/commercial/hitl-policy",
+        headers=_bearer(admin),
+        json={"policy": {"apply_redline": True}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["hitl_policy"] == {"apply_redline": True}
+
+    # Persisted + visible on the next read.
+    read = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
+    commercial = next(a for a in read.json()["practice_areas"] if a["key"] == "commercial")
+    assert commercial["hitl_policy"] == {"apply_redline": True}
+
+    # Audited — tool NAMES only (config, not user data / secrets).
+    row = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.action == "practice_area.hitl_policy")
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert row is not None
+    assert row.details.get("tools") == ["apply_redline"]
+
+
+async def test_admin_put_hitl_policy_is_replace_and_normalizes_false(
+    client: AsyncClient, admin: User
+) -> None:
+    """PUT-replace: a tool set ``false`` (or omitted) is not gated, so the stored
+    column keeps only the ``true`` entries — ``{}`` stays the zero-config default."""
+    await client.put(
+        "/api/v1/practice-areas/commercial/hitl-policy",
+        headers=_bearer(admin),
+        json={"policy": {"apply_redline": True}},
+    )
+    resp = await client.put(
+        "/api/v1/practice-areas/commercial/hitl-policy",
+        headers=_bearer(admin),
+        json={"policy": {"apply_redline": False}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["hitl_policy"] == {}
+
+
+async def test_admin_put_hitl_policy_rejects_unknown_tool(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    """A tool name outside the global eligible set is a 400 (loud typo guard,
+    matching the agent_config validation posture), never persisted — HITL-1's
+    runtime compile only drops unknown names quietly."""
+    resp = await client.put(
+        "/api/v1/practice-areas/commercial/hitl-policy",
+        headers=_bearer(admin),
+        json={"policy": {"not_a_real_tool": True}},
+    )
+    assert resp.status_code == 400
+    # The offending name is echoed back so the admin can fix the typo.
+    assert "not_a_real_tool" in str(resp.json())
+
+    area = (
+        await db_session.execute(select(PracticeArea).where(PracticeArea.key == "commercial"))
+    ).scalar_one()
+    assert area.hitl_policy == {}
+
+
+async def test_put_hitl_policy_requires_admin(client: AsyncClient, user: User) -> None:
+    resp = await client.put(
+        "/api/v1/practice-areas/commercial/hitl-policy",
+        headers=_bearer(user),
+        json={"policy": {"apply_redline": True}},
+    )
+    assert resp.status_code == 403
+
+
+async def test_put_hitl_policy_unknown_area_is_404(client: AsyncClient, admin: User) -> None:
+    resp = await client.put(
+        "/api/v1/practice-areas/does-not-exist/hitl-policy",
+        headers=_bearer(admin),
+        json={"policy": {}},
+    )
+    assert resp.status_code == 404
+
+
 async def test_skill_attach_unknown_skill_is_404(client: AsyncClient, admin: User) -> None:
     resp = await client.post(
         "/api/v1/practice-areas/commercial/skills",

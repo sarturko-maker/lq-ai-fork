@@ -86,6 +86,21 @@ describe('parseStepPayload', () => {
 		expect(parseStepPayload({ id: 's1' })).toBeNull();
 		expect(parseStepPayload(payload({ kind: 'weird' as never }))).toBeNull();
 	});
+
+	it('accepts a hitl_request pause step (HITL-3, ADR-F071) rather than dropping it', () => {
+		const parsed = parseStepPayload(
+			payload({
+				id: 'h1',
+				run_id: 'r1',
+				seq: 5,
+				kind: 'hitl_request',
+				name: 'apply_redline',
+				summary: '[{"args":{},"tool":"apply_redline"}]'
+			})
+		);
+		expect(parsed).not.toBeNull();
+		expect(parsed?.kind).toBe('hitl_request');
+	});
 });
 
 describe('parseRunPayload', () => {
@@ -99,6 +114,15 @@ describe('parseRunPayload', () => {
 	it('rejects unknown statuses', () => {
 		expect(parseRunPayload({ status: 'exploded' })).toBeNull();
 		expect(parseRunPayload(null)).toBeNull();
+	});
+
+	it('accepts the awaiting_input pause status (HITL-3, ADR-F071)', () => {
+		expect(parseRunPayload({ status: 'awaiting_input', error: null })).toEqual({
+			status: 'awaiting_input',
+			error: null
+		});
+		// A truly unknown status still drops (the poller carries the truth).
+		expect(parseRunPayload({ status: 'bogus' })).toBeNull();
 	});
 });
 

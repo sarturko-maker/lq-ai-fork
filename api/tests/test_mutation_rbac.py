@@ -144,8 +144,11 @@ def test_mutating_route_entry_count_pinned() -> None:
     B-3 (ADR-F067 D1) adds 2 mutating practice-area routes (POST/DELETE
     /practice-areas/{key}/knowledge-bases), both AdminUser-gated: 133 → 135.
     HITL-2 (ADR-F071) adds 1 mutating route (POST /agents/runs/{run_id}/resume,
-    MutatingUser-gated): 135 → 136."""
-    assert len(_mutating_routes()) == 136
+    MutatingUser-gated): 135 → 136.
+    HITL-3 (ADR-F071) adds 1 mutating route (PUT
+    /practice-areas/{key}/hitl-policy, AdminUser-gated — passes the drift guard
+    automatically, no allowlist entry): 136 → 137."""
+    assert len(_mutating_routes()) == 137
 
 
 @pytest.mark.unit
@@ -157,13 +160,14 @@ def test_api_v1_path_count_pinned() -> None:
     admin/org-skills + approve/reject/revoke): 176 → 182.
     B-3 (ADR-F067 D1) adds 2 paths (POST/DELETE
     /practice-areas/{key}/knowledge-bases): 182 → 184.
-    HITL-2 (ADR-F071) adds 1 path (POST /agents/runs/{run_id}/resume): 184 → 185."""
+    HITL-2 (ADR-F071) adds 1 path (POST /agents/runs/{run_id}/resume): 184 → 185.
+    HITL-3 (ADR-F071) adds 1 path (PUT /practice-areas/{key}/hitl-policy): 185 → 186."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 185
+    assert len(paths) == 186
 
 
 @pytest.mark.unit
@@ -172,7 +176,8 @@ def test_swapped_routers_expose_no_ungated_write() -> None:
     autonomous via the stacked opt-in gate, §E; B-2a adds POST
     /user-skills/{skill_id}/propose — the author-side org-skill propose).
     HITL-2 (ADR-F071) adds POST /agents/runs/{run_id}/resume (MutatingUser):
-    69 → 70."""
+    69 → 70. HITL-3 (ADR-F071) adds PUT /practice-areas/{key}/hitl-policy but it
+    is AdminUser-gated, so this get_mutating_user count is UNCHANGED at 70."""
     gated = sum(
         1
         for _m, _p, route in _mutating_routes()

@@ -109,6 +109,31 @@ export function unboundOptions(options: CatalogOption[], boundKeys: string[]): C
 	return options.filter((o) => !bound.has(o.key));
 }
 
+/**
+ * HITL-3 (ADR-F071) — the enabled (gated) tool names in a draft stop-and-ask
+ * policy, sorted. The admin card's checkbox draft carries eligible tools as a
+ * boolean map; only the `true` ones are the policy. Sorted so the dirty check
+ * and the PUT body are order-stable.
+ */
+export function hitlEnabledTools(draft: Record<string, boolean>): string[] {
+	return Object.keys(draft)
+		.filter((name) => draft[name])
+		.sort();
+}
+
+/**
+ * True when a draft policy's enabled set differs from the area's saved
+ * `hitl_policy` — gates the Save button so no no-op PUT is sent.
+ */
+export function hitlPolicyDirty(
+	saved: Record<string, boolean>,
+	draft: Record<string, boolean>
+): boolean {
+	const a = hitlEnabledTools(saved);
+	const b = hitlEnabledTools(draft);
+	return a.length !== b.length || a.some((name, i) => name !== b[i]);
+}
+
 /** The shape `provenanceBadge` ($lib/lq-ai/library/page-helpers) needs for an
  *  org-authored skill's provenance chip. */
 export interface OrgSkillBadge {
@@ -203,7 +228,9 @@ export const LEDGER_BEARING_GROUPS = ['redlining', 'ropa'] as const;
 
 /** True when 2+ ledger-bearing groups are bound to the area (D5 caption gate). */
 export function hasMultipleLedgerBearingGroups(boundGroups: string[]): boolean {
-	return boundGroups.filter((g) => (LEDGER_BEARING_GROUPS as readonly string[]).includes(g)).length >= 2;
+	return (
+		boundGroups.filter((g) => (LEDGER_BEARING_GROUPS as readonly string[]).includes(g)).length >= 2
+	);
 }
 
 /**
