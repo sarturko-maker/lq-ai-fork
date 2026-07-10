@@ -19,11 +19,12 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 
 # Import every model module so SQLAlchemy registers them with Base.metadata.
 # This is what `autogenerate` reads to compare schema vs. database state.
 from app.db.base import Base
+from app.db.migration_lock import MIGRATION_ADVISORY_LOCK_KEY
 from app.models import AuditLog, InferenceRoutingLog, User, UserSession  # noqa: F401
 
 config = context.config
@@ -71,7 +72,16 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations against a live database connection."""
+    """Run migrations against a live database connection.
+
+    Concurrent runners — e.g. multiple ``api`` replicas each running
+    ``alembic upgrade head`` on boot (HS-1) — serialize on a Postgres
+    *session-level* advisory lock so only one applies DDL at a time. The first
+    to acquire the lock migrates to head; the rest block, then no-op once they
+    see the schema is already current. Session-scoped (not ``pg_advisory_xact_lock``)
+    so it is held across Alembic's own BEGIN/COMMIT and released explicitly when
+    migrations finish (and again implicitly when the connection closes).
+    """
     configuration = config.get_section(config.config_ini_section) or {}
     configuration["sqlalchemy.url"] = _resolve_database_url()
 
@@ -82,15 +92,37 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,
-            compare_server_default=True,
-        )
+        # Postgres-only primitive; guard so a non-pg engine (offline tooling)
+        # never trips over it. The app is Postgres/pgvector, so this is the
+        # normal path.
+        lock_held = connection.dialect.name == "postgresql"
+        if lock_held:
+            connection.execute(
+                text("SELECT pg_advisory_lock(:key)"),
+                {"key": MIGRATION_ADVISORY_LOCK_KEY},
+            )
+            # Commit the implicit transaction opened by the lock statement so
+            # Alembic gets a clean connection for its own transaction. The
+            # advisory lock is SESSION-scoped and survives this commit.
+            connection.commit()
 
-        with context.begin_transaction():
-            context.run_migrations()
+        try:
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                compare_type=True,
+                compare_server_default=True,
+            )
+
+            with context.begin_transaction():
+                context.run_migrations()
+        finally:
+            if lock_held:
+                connection.execute(
+                    text("SELECT pg_advisory_unlock(:key)"),
+                    {"key": MIGRATION_ADVISORY_LOCK_KEY},
+                )
+                connection.commit()
 
 
 if context.is_offline_mode():
