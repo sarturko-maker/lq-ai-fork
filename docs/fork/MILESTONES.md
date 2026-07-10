@@ -803,11 +803,15 @@ the **customer's own Azure subscription — we host nothing** (the production pa
 Full Phase-1 research report + rationale: **`docs/fork/plans/ENTERPRISE-AZURE-K8S-phase1.md`** (charter:
 `…-research-brief.md`). §10 code-audit: **5 CONFIRMED · 1 PARTIAL · 1 REFUTED** horizontal-scale blockers.
 
-**GATE — awaits maintainer:** ratify **open decisions D1–D14** (report §"Consolidated open decisions"),
-esp. data-plane default (managed PaaS vs in-cluster), Terraform-vs-Bicep, security-control phasing, and
-Entra-SSO-now-vs-fast-follow. Each recommended ADR (F073 tenancy-per-customer, F074 data-plane, F075 IaC,
-F076 Workload-Identity, F077 migrate-as-Job, F078 gateway-sole-egress-on-AKS, F079 Entra SSO/SCIM, F080
-gateway multi-replica config) is **drafted-as-recommendation only** and gets written per-slice once decided.
+**MAINTAINER RULINGS 2026-07-10 (report § "Maintainer rulings"):** **D4** SSO is an OPTIONAL per-customer
+overlay — **local login is ALWAYS retained**, coexists, SSO-only disables local login by config (NOT a
+rebuild/retire); **D7** data residency **REMOVED** (customer deploys models + picks the zone — not ours);
+**D10** reuse the customer's firewall (cost cliff mostly gone); **D13** **FIX** playbooks (widely used — not
+dropped); defaults **D1** managed PaaS, **D6** in-cluster MinIO, **D2** Terraform+AVM confirmed. Still open:
+D3 phasing, D5 tenancy, D8/D9/D11/D12/D14. Each recommended ADR (F073 tenancy-per-customer, F074 data-plane,
+F075 IaC, F076 Workload-Identity, F077 migrate-as-Job, F078 gateway-sole-egress-on-AKS, F079 Entra SSO/SCIM
+[optional overlay], F080 gateway multi-replica config) is **drafted-as-recommendation only** and gets written
+per-slice once its call is settled.
 
 Phase 1 slices (full 30-slice/5-phase ladder in the report; ⚠︎ = a CONFIRMED §10 blocker fix):
 
@@ -824,8 +828,8 @@ Phase 1 slices (full 30-slice/5-phase ladder in the report; ⚠︎ = a CONFIRMED
 - **K8S-8 ⚠︎(HS-4)** — agent-worker `max_jobs` + K8s requests/limits/QoS sized for the ONNX footprint;
   agent-run vs ingest as separate Deployments/HPAs.
 - **K8S-9 ⚠︎(HS-7)** — collabora single-replica (`strategy: Recreate`, `home_mode` off in prod).
-- **K8S-10 ⚠︎(HS-6)** — migrate the legacy playbook executor onto arq + F009 orphan sweep (or drop from the
-  image if retired — D13).
+- **K8S-10 ⚠︎(HS-6)** — migrate the legacy playbook executor onto arq + F009 orphan sweep (**DECIDED: FIX —
+  playbooks widely used; not dropped**).
 - **K8S-11 ⚠︎(HS-3 invariant)** — codify single shared non-clustered Redis + single queue (preserves arq's
   cluster-wide cron dedup).
 - **K8S-12/13/14** — OBS slice (init OTel in both workers, probes, scrape annotations); SSE ingress

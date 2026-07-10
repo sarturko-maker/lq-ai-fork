@@ -6,6 +6,30 @@ Sources: Microsoft Learn / Azure docs fetched 2026-07-10 (URLs at the end) + dir
 
 > **§10 horizontal-scale audit result: 5 CONFIRMED · 1 PARTIAL · 1 REFUTED blockers** (code-verified). All five CONFIRMED blockers are scheduled into Phase 1 of the ladder below — they gate "effortless scale".
 
+## Maintainer rulings (2026-07-10)
+
+The maintainer reviewed this report and decided the headline questions. **These are authoritative and
+override the "options" framing in the § Consolidated open decisions section below.**
+
+1. **End-user login (D4) — DECIDED: SSO is OPTIONAL, per customer; our local login ALWAYS remains.** SSO is
+   *not* a replacement for local auth — both coexist in the product and each customer chooses. A customer that
+   mandates "work-account sign-in only" disables local login by configuration; the local auth substrate is
+   never removed. This makes the SSO piece an **optional overlay** at the single `get_current_user` seam, not
+   a rebuild of our auth.
+2. **Data residency / Claude-in-EU (D7) — REMOVED (not ours to solve).** The customer deploys the models in
+   their OWN Azure and picks the region/zone at deploy time; our gateway just points at the endpoint they
+   configured. Region + model stay per-customer parameters (already true via the alias→deployment
+   indirection). Residency is the customer's deploy-time responsibility — nothing for us to build, and no
+   "is Claude available in Europe" dependency to design around.
+3. **Azure Firewall ownership (D10) — DECIDED: reuse the customer's.** Default to sitting behind the customer's
+   existing hub firewall; stand up our own only if a customer lacks one. The Phase-2 "cost cliff" largely
+   disappears for enterprise customers.
+4. **Legacy playbook executor (D13 / HS-6) — DECIDED: FIX it.** Playbooks ship in the enterprise product and
+   are widely used, so migrate the executor onto the durable arq queue (survives pod eviction) + orphan sweep.
+   Do NOT drop it.
+5. **Confirmed defaults (no objection):** managed PaaS for the DB/cache (D1), in-cluster MinIO object store
+   (D6), Terraform + Azure Verified Modules as the setup tool (D2).
+
 ## Verdict table
 
 | # | Section | Bottom-line verdict / recommendation |
@@ -13,7 +37,7 @@ Sources: Microsoft Learn / Azure docs fetched 2026-07-10 (URLs at the end) + dir
 | §1 | Target topology | **One private AKS cluster per customer**, in the customer's own subscription/VNet — 3 zone-spanning node pools (tainted system, app, dedicated Guaranteed-QoS worker for ONNX/Docling/PyMuPDF, no GPU); 6 app containers → Deployments (arq KEDA-scaled, collabora single-replica), PDB on every Deployment, Cluster Autoscaler now / NAP later. **Gate: fix the §10 in-memory-brake + SSE-single-replica defects before any api/worker replica count exceeds 1.** |
 | §2 | Data plane | **Managed-by-default for stateful cores, in-cluster for boundaries.** Postgres+pgvector → Azure DB for PostgreSQL Flexible Server (allowlist `vector` in `azure.extensions`); Redis → Azure Cache; **object storage stays in-cluster MinIO** (Blob has no S3 API, our layer is aioboto3) with managed Blob as an enterprise upgrade; ONNX + PyMuPDF/Collabora stay in-cluster. Ship a CloudNativePG overlay (same `DATABASE_URL`) for air-gapped/ADR-F070. |
 | §3 | Foundry / model access | **Keyless via Workload Identity.** Add an SDK-free `WorkloadIdentityTokenProvider` alongside the IMDS one, selected by `AZURE_FEDERATED_TOKEN_FILE`; **append `/.default`** (the F072 bare-audience trap inverts on the v2 endpoint); per-deployment user-assigned MI, role **Cognitive Services OpenAI User**. Keyless Claude is a separate slice; Claude's missing EU data zone is a maintainer legal/product call. |
-| §4 | Identity (service + user) | **Two tracks.** Service identity (Workload Identity for gateway/api/both workers) belongs in cut 1 — granting the Foundry role to the gateway pod alone strengthens sole-egress. End-user **Entra SSO + SCIM** is its own ADR'd workstream (verifies at the single `get_current_user` seam): **SSO-first, SCIM fast-follow**, operator kept out of the tenant SCIM group to preserve the F064 fence. |
+| §4 | Identity (service + user) | **Two tracks.** Service identity (Workload Identity for gateway/api/both workers) belongs in cut 1 — granting the Foundry role to the gateway pod alone strengthens sole-egress. End-user **Entra SSO + SCIM** is its own ADR'd workstream (verifies at the single `get_current_user` seam): **SSO-first, SCIM fast-follow**, operator kept out of the tenant SCIM group to preserve the F064 fence. **DECIDED: optional per-customer overlay — local login always retained; see § Maintainer rulings.** |
 | §5 | Networking | **Fully-private posture = Phase 2 (ADR-F070 on AKS).** Private API server (create-time), Private Endpoints for data plane/KV/ACR/Foundry with public access disabled, `outboundType=UDR` → Azure Firewall deny-by-default (F070 §8.4 allowlist), Cilium default-deny NetworkPolicy so only the gateway reaches model endpoints, AGC + Azure WAF ingress. **Avoid AGIC / ingress-nginx**; retain Caddy in-cluster as the tested WOPI/internal/metrics deny layer. |
 | §6 | Secrets & keys | **Key Vault CSI + Workload Identity as the sole secret-injection mechanism**, sourced from the customer's Key Vault, mounted as tmpfs files. Disable the gateway's in-process IMDS KV fetch on AKS (F069 addendum — it grabs the node identity). WI only removes Azure provider keys; gateway key/JWT/Fernet/non-Azure keys/DB+MinIO creds still need CSI. CMK: managed-disk (DES) baseline, etcd KMS + PaaS-CMK as enterprise opt-in. |
 | §7 | IaC + delivery | **Terraform (azurerm) + Azure Verified Modules** as primary landing-zone IaC, state in a bootstrap storage account inside the customer's own subscription (we host nothing). Single umbrella Helm chart lifting `docker-compose.prod.yml`'s env contract 1:1; GitOps via managed `microsoft.flux` (Phase 2; pipeline-push Phase 1). **One `customer.values.yaml`** projected into both tfvars and values. Keep the boundary clean so Bicep stays a drop-in. |
@@ -289,13 +313,13 @@ ADR-F069 and ADR-F072 both mint their tokens by calling the **IMDS endpoint `htt
 
 ### 4.2 End-user identity — Entra SSO + SCIM (the sizeable workstream)
 
-Today the fork ships a **complete self-contained local auth substrate**. Enterprise buyers on Entra will expect their lawyers to sign in with corporate SSO and be provisioned/deprovisioned automatically — which means **replacing**, not extending, most of this.
+Today the fork ships a **complete self-contained local auth substrate**. Enterprise buyers on Entra will often want their lawyers to sign in with corporate SSO and be provisioned/deprovisioned automatically. **DECIDED (maintainer, 2026-07-10): SSO is an OPTIONAL overlay, not a replacement — the local auth substrate is ALWAYS retained; a customer that mandates SSO-only disables local login by configuration. Both live side by side and each customer chooses.** The analysis below measures the seam so the optional overlay is well-scoped, not to justify ripping local auth out.
 
 **How much of the app assumes local auth (measured):**
 
 - **331 auth-dependency usages across 32 router files** — `ActiveUser` (123), `AdminUser` (92), `MutatingUser` (82), `OperatorUser` (17), `CurrentUser` (17). Every one funnels through a **single choke point**: `get_current_user` (`api/app/api/dependencies.py:51-75`) → `decode_access_token` (`api/app/security/jwt.py:125`) → **HS256 verification against a local `settings.jwt_secret`**.
 - The **good news**: because there is exactly one seam, an Entra-issued bearer token can be verified there (validate an Entra JWT / accept an SSO-proxy identity) without touching 331 call sites — the role model downstream is unchanged.
-- The **replaced surface**: the entire local credential + lifecycle machinery becomes redundant or must be fenced off — `POST /auth/login`, `/refresh`, `/logout`, `/change-password`, all `/mfa/*` (setup/enable/verify/disable), `/accept-invite`, `/password-reset(-request)` (`api/app/api/auth.py`), plus the admin lifecycle: `create_invite` / `resend` / `revoke` / `disable` / `enable` / `update_user_role` (`api/app/api/admin.py:1031+`, `:804`). Under Entra SSO these are owned by the IdP; under SCIM, user create/update/disable is driven by Microsoft Entra's provisioning service, not by our admin invites. MFA in particular moves entirely to Entra Conditional Access.
+- The **optionally-disabled surface** (retained in the product; a customer on SSO-only disables these by config — they are NOT removed, since local login stays supported for other customers): the local credential + lifecycle machinery — `POST /auth/login`, `/refresh`, `/logout`, `/change-password`, all `/mfa/*` (setup/enable/verify/disable), `/accept-invite`, `/password-reset(-request)` (`api/app/api/auth.py`), plus the admin lifecycle: `create_invite` / `resend` / `revoke` / `disable` / `enable` / `update_user_role` (`api/app/api/admin.py:1031+`, `:804`). Under Entra SSO these are owned by the IdP; under SCIM, user create/update/disable is driven by Microsoft Entra's provisioning service, not by our admin invites. MFA in particular moves entirely to Entra Conditional Access.
 - **Web coupling**: `web/src/lib/lq-ai/auth/` (auth store), `web/src/routes/lq-ai/login/`, `web/src/lib/lq-ai/api/auth.ts` — the SPA login/refresh flow is rebuilt around an OIDC redirect.
 
 **Standards confirmed:** Entra enterprise apps do **SSO via SAML or OIDC**, and **automatic provisioning via SCIM 2.0** (create/update/deactivate users *and groups*), with group-based provisioning driving access by group membership ([Learn: app provisioning / SCIM](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/user-provisioning), [Learn: build a SCIM endpoint](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/use-scim-to-provision-users-and-groups)). SCIM requires us to **build and host a SCIM 2.0 endpoint** that Entra calls — that is net-new API surface, not a config toggle.
@@ -319,9 +343,13 @@ An honest SSO/SCIM cut requires: (1) an OIDC token-verification path at the `get
 
 ---
 
-### 4.3 Open decision for the maintainer
+### 4.3 Maintainer ruling (2026-07-10) — DECIDED
 
-**Is Entra SSO/SCIM in the first enterprise cut, or a fast-follow?** Both are defensible:
+**SSO is OPTIONAL and per-customer; local login is ALWAYS retained.** SSO/SCIM is an opt-in identity overlay
+a customer can enable; it does not replace or retire our local auth. A customer that mandates work-account-only
+sign-in disables local login by configuration. The product must support **both, side by side**, with the
+choice per deployment. The two bullets below are retained only as rationale for *which optional capability
+lands first* (SSO before SCIM):
 
 - **Fast-follow (recommended default):** ship cut 1 with **service identity keyless (Workload Identity)** + the **existing local login retained** for end users (admin-invite lifecycle already works, ADR-F061/F064). This de-risks the first customer — SSO is the single most common enterprise procurement blocker but rarely a *day-one* deployment blocker, and our local auth is already hardened (MFA, rate-limits, session caps, HMAC refresh index). SSO/SCIM lands as the very next milestone.
 - **First-cut:** if the design-partner customer's security review *gates* on "no local passwords, SSO only," SSO (OIDC) must be in cut 1; SCIM provisioning can still trail (admins invite manually until SCIM lands).
@@ -1191,6 +1219,12 @@ The five phases follow the charter. **All five CONFIRMED §10 blockers are sched
 
 ## Consolidated open decisions for the maintainer
 
+> **STATUS 2026-07-10:** the maintainer has DECIDED the headline items — see **§ Maintainer rulings** at the
+> top. **D4** (SSO optional overlay, local login retained), **D10** (reuse customer firewall), **D13** (fix
+> playbooks), and the defaults **D1/D2/D6** are settled; **D7 (residency) is REMOVED** (the customer deploys
+> models + picks the zone — not ours to solve). The remaining decisions (D3 phasing, D5 tenancy, D8/D9/D11/
+> D12/D14) stay open. The entries below are kept for rationale.
+
 ### D1. Data-plane default: managed PaaS vs in-cluster stateful cores (charter i)
 - **Options:** (A) Azure DB for PostgreSQL Flexible Server + Azure Cache for Redis by default, in-cluster CloudNativePG/redis overlay for air-gapped/ADR-F070; (B) in-cluster pgvector + redis StatefulSets everywhere (customer owns DB ops); object storage is a fixed exception either way (in-cluster MinIO default, Blob as upgrade — Blob has no S3 API).
 - **Recommendation:** Managed-by-default (A): Flexible Server + Azure Cache is the enterprise-buyer expectation (Azure owns patching/HA/backup) and unlocks per-service CMK; ship CloudNativePG as the same-DATABASE_URL overlay for restricted-egress. Confirm the first target customer's landing zone permits a PaaS DB vs mandates in-VNet/in-cluster.
@@ -1215,7 +1249,11 @@ The five phases follow the charter. **All five CONFIRMED §10 blockers are sched
 - **Options:** (A) in-cluster MinIO as the only supported store; (B) S3Proxy sidecar in front of Blob (zero app-code, extra hop — verify multipart + presigned-URL fidelity); (C) native Azure Blob backend behind a storage Protocol (real slice: presigned GET→SAS, copy_object→server-side copy, multipart→Block Blob staging).
 - **Recommendation:** Ship MinIO in-cluster as the default (byte-clean, honours the AGPL server-side posture) and offer (C) native Blob as the enterprise upgrade for customers who want Entra/Workload-Identity storage auth and one fewer stateful pod. Treat (B) S3Proxy as an interim if a customer needs Blob before (C) is funded. Maintainer picks the default enterprise posture.
 
-### D7. Claude-on-Foundry EU data residency
+### D7. Claude-on-Foundry EU data residency — ❌ REMOVED (not ours to solve)
+> **Maintainer ruling:** the customer deploys the models in their own Azure and picks the region/zone at
+> deploy time; our gateway points at that endpoint. Region + model are per-customer parameters (alias→
+> deployment indirection already supports this). Residency is the customer's deploy-time responsibility —
+> nothing for us to build. The options below are moot.
 - **Options:** (a) run agents on GPT-class in an EU region and reserve Claude for non-residency work; (b) accept Sweden Central under a DPA covering Anthropic processing; (c) treat Claude as unavailable until Anthropic ships Foundry EU (~2026).
 - **Recommendation:** This is a legal/product call per customer, not an engineering default — surface it explicitly. Keep region + agent-model-family as per-customer parameters and the alias→deployment indirection intact so the choice is a config change, not a code change.
 
@@ -1261,7 +1299,7 @@ Vertical, end-to-end, testable slices (each ≤2–3 days, one PR), grouped by p
 - **K8S-7 ⚠︎(HS-2)** — Gateway config as immutable read-only ConfigMap + KV CSI; return 405/409 on runtime alias/provider-key/tier writes when mounted `:ro`; document the interim `replicas:1` ceiling.
 - **K8S-8 ⚠︎(HS-4)** — Agent-worker `max_jobs` (new `lq_ai_agent_worker_concurrency`, default 2–4) + K8s requests/limits/QoS sized for the ~2.5 GiB ONNX footprint × max_jobs; agent-run and ingest as separate Deployments with independent HPAs.
 - **K8S-9 ⚠︎(HS-7)** — Collabora single-replica Deployment, `strategy: Recreate`, `home_mode` off for production; document (do not enable) the WOPISrc-consistent-hash multi-pod path.
-- **K8S-10 ⚠︎(HS-6)** — Migrate the classic playbook executor onto arq (`enqueue_playbook_execution_job` + worker consumer) and extend the F009 startup orphan sweep to `PlaybookExecution` — OR drop the executor from the image if being retired.
+- **K8S-10 ⚠︎(HS-6)** — Migrate the classic playbook executor onto arq (`enqueue_playbook_execution_job` + worker consumer) and extend the F009 startup orphan sweep to `PlaybookExecution`. **DECIDED (maintainer): FIX — playbooks ship in the enterprise product and are widely used; do NOT drop.**
 - **K8S-11 ⚠︎(HS-3 invariant)** — Codify single shared non-clustered Azure Cache for Redis + single `queue_name` as an explicit deployment invariant (preserves arq's cluster-wide cron dedup); atomic per-schedule advance (`UPDATE … WHERE next_run_at <= now RETURNING id`) as belt-and-braces.
 - **K8S-12** — OBS slice: call `_maybe_init_otel` from both worker `on_startup` hooks; liveness/startup probes for HTTP services, workers, and collabora's warm-up; `prometheus.io/scrape` annotations on api/gateway; in-cluster OTel Collector target, telemetry opt-in.
 - **K8S-13** — SSE-on-AKS ingress hardening: basic internal ingress with response buffering disabled + long read timeouts for `text/event-stream` (app already sends `x-accel-buffering: no`).
@@ -1280,7 +1318,7 @@ Vertical, end-to-end, testable slices (each ≤2–3 days, one PR), grouped by p
 ### Phase 3 — Entra SSO / SCIM
 - **K8S-23** — Entra OIDC/SAML SSO at the single `get_current_user` seam + SPA OIDC rebuild (331 downstream call sites untouched).
 - **K8S-24** — Hosted SCIM 2.0 endpoint + role↔group mapping + auto-deprovision; operator kept out of the tenant SCIM group (F064 fence).
-- **K8S-25** — Gate/retire local lifecycle endpoints (login/refresh/MFA/invite/reset), MFA handed to Entra Conditional Access; keep a scoped break-glass local-admin path if chosen.
+- **K8S-25** — Make local login **optionally disable-able per deployment** (config flag) — RETAIN the local lifecycle substrate (login/refresh/MFA/invite/reset); a customer on SSO-only turns local login off, MFA handed to Entra Conditional Access. Never removes the substrate (other customers use it).
 
 ### Phase 4 — CMK + data residency
 - **K8S-26** — Managed-disk CMK via Disk Encryption Set (baseline default; may pull forward to Phase 1).
@@ -1301,7 +1339,7 @@ Vertical, end-to-end, testable slices (each ≤2–3 days, one PR), grouped by p
 | **F076** | AKS Workload Identity keyless service identity — generalisation of F069/F072 | Generalise the F069/F072 keyless posture to AKS by adding a Workload-Identity (federated ServiceAccount token / client-assertion) branch alongside the existing IMDS path in the gateway token/KV providers, federating a pe | It re-decides the token-provider seam and the secret-injection mechanism across gateway/api/both workers, and re-opens the F069/F072 SBOM/supply-chain call (adopting azure-identity is hard to undo onc |
 | **F077** | Migrate-as-Job — schema migrations off the boot path | Replace per-pod migrate-on-boot with a single gated Helm pre-install/pre-upgrade hook Job; set LQ_AI_SKIP_MIGRATIONS=1 on api and both workers; the release fails if the Job fails. Optionally add a real pg_advisory_lock i | It changes the release-gating and rollout-ordering contract (Helm blocks on migration before Deployments roll) and the entrypoint's boot semantics — the K8s twin of the deploy.sh dedicated migrate ste |
 | **F078** | Gateway-sole-egress-on-AKS network contract — NetworkPolicy + Firewall (ADR-F070 on AKS) | Realise the fully-private posture as the enterprise default: private API server (create-time), Private Endpoints with public access disabled, UDR → Azure Firewall deny-by-default with the F070 §8.4 allowlist, and a Ciliu | Private API Server VNet Integration is provisioned at cluster-create time — enabling it day-2 forces a cluster restart — so the network posture is baked into provisioning. The two-layer gateway-sole-e |
-| **F079** | End-user identity on AKS — Entra SSO + SCIM provisioning model | Adopt Entra OIDC/SAML SSO verified at the single get_current_user seam, SSO-first with hosted SCIM 2.0 as a fast-follow, MFA handed to Conditional Access, the local lifecycle stack gated/retired, and the ADR-F064 operato | It retires or gates the entire local login/invite/MFA/password lifecycle, rebuilds the SPA auth flow, and moves the source of truth for users to the customer's IdP — an identity-model migration that c |
+| **F079** | End-user identity on AKS — Entra SSO + SCIM provisioning model | Adopt Entra OIDC/SAML SSO verified at the single get_current_user seam, SSO-first with hosted SCIM 2.0 as a fast-follow, MFA handed to Conditional Access, **local login RETAINED (SSO is an optional per-customer overlay at `get_current_user`; SSO-only disables local login by config, never removes it)**, and the ADR-F064 operato | It retires or gates the entire local login/invite/MFA/password lifecycle, rebuilds the SPA auth flow, and moves the source of truth for users to the customer's IdP — an identity-model migration that c |
 | **F080** | Gateway multi-replica config model — immutable ConfigMap + KV CSI (supersedes the 0010 runtime write surface on AKS) | On the AKS profile, ship gateway.yaml as an immutable read-only ConfigMap with provider secrets via Key Vault CSI and disable the runtime alias/provider-key/tier write surface (405/409 on :ro mount); relocate to a shared | It is the HS-2 fix and it changes the admin config contract established by ADR-0010 (hot-reload of a local mutable file): the per-process in-memory snapshot cannot propagate across replicas, and an RW |
 
 ## Cited sources
