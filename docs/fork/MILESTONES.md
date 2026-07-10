@@ -800,6 +800,35 @@ lead model drafts/orchestrates/verifies; smaller models implement.
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+### Upstream awareness review (2026-07-10) — see `docs/fork/plans/UPSTREAM-REVIEW-2026-07.md`
+
+- **UP-SEC-1 — gateway-key enforcement + chat project IDOR/KB scoping** ✅ **SHIPPED** (branch
+  `up-sec-1-gateway-key-chat-idor`) (🔴 security, was confirmed live at HEAD; upstream #288/#289/#290):
+  (1) `/v1` inference router now carries `Depends(make_require_gateway_key())` (mirrors admin; no-ops
+  keyless); (2) `create_chat` 404s a non-owned `project_id` and the KB load is `owner_id`-scoped.
+  **Re-authored (frozen upstream), not cherry-picked** — recorded in `UPSTREAM.md` awareness note, NOT the
+  sync log (no code taken). Gate: gateway 658/2-skip + mypy-strict; api chat blast 141; 5-lens adversarial
+  review (1 should-fix hermeticity fix applied — conftest `delenv LQ_AI_GATEWAY_KEY`, proven by full suite
+  green *with* the key exported). GW-04 `base_url` https/SSRF guard + `api_key_encrypted` strip (#273)
+  **DEFERRED** to a follow-up — kept this slice to the two confirmed-live bugs.
+- **UP-OPS-1 — supply-chain + drift hygiene** (upstream #296/#168/#278): SHA-pin third-party Actions in
+  `release.yml`/`images.yml`/`deploy-staging.yml`/`trivy.yml` (credential-holding, still mutable tags);
+  exact-pin `ruff` in both pyprojects (kills the dev-vs-CI drift in the `ruff-version-drift` memory);
+  forward `LQ_AI_GATEWAY_MASTER_KEY` in root compose gateway env (unless moot under KV/managed-identity).
+  Fast, mechanical, no behavior change.
+- **UP-FIX-1 — ingest timeout + Azure token param** (upstream #196/#157): mark files `failed` on Docling
+  parse timeout instead of stranding them in `processing` (in-job `asyncio.wait_for` soft timeout); add
+  per-provider `use_max_completion_tokens` so GPT-5/o-series Azure deployments stop hard-400ing on
+  `max_tokens` (ties into Azure Foundry). Optionally bundle `text/markdown` verbatim ingest (#206).
+- **UP-DEFER (awareness, own slices when their milestone opens):** anonymization-trusts-client-flags +
+  embeddings-bypass + Presidio defaults (#288 GW-02/03/05, upstream deferred to committee); containers-run-
+  as-root + digest-pin base images (#288/#301); deepagents empty-answer-at-cap synthesis check (#208);
+  model-numeric-args→SQL + AsyncSession-rollback-on-failure check (#239); ADR-0016 structural CI gates
+  (egress import-allowlist + audit payload-column scanner) (#209); deterministic quote-verify/honesty-grade
+  concept for receipts (#216/#225); EUR-Lex authority source for EU practice areas (#257); MCP tool-egress
+  reference design for the gated MCP milestone (#158/#165); read-only auditor role (#266); stack-boot smoke
+  CI (#297); resume-payload encryption-at-rest (#215).
+
 - **PUBLISH-PB — playbook twin of the admin publish fast-path** (surfaced PUBLISH, 2026-07-10): the
   same one-click propose→self-approve→adopt for `kind=playbook`, reusing `promote_to_approved` +
   a playbook gate-battery helper once the skill fast-path has baked.

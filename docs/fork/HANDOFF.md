@@ -3,6 +3,42 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
+> ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+> ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ◀ PICK UP HERE
+> → ③ remaining slices (B-7a/B-7b wizard ladder).**
+>
+> **① UP-SEC-1 ✅ SHIPPED (task #498, branch `up-sec-1-gateway-key-chat-idor`, PR #TBD).** Two
+> confirmed-live security bugs (inherited from baseline `f91149a`, present at HEAD), **re-authored** in our
+> own tree — NOT cherry-picked (upstream FROZEN, ADR-F001); recorded in `UPSTREAM.md` awareness note, not the
+> sync log (no upstream code taken). **SEC-1:** the gateway `/v1` router (chat/completions, embeddings,
+> models, citation-engine config) was unauthenticated while `/admin/v1` gated on the shared key → now carries
+> `dependencies=[Depends(require_gateway_key)]` (mirrors `admin.py`; no-ops keyless/tests, hard-401 once a key
+> is set; api `GatewayClient` already sends the header). 4 fixtures updated + new
+> `test_inference_gateway_auth.py`; hermeticity backstop = `conftest.py` autouse `delenv LQ_AI_GATEWAY_KEY`
+> (review-caught: pre-existing `/v1` tests only passed because the shell lacked the key). **SEC-2:**
+> `create_chat` persisted an attacker-supplied `project_id` with NO ownership check (chat's `project_id`
+> drives KB retrieval → foreign-project bind splices the victim's KB content into the attacker's chat) →
+> now 404s (not 403) a non-owned/absent project before persisting + the KB load is `owner_id`-scoped (defense
+> in depth). **Gate:** gateway `ruff`/`format`/`mypy --strict` clean + **658 passed/2 skip** (also green with
+> the key *exported* — proves the hermeticity fix); api `ruff`/`format`/`mypy` clean + chat/RAG blast **141
+> passed**. 5-lens adversarial review (14 agents) → 1 should-fix (the conftest hermeticity, fixed+proven), 3
+> refuted. GW-04 `base_url`/SSRF + `api_key_encrypted` strip (#273) DEFERRED to a follow-up.
+>
+> **② K8S-R — enterprise Azure/AKS deployment RESEARCH (task #499). ◀ START HERE.** Charter (self-contained, run it):
+> **`docs/fork/plans/ENTERPRISE-AZURE-K8S-research-brief.md`**. RESEARCH not coding. Thesis: distributable
+> **per-customer enterprise deployment on AKS into the CUSTOMER's own Azure subscription — we host nothing**
+> (OSS). Real customer + 2nd Azure prospect; **parameterised repeat** per customer; VM/compose = demo-grade;
+> **Foundry = models only**. Deliverable: `ENTERPRISE-AZURE-K8S-phase1.md` (mirror `AZURE-FOUNDRY-phase1.md`)
+> + slice ladder + ADR(s). Method = research fan-out (Workflow), WebSearch/WebFetch current Azure facts
+> (VERIFY — surface moves fast), code-ground the **§10 horizontal-scale blocker audit** (in-memory R4
+> brake/FanOutQuota, SSE-under-replicas, migrate-on-boot→Job). Reuse+generalise ADR-F069/F070/F072/F058 +
+> BRAND-1. SURFACE (don't pre-decide): managed-PaaS-vs-in-cluster, Terraform-vs-Bicep, security-control
+> phasing, Entra-SSO/SCIM-now-or-fast-follow.
+>
+> **③ Remaining slices:** B-7a profile manifests → B-7b wizard ([[pivot-modular-azure]] ladder; absorbs
+> ONBOARD-1/2 + G13/#473). Also pending: B-2c org-skill red-team eval, #490 GW-FILEIDS, AIC-3 (#456), SETUP-6.
+> ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+
 > ▶▶▶ **SHIPPED (2026-07-10): PUBLISH — admin skill fast-path (task #496, branch
 > `publish-admin-skill-fastpath`, PR #255).** One-click `POST /user-skills/{id}/publish` collapses
 > propose→self-approve→adopt for a skill the ADMIN authored — zero new authority; identical governance

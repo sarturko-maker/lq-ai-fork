@@ -421,6 +421,26 @@ async def create_chat(
     user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ChatResponse:
+    # UP-SEC-1 SEC-2 (re-authored fork fix): a chat may only bind to a project
+    # the caller owns. The chat's ``project_id`` drives KB retrieval on every
+    # send (see ``_retrieve_kb_context_for_chat``), so persisting an
+    # attacker-supplied foreign ``project_id`` would splice another user's
+    # knowledge-base content into the attacker's chat. Cross-user / missing
+    # collapses to 404 (never 403) — id-probing-safe, matching
+    # ``_load_chat_or_404``.
+    if payload.project_id is not None:
+        owned = await db.execute(
+            select(Project.id).where(
+                Project.id == payload.project_id,
+                Project.owner_id == user.id,
+            )
+        )
+        if owned.scalar_one_or_none() is None:
+            raise NotFound(
+                f"Project {payload.project_id} not found.",
+                details={"project_id": str(payload.project_id)},
+            )
+
     chat = Chat(
         owner_id=user.id,
         project_id=payload.project_id,
@@ -864,7 +884,17 @@ async def _retrieve_kb_context_for_chat(
         return [], []
 
     # Load KB rows (for hybrid_alpha per KB). One SELECT for the set.
-    kb_stmt = select(KnowledgeBase).where(KnowledgeBase.id.in_(kb_ids))
+    # UP-SEC-1 SEC-2 (defense in depth): scope the load to the chat owner so
+    # retrieval can never surface a KB the caller doesn't own, even if a chat
+    # somehow references a foreign project. KB attach already requires the
+    # caller to own both project AND KB (see projects.py `_load_visible_kb`), so
+    # for a legitimately-owned chat every attached KB has
+    # ``owner_id == chat.owner_id`` — this filter is a no-op there and a hard
+    # backstop otherwise.
+    kb_stmt = select(KnowledgeBase).where(
+        KnowledgeBase.id.in_(kb_ids),
+        KnowledgeBase.owner_id == chat.owner_id,
+    )
     kb_rows = (await db.execute(kb_stmt)).scalars().all()
 
     # Embed the query once (reused across every KB). Mirrors the

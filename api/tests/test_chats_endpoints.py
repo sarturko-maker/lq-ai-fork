@@ -179,6 +179,99 @@ async def test_create_chat_with_explicit_title_and_project_id(
 
 
 @pytest.mark.integration
+async def test_create_chat_with_own_project_id_201(
+    client: AsyncClient,
+    db_user: User,
+    db_session: AsyncSession,
+) -> None:
+    """UP-SEC-1 SEC-2: binding a chat to a project the caller OWNS succeeds."""
+
+    from app.models.project import Project
+
+    project = Project(
+        owner_id=db_user.id,
+        name="Mine",
+        slug=f"mine-{uuid.uuid4().hex[:6]}",
+        privileged=False,
+    )
+    db_session.add(project)
+    await db_session.flush()
+    token = _bearer_for(db_user)
+
+    response = await client.post(
+        "/api/v1/chats",
+        json={"project_id": str(project.id)},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["project_id"] == str(project.id)
+
+
+@pytest.mark.integration
+async def test_create_chat_with_foreign_project_id_404(
+    client: AsyncClient,
+    db_user: User,
+    other_user: User,
+    db_session: AsyncSession,
+) -> None:
+    """UP-SEC-1 SEC-2 (IDOR): a chat cannot bind to another user's project.
+
+    The chat's ``project_id`` drives KB retrieval; persisting a foreign
+    ``project_id`` would splice the victim's knowledge-base content into the
+    attacker's chat. Cross-user collapses to 404 (never 403) so the response
+    is indistinguishable from "no such project" — no existence leak. The chat
+    must NOT be persisted.
+    """
+
+    from app.models.project import Project
+
+    victim_project = Project(
+        owner_id=other_user.id,
+        name="Victim",
+        slug=f"victim-{uuid.uuid4().hex[:6]}",
+        privileged=False,
+    )
+    db_session.add(victim_project)
+    await db_session.flush()
+    token = _bearer_for(db_user)
+
+    response = await client.post(
+        "/api/v1/chats",
+        json={"project_id": str(victim_project.id)},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 404
+
+    # The attacker's chat must not have been created.
+    rows = (
+        (await db_session.execute(select(Chat).where(Chat.project_id == victim_project.id)))
+        .scalars()
+        .all()
+    )
+    assert rows == []
+
+
+@pytest.mark.integration
+async def test_create_chat_with_nonexistent_project_id_404(
+    client: AsyncClient,
+    db_user: User,
+) -> None:
+    """UP-SEC-1 SEC-2: an unknown ``project_id`` 404s (same posture as foreign)."""
+
+    token = _bearer_for(db_user)
+
+    response = await client.post(
+        "/api/v1/chats",
+        json={"project_id": str(uuid.uuid4())},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.integration
 async def test_get_chat_returns_persisted_row(
     client: AsyncClient,
     db_user: User,

@@ -57,7 +57,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Final
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
@@ -68,6 +68,7 @@ from app.anonymization.middleware import (
     post_anonymize_response,
     pre_anonymize_request,
 )
+from app.api.dependencies import make_require_gateway_key
 from app.clients.backend import BackendClient, Skill, get_backend_client
 from app.config import GatewayConfig
 from app.errors import LQAIError
@@ -111,7 +112,23 @@ from app.tier_floor import TierFloor, is_refused, resolve_tier_floor
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1", tags=["inference"])
+# UP-SEC-1 (re-authored fork fix): gate the whole ``/v1`` surface on the same
+# shared-secret the admin router already enforces (see app.api.admin). The
+# gateway is the platform's sole egress + sole provider-key holder; leaving
+# ``/v1/chat/completions`` (and embeddings/models/citation-engine config)
+# unauthenticated let anything that could reach the gateway port spend provider
+# credit and read routing config without the backend's ``X-LQ-AI-Gateway-Key``.
+# ``make_require_gateway_key`` no-ops when ``gateway_auth`` is disabled or the
+# key env is unset (keyless local dev), so this is byte-identical when unset and
+# a hard 401 the moment a key is configured. The api's ``GatewayClient`` already
+# sends the header on every call (clients/gateway.py).
+require_gateway_key = make_require_gateway_key()
+
+router = APIRouter(
+    prefix="/v1",
+    tags=["inference"],
+    dependencies=[Depends(require_gateway_key)],
+)
 
 
 TIER_HEADER: Final[str] = "X-LQ-AI-Routed-Inference-Tier"
