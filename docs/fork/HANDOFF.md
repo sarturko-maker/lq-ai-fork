@@ -5,8 +5,8 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 > ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ✅ DELIVERED
-> (headline decisions ruled + folded into PR #257) → ③ K8S SCALE-SAFE CLEANUP bugs ◀ PICK UP HERE (start
-> CLEAN-1 = HS-1 advisory-lock), then B-7a/B-7b wizard.**
+> (folded into #257) → ③ K8S SCALE-SAFE CLEANUP bugs (CLEAN-1 ✅ shipped #258) ◀ PICK UP HERE (continue
+> CLEAN-2 = HS-4 `max_jobs`), then B-7a/B-7b wizard.**
 >
 > **① UP-SEC-1 ✅ SHIPPED (task #498, branch `up-sec-1-gateway-key-chat-idor`, PR #256).** Two
 > confirmed-live security bugs (inherited from baseline `f91149a`, present at HEAD), **re-authored** in our
@@ -50,11 +50,18 @@ then CLAUDE.md, then the ADRs/plans named below.
 > fixes for the CONFIRMED §10 blockers that LAND NOW on the current tree (no K8s infra needed) — these are
 > genuine durability/hygiene bugs that also de-risk future scaling. Branch off `main`; full ADR-F005 gate.
 > Suggested order (file:line + fix in the report's "Horizontal-scale blocker ledger"):
-> **CLEAN-1 (HS-1)** — real `pg_advisory_lock` around the migration in `api/alembic/env.py` + DELETE the
-> FALSE advisory-lock comment in `api/entrypoint.sh` (it claims env.py locks; it does not). Small.
-> **CLEAN-2 (HS-4)** — add `max_jobs` to `api/app/workers/arq_setup.py` WorkerSettings (new setting, e.g.
-> `lq_ai_agent_worker_concurrency`, default 2–4) mirroring `document_pipeline.py`'s cap; stops the ONNX
-> agent worker running 10 concurrent jobs. Small.
+> **CLEAN-1 (HS-1) ✅ SHIPPED (PR #258, branch `clean-1-migration-advisory-lock`).** `env.py`'s
+> `run_migrations_online()` now takes a Postgres **session-level** `pg_advisory_lock` (key in new
+> `api/app/db/migration_lock.py` — env.py can't host it, importing env.py runs migrations) and releases it in
+> a `finally`; `entrypoint.sh`'s false "env.py locks" comment corrected to name the real seam. Tests: no-DB
+> source guard + integration serialize-proof (hold lock → concurrent upgrade blocks → release → completes;
+> hardened so a failed upgrade can't read as success). 60 migration tests pass; ruff/format/mypy clean.
+> **TRAP (recorded): run container ruff with the REPO ROOT mounted** — mounting only `api/` hides the root
+> `ruff.toml` (line-length=100) so ruff falls back to 88 and rewraps the whole file into diff churn.
+> **CLEAN-2 (HS-4) ◀ NEXT** — add `max_jobs` to `api/app/workers/arq_setup.py` WorkerSettings (new setting,
+> e.g. `lq_ai_agent_worker_concurrency`, default 2–4) mirroring `document_pipeline.py`'s cap (`max_jobs =
+> settings.lq_ai_ingest_worker_concurrency` at `_populate_class_attrs`, config field `config.py:88`); stops
+> the ONNX agent worker running 10 concurrent jobs. Small.
 > **CLEAN-3 (HS-6)** — migrate the classic playbook executor off FastAPI `BackgroundTasks`
 > (`api/app/api/playbooks.py:728`, `_run_in_background` :950-982) onto arq (enqueue + worker consumer) +
 > extend the F009 startup orphan-sweep to `PlaybookExecution`. Real slice; maintainer said FIX (playbooks
