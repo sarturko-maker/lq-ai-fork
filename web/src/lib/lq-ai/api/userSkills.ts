@@ -14,6 +14,7 @@
  * 404; failure paths use the standard ``LQAIApiError`` envelope.
  */
 import { apiRequest } from './client';
+import type { OrgSkillVersionAdminRead } from './admin';
 import type {
 	OrgSkillVersionState,
 	UserSkill,
@@ -137,6 +138,29 @@ export interface OrgSkillProposalResponse {
 export async function proposeUserSkill(id: string): Promise<OrgSkillProposalResponse> {
 	return apiRequest<OrgSkillProposalResponse>(
 		`/user-skills/${encodeURIComponent(id)}/propose`,
+		{ method: 'POST' }
+	);
+}
+
+/**
+ * POST /api/v1/user-skills/{id}/publish — the ADMIN fast-path (ADR-F067
+ * Publish). Collapses propose -> approve -> adopt into ONE atomic action for a
+ * skill the admin AUTHORED THEMSELVES, stopping at Library membership (the
+ * "Bind to an area" step stays a separate, deliberate click).
+ *
+ * AdminUser-gated and STRICTLY owner-scoped: team-scope, non-owned, and
+ * archived rows all 404 (no existence leak). ADR-F064 fences the platform
+ * operator off this tenant-authored write (403). 409 when the slug collides
+ * with a shipped skill or an open proposal for the slug already exists; 422
+ * when the synthesized frontmatter fails the org allowlist or exceeds the size
+ * cap — both messages surface verbatim via ``describeMutationError`` on the
+ * calling page. Returns the FULL admin-read snapshot — the same
+ * ``OrgSkillVersionAdminRead`` the review queue emits (``admin.ts``) — 201 on a
+ * fresh adoption, 200 when an identical approved snapshot is already adopted.
+ */
+export async function publishUserSkill(id: string): Promise<OrgSkillVersionAdminRead> {
+	return apiRequest<OrgSkillVersionAdminRead>(
+		`/user-skills/${encodeURIComponent(id)}/publish`,
 		{ method: 'POST' }
 	);
 }

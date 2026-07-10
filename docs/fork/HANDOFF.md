@@ -3,6 +3,32 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
+> ▶▶▶ **SHIPPED (2026-07-10): PUBLISH — admin skill fast-path (task #496, branch
+> `publish-admin-skill-fastpath`, PR #PRNUM).** One-click `POST /user-skills/{id}/publish` collapses
+> propose→self-approve→adopt for a skill the ADMIN authored — zero new authority; identical governance
+> artifacts (frozen approved snapshot + Library entry + content-free audits `propose`/`approve
+> fast_path:true`/`adopt`; republish of adopted slug = 2 rows, adopt no-ops); Bind stays deliberate
+> ("Bind to an area →" link). Plan: `docs/fork/plans/PUBLISH-admin-skill-fast-path.md`; ADR-F067
+> PUBLISH addendum. KEY RULING: operator-fence fold-in on existing adopt/bind DROPPED — ADR-F064
+> D2 deliberately keeps the operator on areas/capabilities; narrowing = backlogged
+> `OPERATOR-NARROW-AGENT-CONFIG` (F064-superseding slice). `/publish` itself IS operator-fenced.
+> **Gate evidence:** full containerized api suite **3666 passed / 47 skipped / 3 env-only failures**
+> (ONNX model NO_SUCHFILE in `test_embedding_provider`+`test_rerank_provider` — model cache absent in
+> that run, zero slice overlap); targeted publish+harness+guards **93 passed/1 skipped**; ruff+mypy(231)
+> clean; web svelte-check **0 errors**, vitest **1334 passed**. **Adversarial review** (5 lenses ×
+> 3-refuter verification, 12 candidates → 9 confirmed): ALL FIXED — (1) Org Library section now
+> scope-gated via `showOrgLibrarySection` (team rows would 404); (2) race-409 handler read `row.slug`
+> AFTER rollback → MissingGreenlet 500 — slug captured pre-flush in publish AND propose (same latent
+> bug); (3) `save()` now clears stale publish/propose success banners; (4) 6 format-noise hunks in
+> admin.py reverted; (5) F067 addendum bullet 4 reworded (409 checks live in handlers, not the freeze
+> helper). Plus 1 refuter-miss fixed by hand: `canPropose` now excludes `viewer` (propose is
+> MutatingUser-gated; viewers read-only per F064 D1). **Live UAT (dev stack, api rebuilt, DB@0095,
+> throwaway rows cleaned):** publish 201 approved v1 → unchanged re-publish 200 no-op → edited
+> re-publish 201 v2 (DB: v1 superseded/v2 approved, 1 Library row) → injection 422 naming
+> `lq_ai.allowed-tools` → member 403 → admin-on-member-skill 404; audit content-free PASS, 3+2 rows.
+> **NEXT:** maintainer VM UAT (author → Publish → Bind → agent cites; 200 no-op message) + confirm
+> option-A fence ruling; then back to the ladder: **B-7a profile manifests → B-7b wizard**.
+
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 > ▶▶▶ **PIVOT (2026-07-07): MODULAR AGENT-BUILDER + AZURE FOUNDRY + REDLINE CONTINUITY — the CURRENT
 > direction. Maintainer approved ALL of it verbatim ("Approved and go on all").** Governing docs (read in

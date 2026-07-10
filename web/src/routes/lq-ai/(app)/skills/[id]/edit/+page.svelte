@@ -17,14 +17,19 @@
 
 	import { userSkillsApi, skillsApi, teamsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
+	import { auth } from '$lib/lq-ai/auth/store';
 	import type { UserSkill, SkillSummary, TeamSummary } from '$lib/lq-ai/types';
 	import type { OrgSkillProposalResponse } from '$lib/lq-ai/api/userSkills';
 	import TrustPill from '$lib/lq-ai/components/TrustPill.svelte';
 	import {
+		canPropose,
+		canPublish,
 		describeMutationError,
 		formatDateTime,
 		proposalStateLabel,
 		proposalStateTone,
+		proposeSuccessMessage,
+		showOrgLibrarySection,
 		showProposalsSection,
 		sortProposalsNewestFirst
 	} from './page-helpers';
@@ -51,9 +56,22 @@
 	let saveOk: string | null = null;
 	let actionError: string | null = null;
 
+	// ADR-F067 Publish fast-path — the two mutually-exclusive org-adoption
+	// buttons. Both surface errors through the shared `actionError` banner.
+	let publishing = false;
+	let publishOk = false;
+	let proposing = false;
+	let proposeOk: string | null = null;
+
 	$: skillId = $page.params.id;
 	$: justCreated = $page.url.searchParams.get('created') === '1';
 	$: shadowsBuiltIn = row !== null && builtinSlugs.has(row.slug);
+	// Role gates (ADR-F064/F067): admin (non-operator) publishes; a plain member
+	// proposes; the operator sees neither. Never both. The whole section is
+	// additionally USER-scope-only — publish/propose 404 team rows (D2).
+	$: showPublish = canPublish($auth.user);
+	$: showPropose = canPropose($auth.user);
+	$: showOrgSection = row !== null && showOrgLibrarySection(row.scope, $auth.user);
 
 	async function load(): Promise<void> {
 		loading = true;
@@ -143,6 +161,10 @@
 			body = updated.body;
 			tagsInput = (updated.tags ?? []).join(', ');
 			saveOk = 'Saved.';
+			// The saved edit is NOT in the Library until re-published/re-proposed —
+			// a lingering success banner would misstate Library state.
+			publishOk = false;
+			proposeOk = null;
 		} catch (e) {
 			console.error('user-skills/edit: save failed', e);
 			submitError = e instanceof Error ? e.message : 'Failed to save changes.';
@@ -162,6 +184,40 @@
 			proposalsError = describeMutationError(e, 'Failed to load proposal history.');
 		} finally {
 			proposalsLoading = false;
+		}
+	}
+
+	async function publish(): Promise<void> {
+		if (!row) return;
+		publishing = true;
+		actionError = null;
+		publishOk = false;
+		proposeOk = null;
+		try {
+			await userSkillsApi.publishUserSkill(row.id);
+			publishOk = true;
+		} catch (e) {
+			console.error('user-skills/edit: publish failed', e);
+			actionError = describeMutationError(e, 'Failed to publish this skill to the Library.');
+		} finally {
+			publishing = false;
+		}
+	}
+
+	async function propose(): Promise<void> {
+		if (!row) return;
+		proposing = true;
+		actionError = null;
+		proposeOk = null;
+		publishOk = false;
+		try {
+			const res = await userSkillsApi.proposeUserSkill(row.id);
+			proposeOk = proposeSuccessMessage(res);
+		} catch (e) {
+			console.error('user-skills/edit: propose failed', e);
+			actionError = describeMutationError(e, 'Failed to propose this skill to the Library.');
+		} finally {
+			proposing = false;
 		}
 	}
 
@@ -371,6 +427,68 @@
 			</div>
 		</form>
 
+		{#if showOrgSection}
+			<section class="mt-8" data-testid="lq-ai-user-skill-org-adoption">
+				<h2 class="lq-text-h4 mb-2">Org Library</h2>
+				<p class="lq-text-caption mb-3" style="color: var(--lq-text-tertiary);">
+					{#if showPublish}
+						Publish this skill straight into your org's Library, then bind it to a practice area.
+					{:else}
+						Propose this skill for org-wide adoption — an admin reviews it before it joins the
+						Library.
+					{/if}
+				</p>
+
+				{#if publishOk}
+					<div
+						class="mb-3 p-3 rounded border border-emerald-300 bg-emerald-50 text-emerald-900 text-sm dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100"
+						role="status"
+						data-testid="lq-ai-user-skill-publish-success"
+					>
+						Published to your org Library.
+						<a
+							href="/lq-ai/admin/areas"
+							class="lq-link ml-1"
+							data-testid="lq-ai-user-skill-bind-link"
+						>
+							Bind to an area →
+						</a>
+					</div>
+				{/if}
+				{#if proposeOk}
+					<div
+						class="mb-3 p-3 rounded border border-emerald-300 bg-emerald-50 text-emerald-900 text-sm dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100"
+						role="status"
+						data-testid="lq-ai-user-skill-edit-propose-success"
+					>
+						{proposeOk}
+					</div>
+				{/if}
+
+				{#if showPublish}
+					<button
+						type="button"
+						class="lq-btn-primary lq-text-caption"
+						on:click={publish}
+						disabled={publishing}
+						data-testid="lq-ai-user-skill-publish-btn"
+					>
+						{publishing ? 'Publishing…' : 'Publish to org'}
+					</button>
+				{:else if showPropose}
+					<button
+						type="button"
+						class="lq-btn-secondary lq-text-caption"
+						on:click={propose}
+						disabled={proposing}
+						data-testid="lq-ai-user-skill-edit-propose-btn"
+					>
+						{proposing ? 'Proposing…' : 'Propose to Library'}
+					</button>
+				{/if}
+			</section>
+		{/if}
+
 		{#if showProposalsSection(row.scope)}
 		<section class="mt-8" data-testid="lq-ai-user-skill-proposals">
 			<h2 class="lq-text-h4 mb-2">Proposals</h2>
@@ -468,6 +586,17 @@
 		align-items: center;
 	}
 	.lq-btn-secondary:hover { background: var(--lq-inset); }
+	.lq-btn-secondary:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
+	.lq-btn-secondary:disabled:hover { background: transparent; }
+
+	.lq-link {
+		color: var(--lq-accent);
+		text-decoration: none;
+	}
+	.lq-link:hover { text-decoration: underline; }
 
 	.lq-btn-danger {
 		background: transparent;

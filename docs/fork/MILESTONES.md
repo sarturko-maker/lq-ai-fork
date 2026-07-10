@@ -800,6 +800,18 @@ lead model drafts/orchestrates/verifies; smaller models implement.
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **PUBLISH-PB — playbook twin of the admin publish fast-path** (surfaced PUBLISH, 2026-07-10): the
+  same one-click propose→self-approve→adopt for `kind=playbook`, reusing `promote_to_approved` +
+  a playbook gate-battery helper once the skill fast-path has baked.
+- **PUBLISH-BADGE — review-queue nav badge** (surfaced PUBLISH, 2026-07-10): the approvals queue
+  lives inside `/lq-ai/admin/library` with no nav item or pending count; add a badge so an admin
+  sees other authors' in-flight proposals without knowing to open Library.
+- **OPERATOR-NARROW-AGENT-CONFIG — deliberate F064 supersession** (surfaced PUBLISH, 2026-07-10):
+  fence the platform operator off Library adopt/remove (incl. the legacy PATCH /admin/capabilities
+  backdoor), all 8 capability attach/detach handlers, AND area create/delete/config — the full
+  coherent "operators cannot shape Deep Agents" set. F064 D2 explicitly KEEPS the operator on these
+  surfaces today, so this is an ADR-superseding decision, not a bugfix; needs its own ADR.
+
 - **P-2 candidate — fully offline image path for the private profile (surfaced P-1, ADR-F070):** a
   private registry mirror or `docker save`/`load` side-load flow so `ghcr.io` drops off the
   restricted-egress inventory entirely (runbook azure-vm-sandbox.md §8.4).
