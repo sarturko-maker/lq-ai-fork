@@ -5,9 +5,10 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 > ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ✅ DELIVERED
-> (folded into #257) → ③ K8S SCALE-SAFE CLEANUP bugs (CLEAN-1 ✅ #258, CLEAN-2 ✅ #259, CLEAN-3a ✅ #260;
-> CLEAN-3b GATED on maintainer greenlight — schema migration) ◀ PICK UP HERE (continue CLEAN-4 = HS-2
-> gateway read-only config), then B-7a/B-7b wizard.**
+> (folded into #257) → ③ K8S SCALE-SAFE CLEANUP — APP-CODE MILESTONE COMPLETE (CLEAN-1 ✅ #258, CLEAN-2 ✅
+> #259, CLEAN-3a ✅ #260, CLEAN-4 ✅ #261). ◀ PICK UP HERE: B-7a/B-7b wizard. GATED/deferred: CLEAN-3b
+> (durability migration — needs maintainer greenlight, #505); HS-7/migrate-Job/immutable-ConfigMap =
+> deployment-layer with the K8s ladder.**
 >
 > **① UP-SEC-1 ✅ SHIPPED (task #498, branch `up-sec-1-gateway-key-chat-idor`, PR #256).** Two
 > confirmed-live security bugs (inherited from baseline `f91149a`, present at HEAD), **re-authored** in our
@@ -76,12 +77,15 @@ then CLAUDE.md, then the ADRs/plans named below.
 > **CLEAN-3b (HS-6 durability) — GATED on maintainer greenlight (task #505):** Tier B lands an Alembic
 > migration (lease/heartbeat/claimed columns on `playbook_executions`, which has NONE) + a new orphan sweep so a
 > killed worker settles the row to `error` instead of hanging at `running`. Held because it's a schema change.
-> **CLEAN-4 (HS-2, code-side) ◀ NEXT** — add a read-only/immutable mode to the gateway config
-> (`gateway/app/config_holder.py`, `config_writer.py`) so runtime alias/key/tier writes 405/409 when the
-> config is mounted `:ro` — the code half of the multi-replica fix (immutable ConfigMap + KV CSI is the K8s
-> half, later). Small–medium.
-> HS-7 (collabora single-replica) + migrate-as-Job Helm hook + immutable ConfigMap are DEPLOYMENT-layer,
-> done with the K8s ladder (K8S-1…30), not now.
+> **CLEAN-4 (HS-2, code-side) ✅ SHIPPED (PR #261, branch `clean-4-gateway-config-readonly`).** Gateway
+> read-only MODE: `LQ_AI_GATEWAY_CONFIG_READONLY` → `app.state.config_read_only` at lifespan; a
+> `_read_only_guard` in `gateway/app/api/admin.py` early-returns **409 `config_read_only`** from all 7
+> config-write endpoints (tier / alias ×3 / provider-key ×3) BEFORE any file I/O — reads/inference untouched.
+> All 5 config-write fn call sites guarded (SIGHUP only reads). Deep security + completeness review CLEAN.
+> 70 gateway tests (mypy --strict 41 clean). The code half of the multi-replica fix; the immutable ConfigMap +
+> KV CSI is the K8s (deployment) half, later.
+> **HS-7 (collabora single-replica) + migrate-as-Job Helm hook + immutable ConfigMap are DEPLOYMENT-layer,
+> done with the K8s ladder (K8S-1…30), not now. The APP-CODE cleanup is COMPLETE.**
 >
 > **THEN (was ③):** B-7a profile manifests → B-7b wizard ([[pivot-modular-azure]] ladder; absorbs
 > ONBOARD-1/2 + G13/#473). Also pending: B-2c org-skill red-team eval, #490 GW-FILEIDS, AIC-3 (#456), SETUP-6.

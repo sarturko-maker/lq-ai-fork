@@ -84,6 +84,20 @@ DEFAULT_CONFIG_PATH = Path("gateway.yaml")
 """Default path the gateway looks for its config when ``GATEWAY_CONFIG_PATH``
 is unset. Resolved relative to the process cwd."""
 
+CONFIG_READONLY_ENV = "LQ_AI_GATEWAY_CONFIG_READONLY"
+"""When truthy, runtime config mutations are disabled (HS-2, CLEAN-4). Set it
+when the gateway config is mounted read-only — an immutable Kubernetes
+ConfigMap across replicas — so the admin alias/key/tier WRITE endpoints refuse
+with 409 instead of failing an ``os.replace`` on a ``:ro`` mount or letting
+per-pod snapshots diverge. Reads (GET) and inference are unaffected."""
+
+
+def _config_read_only(env: dict[str, str] | None = None) -> bool:
+    """Whether runtime config mutations are disabled (``CONFIG_READONLY_ENV``)."""
+
+    source = env if env is not None else os.environ
+    return source.get(CONFIG_READONLY_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
 
 def _resolve_config_path() -> Path:
     """Return the effective config path for this process."""
@@ -175,6 +189,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # own snapshot via :meth:`MutableConfigHolder.current`.
     config_holder = MutableConfigHolder(config, config_path=config_path)
     app.state.config_holder = config_holder
+    # HS-2 (CLEAN-4): when the config is mounted read-only (immutable ConfigMap),
+    # the admin WRITE endpoints refuse mutations instead of failing an os.replace
+    # or diverging per-pod. Reads/inference are unaffected.
+    app.state.config_read_only = _config_read_only()
+    if app.state.config_read_only:
+        logger.info(
+            "gateway config is READ-ONLY (%s set); admin writes disabled", CONFIG_READONLY_ENV
+        )
     # Backwards-compat: the existing routes read ``app.state.config``
     # for the *initial* snapshot. Per-request handlers that need the
     # live snapshot read through ``app.state.config_holder.current()``.
