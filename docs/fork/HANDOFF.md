@@ -4,8 +4,9 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 then CLAUDE.md, then the ADRs/plans named below.
 
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
-> ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ◀ PICK UP HERE
-> → ③ remaining slices (B-7a/B-7b wizard ladder).**
+> ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ✅ DELIVERED
+> (headline decisions ruled + folded into PR #257) → ③ K8S SCALE-SAFE CLEANUP bugs ◀ PICK UP HERE (start
+> CLEAN-1 = HS-1 advisory-lock), then B-7a/B-7b wizard.**
 >
 > **① UP-SEC-1 ✅ SHIPPED (task #498, branch `up-sec-1-gateway-key-chat-idor`, PR #256).** Two
 > confirmed-live security bugs (inherited from baseline `f91149a`, present at HEAD), **re-authored** in our
@@ -24,19 +25,50 @@ then CLAUDE.md, then the ADRs/plans named below.
 > passed**. 5-lens adversarial review (14 agents) → 1 should-fix (the conftest hermeticity, fixed+proven), 3
 > refuted. GW-04 `base_url`/SSRF + `api_key_encrypted` strip (#273) DEFERRED to a follow-up.
 >
-> **② K8S-R — enterprise Azure/AKS deployment RESEARCH (task #499). ◀ START HERE.** Charter (self-contained, run it):
-> **`docs/fork/plans/ENTERPRISE-AZURE-K8S-research-brief.md`**. RESEARCH not coding. Thesis: distributable
-> **per-customer enterprise deployment on AKS into the CUSTOMER's own Azure subscription — we host nothing**
-> (OSS). Real customer + 2nd Azure prospect; **parameterised repeat** per customer; VM/compose = demo-grade;
-> **Foundry = models only**. Deliverable: `ENTERPRISE-AZURE-K8S-phase1.md` (mirror `AZURE-FOUNDRY-phase1.md`)
-> + slice ladder + ADR(s). Method = research fan-out (Workflow), WebSearch/WebFetch current Azure facts
-> (VERIFY — surface moves fast), code-ground the **§10 horizontal-scale blocker audit** (in-memory R4
-> brake/FanOutQuota, SSE-under-replicas, migrate-on-boot→Job). Reuse+generalise ADR-F069/F070/F072/F058 +
-> BRAND-1. SURFACE (don't pre-decide): managed-PaaS-vs-in-cluster, Terraform-vs-Bicep, security-control
-> phasing, Entra-SSO/SCIM-now-or-fast-follow.
+> **② K8S-R — enterprise Azure/AKS deployment RESEARCH ✅ DELIVERED (task #499, PR #257).** Report:
+> **`docs/fork/plans/ENTERPRISE-AZURE-K8S-phase1.md`** (charter: `…-research-brief.md`). Produced by a
+> 21-agent research fan-out (11 section researchers with Azure web-fact verification + fork-tree code
+> grounding → adversarial code-verification of every §10 scale-blocker → synthesis; assembler truncated so
+> the report was **rebuilt deterministically from the journal**, zero loss). **§10 result: 5 CONFIRMED · 1
+> PARTIAL · 1 REFUTED** horizontal-scale blockers, each CONFIRMED one mapped to a Phase-1 hardening slice —
+> HS-1 migrate-on-boot race (no advisory lock; entrypoint comment is FALSE), HS-2 gateway per-pod in-memory
+> config diverges across replicas, HS-4 agent-worker no `max_jobs`+ONNX OOM, HS-6 legacy playbook executor
+> in-process `BackgroundTasks` (api-pinned, no lease), HS-7 collabora stateful → single-replica; HS-3
+> REFUTED (arq crons already cluster-wide singleton via `unique=True`), HS-5 PARTIAL (cost-governance gap,
+> not a break). Recommendations: cluster-per-customer, **managed-PaaS-by-default** (MinIO stays in-cluster —
+> Blob has no S3 API), **Terraform+AVM** (Bicep drop-in), keyless **Workload Identity** (append `/.default`
+> — the F072 bare-audience trap INVERTS on v2), migrate-as-Job, F070-on-AKS private networking = Phase 2
+> (cost cliff: Firewall ~$913 + WAF). **8 recommended ADRs F073–F080; 30-slice / 5-phase ladder; 14 open
+> decisions D1–D14** surfaced (charter's 4 + 10). **MAINTAINER RULINGS 2026-07-10 (folded into the report §
+> "Maintainer rulings" + MILESTONES §K8S): D4 SSO = OPTIONAL per-customer overlay, LOCAL LOGIN ALWAYS RETAINED
+> (coexist; SSO-only disables local login by config — NOT a rebuild/retire); D7 residency REMOVED (customer
+> deploys models + picks the zone — not ours); D10 reuse the customer's firewall; D13 FIX playbooks (widely
+> used — not dropped); defaults D1 managed-PaaS / D6 in-cluster MinIO / D2 Terraform+AVM confirmed. Still
+> open: D3 phasing, D5 tenancy, D8/D9/D11/D12/D14. ADR files written per-slice as calls settle. No code yet.**
 >
-> **③ Remaining slices:** B-7a profile manifests → B-7b wizard ([[pivot-modular-azure]] ladder; absorbs
+> **③ K8S SCALE-SAFE CLEANUP ◀ PICK UP HERE (maintainer: "cleanup bugs after we compact").** The app-code
+> fixes for the CONFIRMED §10 blockers that LAND NOW on the current tree (no K8s infra needed) — these are
+> genuine durability/hygiene bugs that also de-risk future scaling. Branch off `main`; full ADR-F005 gate.
+> Suggested order (file:line + fix in the report's "Horizontal-scale blocker ledger"):
+> **CLEAN-1 (HS-1)** — real `pg_advisory_lock` around the migration in `api/alembic/env.py` + DELETE the
+> FALSE advisory-lock comment in `api/entrypoint.sh` (it claims env.py locks; it does not). Small.
+> **CLEAN-2 (HS-4)** — add `max_jobs` to `api/app/workers/arq_setup.py` WorkerSettings (new setting, e.g.
+> `lq_ai_agent_worker_concurrency`, default 2–4) mirroring `document_pipeline.py`'s cap; stops the ONNX
+> agent worker running 10 concurrent jobs. Small.
+> **CLEAN-3 (HS-6)** — migrate the classic playbook executor off FastAPI `BackgroundTasks`
+> (`api/app/api/playbooks.py:728`, `_run_in_background` :950-982) onto arq (enqueue + worker consumer) +
+> extend the F009 startup orphan-sweep to `PlaybookExecution`. Real slice; maintainer said FIX (playbooks
+> widely used). Durability parity with every other run type.
+> **CLEAN-4 (HS-2, code-side)** — add a read-only/immutable mode to the gateway config
+> (`gateway/app/config_holder.py`, `config_writer.py`) so runtime alias/key/tier writes 405/409 when the
+> config is mounted `:ro` — the code half of the multi-replica fix (immutable ConfigMap + KV CSI is the K8s
+> half, later). Small–medium.
+> HS-7 (collabora single-replica) + migrate-as-Job Helm hook + immutable ConfigMap are DEPLOYMENT-layer,
+> done with the K8s ladder (K8S-1…30), not now.
+>
+> **THEN (was ③):** B-7a profile manifests → B-7b wizard ([[pivot-modular-azure]] ladder; absorbs
 > ONBOARD-1/2 + G13/#473). Also pending: B-2c org-skill red-team eval, #490 GW-FILEIDS, AIC-3 (#456), SETUP-6.
+> Full K8S enterprise ladder (K8S-1…30, MILESTONES §K8S) sequences once the maintainer sets priority.
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 > ▶▶▶ **SHIPPED (2026-07-10): PUBLISH — admin skill fast-path (task #496, branch
