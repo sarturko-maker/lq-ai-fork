@@ -38,6 +38,9 @@ Registered functions:
 * ``noop_job`` — lightweight "is the worker consuming?" health probe.
 * :func:`app.workers.easy_playbook_worker.easy_playbook_generation_job`
   (M3-A6) — Easy Playbook generation pipeline.
+* :func:`app.workers.playbook_worker.playbook_execution_job`
+  (CLEAN-3a, HS-6) — Playbook execution pipeline (moved off the api's
+  FastAPI ``BackgroundTasks`` onto this worker).
 * :func:`app.workers.tabular_worker.tabular_execution_job`
   (M3-C2) — Tabular Review execution pipeline.
 * :func:`app.workers.autonomous_worker.autonomous_session_job`
@@ -93,6 +96,7 @@ from app.workers.autonomous_worker import (
     autonomous_session_job,
 )
 from app.workers.easy_playbook_worker import easy_playbook_generation_job
+from app.workers.playbook_worker import playbook_execution_job
 from app.workers.tabular_worker import tabular_execution_job
 
 log = logging.getLogger(__name__)
@@ -307,6 +311,7 @@ class WorkerSettings:
     functions: ClassVar[list[Any]] = [
         noop_job,
         easy_playbook_generation_job,
+        playbook_execution_job,
         tabular_execution_job,
         autonomous_session_job,
         # agent_run_job is appended by _populate_class_attrs wrapped in

@@ -1,9 +1,9 @@
 """Playbook executor — builds the LangGraph workflow and runs it.
 
-Public surface: :func:`run_playbook_execution`. The endpoint layer
-(``app.api.playbooks``) calls it from a FastAPI ``BackgroundTask`` so
-the kick-off endpoint can return immediately with a 202 while the
-workflow runs out-of-band.
+Public surface: :func:`run_playbook_execution`. Since CLEAN-3a (HS-6) it runs
+on the ``arq-worker`` — the kick-off endpoint (``app.api.playbooks``) enqueues
+:func:`app.workers.playbook_worker.playbook_execution_job` and returns 202
+immediately while the worker runs this out-of-band.
 
 Graph shape
 -----------
@@ -81,9 +81,10 @@ async def run_playbook_execution(
     Raises :class:`PlaybookExecutorError` if the execution row is
     missing or the referenced playbook / target document cannot be
     loaded. Otherwise, in-graph failures are caught and persisted
-    rather than re-raised — the kick-off endpoint runs this as a
-    background task; an uncaught exception would otherwise vanish
-    into the FastAPI event loop.
+    rather than re-raised — the arq worker
+    (:func:`app.workers.playbook_worker.playbook_execution_job`) runs
+    this, and an uncaught in-graph exception would otherwise settle
+    the job as a hard failure instead of a polled ``error`` row.
     """
 
     execution = await db.get(PlaybookExecution, execution_id)

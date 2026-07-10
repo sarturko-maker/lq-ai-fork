@@ -72,6 +72,15 @@ worker consumes from the same shared queue as Easy Playbook (per
 Decision C-3) and walks the documents x columns grid via the
 LangGraph executor."""
 
+PLAYBOOK_EXECUTION_JOB_NAME = "playbook_execution_job"
+"""CLEAN-3a (HS-6) — Playbook EXECUTION pipeline (distinct from Easy
+Playbook GENERATION above). Triggered by ``POST /api/v1/playbooks/{id}/execute``;
+the playbook worker consumes from the shared queue and runs the existing
+playbook against a target document via the LangGraph executor
+(``app.playbooks.executor.run_playbook_execution``). Moves execution off the
+api's FastAPI ``BackgroundTasks`` so the api stays multi-replica-clean. Must
+match :data:`app.workers.playbook_worker.PLAYBOOK_EXECUTION_JOB_NAME`."""
+
 M3_PLAYBOOK_QUEUE_NAME = "arq:m3a6"
 """Mirror of :data:`app.workers.arq_setup.M3_PLAYBOOK_QUEUE_NAME` (kept
 here to avoid a circular import). Must stay in sync; a discrepancy
@@ -278,6 +287,41 @@ async def enqueue_tabular_execution_job(execution_id: uuid.UUID) -> bool:
             "enqueue_tabular_execution_job: failed; row stays pending",
             extra={
                 "event": "tabular_execution_enqueue_failed",
+                "execution_id": str(execution_id),
+                "error": str(exc),
+            },
+        )
+        return False
+
+
+async def enqueue_playbook_execution_job(execution_id: uuid.UUID) -> bool:
+    """Enqueue a Playbook EXECUTION job onto the shared playbook queue (CLEAN-3a).
+
+    Replaces the api-side FastAPI ``BackgroundTasks`` kick-off so playbook
+    execution runs on the worker (the api stays multi-replica-clean, HS-6).
+
+    Returns True on success, False on transport / import failure. Best-effort
+    transport, like the tabular twin — but because playbook execution has no
+    orphan sweep yet (CLEAN-3b), the ``POST`` handler settles the row to
+    ``error`` on a False return rather than leaving it stuck at ``pending``.
+    """
+
+    try:
+        pool = await _get_m3a6_pool()
+        await pool.enqueue_job(PLAYBOOK_EXECUTION_JOB_NAME, str(execution_id))
+        log.info(
+            "enqueue_playbook_execution_job: enqueued",
+            extra={
+                "event": "playbook_execution_enqueue",
+                "execution_id": str(execution_id),
+            },
+        )
+        return True
+    except Exception as exc:
+        log.warning(
+            "enqueue_playbook_execution_job: failed",
+            extra={
+                "event": "playbook_execution_enqueue_failed",
                 "execution_id": str(execution_id),
                 "error": str(exc),
             },

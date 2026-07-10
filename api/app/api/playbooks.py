@@ -35,9 +35,9 @@ Surface (per [PRD §3.7](docs/PRD.md#37-playbooks)):
   ``completed``.
 * ``POST   /api/v1/playbooks/{playbook_id}/execute`` — kick off an
   execution against a target document. Returns 202 with the new
-  :class:`PlaybookExecution` row at status ``'pending'``; the
-  workflow runs in a FastAPI ``BackgroundTask`` and writes its
-  state to the same row as it progresses.
+  :class:`PlaybookExecution` row at status ``'pending'``; the arq
+  worker (CLEAN-3a) runs the workflow and writes its state to the
+  same row as it progresses.
 * ``GET    /api/v1/playbook-executions/{execution_id}`` — poll the
   current state of an execution. Returns the row with the latest
   ``status`` / ``results`` / ``error`` fields.
@@ -62,14 +62,15 @@ The poll endpoint requires the caller to own the execution
 Async execution model
 ---------------------
 
-Per the M3-1 architectural decision the executor runs in-process
-via FastAPI ``BackgroundTasks``. The executor function
-(:func:`app.playbooks.executor.run_playbook_execution`) opens its
-own DB session (the request-scoped session closes when the
-202-returning handler exits). Operators with restart-survival
-requirements can migrate the worker path to ARQ as a future
-enhancement — the executor interface accepts the same shape either
-way.
+CLEAN-3a (HS-6): the executor runs on the ``arq-worker`` process, not in the
+api. The 202-returning handler enqueues
+:func:`app.workers.playbook_worker.playbook_execution_job` via
+:func:`app.workers.queue.enqueue_playbook_execution_job` onto the shared
+playbook queue; the worker opens its own DB session and dispatches to
+:func:`app.playbooks.executor.run_playbook_execution`. This keeps the api
+multi-replica-clean (execution is no longer pinned to the process that took
+the request). Durability parity with the deep-agent runner (a lease/heartbeat
+orphan sweep for ``PlaybookExecution``) is CLEAN-3b.
 """
 
 from __future__ import annotations
@@ -79,7 +80,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -93,8 +94,7 @@ from app.agents.playbook_proposal import (
 )
 from app.api.dependencies import ActiveUser, MutatingUser, tenant_admin_visibility
 from app.audit import audit_action
-from app.clients.gateway import GatewayClient, get_gateway_client
-from app.db.session import get_db, get_session_factory
+from app.db.session import get_db
 from app.models.document import Document
 from app.models.file import File as FileModel
 from app.models.org_playbook_version import OrgPlaybookVersion
@@ -105,7 +105,6 @@ from app.models.playbook import (
     PlaybookPosition,
 )
 from app.models.project import Project
-from app.playbooks.executor import PlaybookExecutorError, run_playbook_execution
 from app.schemas.playbooks import (
     EasyPlaybookGeneration as EasyPlaybookGenerationSchema,
     EasyPlaybookGenerationCreate,
@@ -115,7 +114,10 @@ from app.schemas.playbooks import (
     PlaybookExecutionCreate,
     PlaybookUpdate,
 )
-from app.workers.queue import enqueue_easy_playbook_generation_job
+from app.workers.queue import (
+    enqueue_easy_playbook_generation_job,
+    enqueue_playbook_execution_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -666,16 +668,16 @@ async def execute_playbook(
     playbook_id: uuid.UUID,
     body: PlaybookExecutionCreate,
     user: MutatingUser,
-    background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
-    gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> PlaybookExecutionSchema:
-    """Create a :class:`PlaybookExecution` row and schedule the workflow.
+    """Create a :class:`PlaybookExecution` row and enqueue the workflow.
 
-    Returns 202 immediately with the row at status ``'pending'``. The
-    workflow promotes it to ``'running'`` shortly after the response
-    is sent, and to ``'completed'`` / ``'error'`` once the four-node
-    graph completes.
+    Returns 202 with the row at status ``'pending'``; the arq worker
+    (CLEAN-3a, HS-6) promotes it to ``'running'`` when it picks the job up and
+    to ``'completed'`` / ``'error'`` once the four-node graph completes. If the
+    job cannot be enqueued the row is settled ``'error'`` before returning (no
+    orphan sweep for playbook executions exists yet — CLEAN-3b), so the poll
+    endpoint sees a terminal state instead of a row stuck at ``'pending'``.
     """
 
     # Reuse the visibility helper. Note: the execute path is stricter
@@ -723,13 +725,18 @@ async def execute_playbook(
     await db.commit()
     await db.refresh(execution)
 
-    # Schedule the workflow. The executor opens its own DB session so
-    # the per-request session can close cleanly when we return 202.
-    background.add_task(
-        _run_in_background,
-        execution_id=execution.id,
-        gateway=gateway,
-    )
+    # Enqueue the workflow onto the shared playbook queue (CLEAN-3a, HS-6). The
+    # worker opens its own DB session; the per-request session closes cleanly on
+    # return. On a transport failure, settle the row to 'error' now — there is
+    # no orphan sweep for playbook executions yet (CLEAN-3b), so a stuck
+    # 'pending' row would poll forever.
+    enqueued = await enqueue_playbook_execution_job(execution.id)
+    if not enqueued:
+        execution.status = "error"
+        execution.error = "executor: unable to enqueue execution job"
+        execution.completed_at = datetime.now(UTC)
+        await db.commit()
+        await db.refresh(execution)
 
     return PlaybookExecutionSchema.model_validate(execution)
 
@@ -945,38 +952,3 @@ async def _load_visible_playbook(
     ):
         raise HTTPException(status_code=404, detail="playbook not found")
     return playbook
-
-
-async def _run_in_background(
-    *,
-    execution_id: uuid.UUID,
-    gateway: GatewayClient,
-) -> None:
-    """Background-task entry point — opens a fresh session for the executor.
-
-    FastAPI's request-scoped session closes when the kick-off handler
-    returns 202; the executor needs its own session for the duration
-    of the workflow. We rely on the same session factory the rest of
-    the API uses, so the executor's queries flow through the same
-    connection pool.
-    """
-    factory = get_session_factory()
-    async with factory() as session:
-        try:
-            await run_playbook_execution(
-                session,
-                execution_id=execution_id,
-                gateway=gateway,
-            )
-        except PlaybookExecutorError as exc:
-            # The executor already wrote status='error' before raising;
-            # this catch is purely so the background task doesn't surface
-            # as an unhandled exception in the logs.
-            logger.warning(
-                "playbook executor refused to start",
-                extra={
-                    "event": "playbook_executor_refused",
-                    "execution_id": str(execution_id),
-                    "reason": str(exc),
-                },
-            )
