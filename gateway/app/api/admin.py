@@ -118,6 +118,30 @@ def _not_implemented(*, message: str, next_task: str) -> JSONResponse:
     )
 
 
+def _read_only_guard(request: Request) -> JSONResponse | None:
+    """Return a 409 envelope if runtime config mutation is disabled (HS-2, CLEAN-4).
+
+    ``app.state.config_read_only`` is set at lifespan from the
+    ``LQ_AI_GATEWAY_CONFIG_READONLY`` env — truthy when the gateway config is
+    mounted read-only (an immutable ConfigMap). ``None`` means writes are
+    allowed. Defaults to allowed when the attribute is absent (tests that bypass
+    the lifespan and never opt into read-only). The check runs BEFORE any
+    file-write attempt so a ``:ro`` mount fails cleanly instead of erroring on
+    ``os.replace`` or diverging per-pod across replicas. Reads are unaffected.
+    """
+
+    if getattr(request.app.state, "config_read_only", False):
+        return _gateway_error(
+            code="config_read_only",
+            message=(
+                "gateway config is read-only in this deployment; runtime "
+                "alias / provider-key / tier mutations are disabled"
+            ),
+            http_status=status.HTTP_409_CONFLICT,
+        )
+    return None
+
+
 def _alias_to_payload(name: str, alias: ModelAliasConfig) -> dict[str, Any]:
     """Render a single alias as the admin-API JSON shape.
 
@@ -289,6 +313,8 @@ async def patch_tier_config(
     success. On validation failure the on-disk file rolls back.
     """
 
+    if (blocked := _read_only_guard(request)) is not None:
+        return blocked
     holder = _holder(request)
     payload = body.model_dump(exclude_none=True)
     if not payload:
@@ -400,6 +426,8 @@ async def create_alias(
 ) -> dict[str, Any] | JSONResponse:
     """Create a new alias. 409 if ``body.name`` is already configured."""
 
+    if (blocked := _read_only_guard(request)) is not None:
+        return blocked
     holder = _holder(request)
     fallback_payload = (
         [{"provider": fb.provider, "model": fb.model} for fb in body.fallback]
@@ -442,6 +470,8 @@ async def update_alias(
 ) -> dict[str, Any] | JSONResponse:
     """Update an existing alias. 404 if not configured."""
 
+    if (blocked := _read_only_guard(request)) is not None:
+        return blocked
     holder = _holder(request)
     fallback_payload = (
         [{"provider": fb.provider, "model": fb.model} for fb in body.fallback]
@@ -480,6 +510,8 @@ async def update_alias(
 async def remove_alias(request: Request, name: str) -> JSONResponse:
     """Remove an alias. 404 if not configured."""
 
+    if (blocked := _read_only_guard(request)) is not None:
+        return blocked
     holder = _holder(request)
     try:
         delete_alias(holder, name=name)
@@ -586,6 +618,8 @@ async def _apply_provider_key_request(
     reload failure paths.
     """
 
+    if (blocked := _read_only_guard(request)) is not None:
+        return blocked
     master_key = _resolved_master_key()
     if not master_key:
         return _gateway_error(
@@ -685,6 +719,8 @@ async def revoke_provider_key_endpoint(
     explicit return, so that is fine even with ``response_class=Response``.
     """
 
+    if (blocked := _read_only_guard(request)) is not None:
+        return blocked
     holder = _holder(request)
     async with request.app.state.provider_key_lock:
         try:
