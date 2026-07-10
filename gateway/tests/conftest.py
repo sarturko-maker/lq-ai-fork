@@ -30,6 +30,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE_CONFIG = REPO_ROOT / "gateway.yaml.example"
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_gateway_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the auth gate hermetic against an ambient ``LQ_AI_GATEWAY_KEY``.
+
+    ``gateway.yaml.example`` ships ``gateway_auth.enabled: true`` and the dev
+    stack exports ``LQ_AI_GATEWAY_KEY`` as a real secret. Since UP-SEC-1 the
+    ``/v1`` inference router enforces that key (mirroring ``/admin/v1``), so any
+    test that loads the example config and sends no header would spuriously 401
+    the moment the runner's shell has the key exported. Delenv it by default
+    (autouse, function-scoped, runs before the explicitly-requested fixtures) so
+    keyless-dev is the *asserted* posture rather than an accident of the ambient
+    env; the auth-exercising fixtures re-``setenv`` it afterwards and send the
+    header.
+    """
+
+    monkeypatch.delenv("LQ_AI_GATEWAY_KEY", raising=False)
+
+
 @pytest.fixture
 def example_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Satisfy the ``${VAR}`` placeholders in ``gateway.yaml.example``."""

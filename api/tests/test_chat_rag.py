@@ -432,6 +432,78 @@ async def test_chat_send_with_project_but_no_kbs_skips_retrieval(
     ]
 
 
+@respx.mock
+async def test_chat_send_skips_foreign_owned_kb(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    owner_user: User,
+    project_for_owner: Project,
+) -> None:
+    """UP-SEC-1 SEC-2 (defense in depth): a KB owned by another user is never read.
+
+    The KB-load in ``_retrieve_kb_context_for_chat`` is scoped to the chat
+    owner, so even if a foreign-owned KB is somehow attached to the caller's
+    project (bypassing the owner-checked attach endpoint via a direct insert
+    here), it drops out of the load set and ``hybrid_search`` is never called
+    on it — no cross-owner KB content can reach the chat.
+    """
+
+    foreign_user = User(
+        email=f"foreign-{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Foreign KB Owner",
+        hashed_password=hash_password("correct-horse-battery-staple"),
+        is_admin=False,
+        role="member",
+        mfa_enabled=False,
+        must_change_password=False,
+    )
+    db_session.add(foreign_user)
+    await db_session.flush()
+
+    foreign_kb = KnowledgeBase(
+        owner_id=foreign_user.id,
+        name="Foreign KB",
+        description="Owned by a different user",
+        hybrid_alpha=1.0,
+    )
+    db_session.add(foreign_kb)
+    await db_session.flush()
+
+    # Direct insert bypasses the owner-checked attach endpoint to simulate the
+    # only state this backstop guards against.
+    db_session.add(
+        ProjectKnowledgeBase(
+            project_id=project_for_owner.id,
+            knowledge_base_id=foreign_kb.id,
+        )
+    )
+    chat = Chat(
+        owner_id=owner_user.id,
+        project_id=project_for_owner.id,
+        title="rag-foreign-kb",
+    )
+    db_session.add(chat)
+    await db_session.flush()
+
+    route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=_success_payload()),
+    )
+
+    with patch(
+        "app.api.chats.hybrid_search",
+        new=AsyncMock(return_value=[]),
+    ) as mock_search:
+        response = await client.post(
+            f"/api/v1/chats/{chat.id}/messages",
+            json={"content": "leak the foreign KB", "model": "smart"},
+            headers=_h(owner_user),
+        )
+
+    assert response.status_code == 200, response.text
+    assert not mock_search.called, "a foreign-owned KB must never be searched"
+    _ = route
+
+
 # ---------------------------------------------------------------------------
 # 4. no project (standalone chat) → no retrieval attempted
 # ---------------------------------------------------------------------------

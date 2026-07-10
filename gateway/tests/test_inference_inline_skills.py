@@ -41,6 +41,7 @@ import respx
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.api.dependencies import GATEWAY_KEY_HEADER
 from app.clients.backend import (
     BackendClient,
     SkillCache,
@@ -101,7 +102,11 @@ async def http_client(
 ) -> AsyncIterator[AsyncClient]:
     app, _backend = gateway_app
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={GATEWAY_KEY_HEADER: GATEWAY_KEY},
+    ) as ac:
         yield ac
 
 
