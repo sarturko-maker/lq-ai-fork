@@ -1751,3 +1751,136 @@ async def test_practice_areas_hitl_policy_column(db_session: AsyncSession) -> No
         (await db_session.execute(text("SELECT hitl_policy FROM practice_areas"))).scalars().all()
     )
     assert seeded and all(policy == {} for policy in seeded)
+
+
+# ---------------------------------------------------------------------------
+# HS-1 — migrate-on-boot advisory lock (CLEAN-1)
+#
+# env.py's run_migrations_online() must acquire a Postgres session-level
+# advisory lock so concurrent `alembic upgrade head` runners (multiple api
+# replicas on boot) serialize instead of racing the same DDL. The entrypoint
+# comment historically CLAIMED this lock existed before the code actually took
+# one; these tests pin that the code now backs the claim.
+# ---------------------------------------------------------------------------
+
+
+def test_migration_env_acquires_advisory_lock_source_guard() -> None:
+    """No-DB guard (runs in CI without Postgres): env.py's online path acquires
+    and releases the SHARED advisory lock, and entrypoint.sh's comment is no
+    longer the false 'env.py locks' claim but points at the real seam."""
+    from tests.conftest import API_DIR
+
+    env_src = (API_DIR / "alembic" / "env.py").read_text()
+    assert "pg_advisory_lock" in env_src, "env.py must acquire the migration advisory lock"
+    assert "pg_advisory_unlock" in env_src, "env.py must release the advisory lock"
+    assert "MIGRATION_ADVISORY_LOCK_KEY" in env_src, "env.py must use the shared lock key"
+
+    entry_src = (API_DIR / "entrypoint.sh").read_text()
+    assert "advisory lock" in entry_src, "entrypoint.sh should still document the coordination"
+    assert "MIGRATION_ADVISORY_LOCK_KEY" in entry_src, "entrypoint.sh should name the real seam"
+
+
+@pytest.mark.integration
+async def test_migration_advisory_lock_serializes_concurrent_runners() -> None:
+    """HS-1: a concurrent `alembic upgrade head` BLOCKS while another holder
+    owns the migration advisory lock, then completes once it is released.
+
+    Deterministic proof that env.py's online path takes the same lock: we hold
+    it manually in one connection, start a real upgrade in a thread, assert the
+    upgrade does not finish while the lock is held, then release and assert it
+    finishes. Runs on a throwaway DB so the shared test DB is never touched."""
+    import threading
+
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine
+
+    from app.db.migration_lock import MIGRATION_ADVISORY_LOCK_KEY
+    from tests.conftest import API_DIR
+
+    runtime_url = os.environ.get("DATABASE_URL")
+    if not runtime_url:
+        pytest.skip("DATABASE_URL not set")
+
+    base, _orig = runtime_url.rsplit("/", 1)
+    fresh_db = f"lq_ai_test_lock_{secrets.token_hex(4)}"
+    admin_sync = f"{base.replace('postgresql+asyncpg://', 'postgresql://', 1)}/postgres"
+    fresh_sync = f"{base.replace('postgresql+asyncpg://', 'postgresql://', 1)}/{fresh_db}"
+
+    def _scenario() -> tuple[bool, bool, list[str]]:
+        admin_engine = create_engine(admin_sync, isolation_level="AUTOCOMMIT")
+        with admin_engine.connect() as conn:
+            conn.execute(text(f'CREATE DATABASE "{fresh_db}"'))
+        admin_engine.dispose()
+
+        cfg = Config(str(API_DIR / "alembic.ini"))
+        cfg.set_main_option("script_location", str(API_DIR / "alembic"))
+
+        holder_engine = create_engine(fresh_sync)
+        blocked_while_held = False
+        finished_after_release = False
+        # Captures the worker's outcome so a FAILED upgrade (which also sets
+        # `done`) can't masquerade as a successful one.
+        worker_error: list[str] = []
+        try:
+            holder = holder_engine.connect()
+            # Session-level lock: survives the commit below, released only by an
+            # explicit unlock (or when this connection closes).
+            holder.execute(
+                text("SELECT pg_advisory_lock(:k)"),
+                {"k": MIGRATION_ADVISORY_LOCK_KEY},
+            )
+            holder.commit()
+
+            done = threading.Event()
+
+            def _upgrade() -> None:
+                saved = os.environ.get("DATABASE_URL")
+                os.environ["DATABASE_URL"] = fresh_sync
+                try:
+                    command.upgrade(cfg, "head")
+                except BaseException as exc:  # record the failure; asserted below
+                    worker_error.append(repr(exc))
+                finally:
+                    if saved is None:
+                        os.environ.pop("DATABASE_URL", None)
+                    else:
+                        os.environ["DATABASE_URL"] = saved
+                    done.set()
+
+            worker = threading.Thread(target=_upgrade, daemon=True)
+            worker.start()
+
+            # While the lock is held, env.py blocks at acquire BEFORE any DDL →
+            # the upgrade must not complete. (If env.py errored instead, done
+            # would fire and blocked_while_held would be False → clear failure.)
+            blocked_while_held = not done.wait(timeout=5.0)
+
+            holder.execute(
+                text("SELECT pg_advisory_unlock(:k)"),
+                {"k": MIGRATION_ADVISORY_LOCK_KEY},
+            )
+            holder.commit()
+            holder.close()
+
+            finished_after_release = done.wait(timeout=60.0)
+        finally:
+            holder_engine.dispose()
+            admin_engine = create_engine(admin_sync, isolation_level="AUTOCOMMIT")
+            with admin_engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                        "WHERE datname = :db AND pid <> pg_backend_pid()"
+                    ),
+                    {"db": fresh_db},
+                )
+                conn.execute(text(f'DROP DATABASE IF EXISTS "{fresh_db}"'))
+            admin_engine.dispose()
+
+        return blocked_while_held, finished_after_release, worker_error
+
+    blocked, finished, errors = await asyncio.to_thread(_scenario)
+    assert blocked, "concurrent upgrade did NOT block while the advisory lock was held"
+    assert finished, "upgrade did not complete after the advisory lock was released"
+    assert not errors, f"the released upgrade did not succeed: {errors}"

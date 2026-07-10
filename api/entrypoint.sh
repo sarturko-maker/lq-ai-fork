@@ -9,10 +9,11 @@ set -e
 # HTTP server accepts traffic. If migrations fail, this script fails —
 # the container does not start a half-configured api.
 #
-# Alembic acquires a Postgres advisory lock via its env.py setup, so
-# multiple workers / replicas racing this step coordinate correctly:
-# the first to acquire the lock applies migrations, the rest no-op
-# once they see the schema is current.
+# env.py's run_migrations_online() acquires a Postgres session-level
+# advisory lock (MIGRATION_ADVISORY_LOCK_KEY) around the migration run,
+# so multiple workers / replicas racing this step coordinate correctly:
+# the first to acquire the lock applies migrations to head, the rest
+# block then no-op once they see the schema is current (HS-1).
 #
 # Operators on a deployment that handles migrations out-of-band (an
 # external job, a sidecar, Kubernetes pre-deploy hook, etc.) can
