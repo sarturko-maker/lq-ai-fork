@@ -796,6 +796,49 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   (org-profile intake → first witnessed run — the empty-House-Brief degradation makes this
   non-optional).
 
+## K8S — enterprise per-customer AKS deployment (RESEARCH DELIVERED 2026-07-10; ADRs F073–F080 recommended)
+
+Outcome: the fork becomes a **distributable, per-customer enterprise deployment on AKS** that installs into
+the **customer's own Azure subscription — we host nothing** (the production path; VM/compose is demo-grade).
+Full Phase-1 research report + rationale: **`docs/fork/plans/ENTERPRISE-AZURE-K8S-phase1.md`** (charter:
+`…-research-brief.md`). §10 code-audit: **5 CONFIRMED · 1 PARTIAL · 1 REFUTED** horizontal-scale blockers.
+
+**GATE — awaits maintainer:** ratify **open decisions D1–D14** (report §"Consolidated open decisions"),
+esp. data-plane default (managed PaaS vs in-cluster), Terraform-vs-Bicep, security-control phasing, and
+Entra-SSO-now-vs-fast-follow. Each recommended ADR (F073 tenancy-per-customer, F074 data-plane, F075 IaC,
+F076 Workload-Identity, F077 migrate-as-Job, F078 gateway-sole-egress-on-AKS, F079 Entra SSO/SCIM, F080
+gateway multi-replica config) is **drafted-as-recommendation only** and gets written per-slice once decided.
+
+Phase 1 slices (full 30-slice/5-phase ladder in the report; ⚠︎ = a CONFIRMED §10 blocker fix):
+
+- **K8S-1** — umbrella Helm chart: lift `docker-compose.prod.yml` env contract 1:1; 6 app containers as
+  Deployments + PDBs.
+- **K8S-2 ⚠︎(HS-1)** — migrations off the boot path: gated Helm pre-upgrade Job + `LQ_AI_SKIP_MIGRATIONS=1`
+  everywhere; delete the false advisory-lock comment; real `pg_advisory_lock` as defense-in-depth.
+- **K8S-3/4** — Terraform root + AVM + per-customer tfvars (state in the customer's subscription); single
+  `customer.values.yaml` projected into both tfvars and Helm values (customer #2 = parameterised repeat).
+- **K8S-5/6** — keyless Foundry via SDK-free `WorkloadIdentityTokenProvider` (append `/.default`) + Key
+  Vault CSI for residual secrets; disable the gateway in-process IMDS KV fetch on AKS.
+- **K8S-7 ⚠︎(HS-2)** — gateway config as immutable `:ro` ConfigMap + KV CSI (405/409 on runtime writes;
+  interim `replicas:1`).
+- **K8S-8 ⚠︎(HS-4)** — agent-worker `max_jobs` + K8s requests/limits/QoS sized for the ONNX footprint;
+  agent-run vs ingest as separate Deployments/HPAs.
+- **K8S-9 ⚠︎(HS-7)** — collabora single-replica (`strategy: Recreate`, `home_mode` off in prod).
+- **K8S-10 ⚠︎(HS-6)** — migrate the legacy playbook executor onto arq + F009 orphan sweep (or drop from the
+  image if retired — D13).
+- **K8S-11 ⚠︎(HS-3 invariant)** — codify single shared non-clustered Redis + single queue (preserves arq's
+  cluster-wide cron dedup).
+- **K8S-12/13/14** — OBS slice (init OTel in both workers, probes, scrape annotations); SSE ingress
+  hardening (buffering off, long read timeout); ACR supply chain (GHCR → customer ACR by digest, MI pull,
+  fix the `image.owner` default).
+- **K8S-15 (conditional, HS-5)** — per-conversation token/fan-out seed on resume + optional per-tenant
+  aggregate budget — only if enterprise cost governance is in v1 scope (D12).
+
+Phases 2–5 (report): private networking (F070-on-AKS; K8S-16…22), Entra SSO/SCIM (K8S-23…25), CMK +
+residency (K8S-26…28), multi-region HA (K8S-29/30). Phase-1 infra ≈ **$1,000–1,200/mo + usage-based Foundry
+tokens**; Phase-2 networking is the cost cliff (Azure Firewall ~$913/mo + WAF) — parameterise firewall/
+ingress/Log-Analytics for customers with a landing-zone hub.
+
 ## Backlog
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)

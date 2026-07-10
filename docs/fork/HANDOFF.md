@@ -4,8 +4,8 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 then CLAUDE.md, then the ADRs/plans named below.
 
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
-> ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ◀ PICK UP HERE
-> → ③ remaining slices (B-7a/B-7b wizard ladder).**
+> ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ✅ DELIVERED
+> (awaits maintainer decisions D1–D14) → ③ remaining slices (B-7a/B-7b wizard ladder) ◀ PICK UP HERE.**
 >
 > **① UP-SEC-1 ✅ SHIPPED (task #498, branch `up-sec-1-gateway-key-chat-idor`, PR #256).** Two
 > confirmed-live security bugs (inherited from baseline `f91149a`, present at HEAD), **re-authored** in our
@@ -24,19 +24,28 @@ then CLAUDE.md, then the ADRs/plans named below.
 > passed**. 5-lens adversarial review (14 agents) → 1 should-fix (the conftest hermeticity, fixed+proven), 3
 > refuted. GW-04 `base_url`/SSRF + `api_key_encrypted` strip (#273) DEFERRED to a follow-up.
 >
-> **② K8S-R — enterprise Azure/AKS deployment RESEARCH (task #499). ◀ START HERE.** Charter (self-contained, run it):
-> **`docs/fork/plans/ENTERPRISE-AZURE-K8S-research-brief.md`**. RESEARCH not coding. Thesis: distributable
-> **per-customer enterprise deployment on AKS into the CUSTOMER's own Azure subscription — we host nothing**
-> (OSS). Real customer + 2nd Azure prospect; **parameterised repeat** per customer; VM/compose = demo-grade;
-> **Foundry = models only**. Deliverable: `ENTERPRISE-AZURE-K8S-phase1.md` (mirror `AZURE-FOUNDRY-phase1.md`)
-> + slice ladder + ADR(s). Method = research fan-out (Workflow), WebSearch/WebFetch current Azure facts
-> (VERIFY — surface moves fast), code-ground the **§10 horizontal-scale blocker audit** (in-memory R4
-> brake/FanOutQuota, SSE-under-replicas, migrate-on-boot→Job). Reuse+generalise ADR-F069/F070/F072/F058 +
-> BRAND-1. SURFACE (don't pre-decide): managed-PaaS-vs-in-cluster, Terraform-vs-Bicep, security-control
-> phasing, Entra-SSO/SCIM-now-or-fast-follow.
+> **② K8S-R — enterprise Azure/AKS deployment RESEARCH ✅ DELIVERED (task #499, PR #257).** Report:
+> **`docs/fork/plans/ENTERPRISE-AZURE-K8S-phase1.md`** (charter: `…-research-brief.md`). Produced by a
+> 21-agent research fan-out (11 section researchers with Azure web-fact verification + fork-tree code
+> grounding → adversarial code-verification of every §10 scale-blocker → synthesis; assembler truncated so
+> the report was **rebuilt deterministically from the journal**, zero loss). **§10 result: 5 CONFIRMED · 1
+> PARTIAL · 1 REFUTED** horizontal-scale blockers, each CONFIRMED one mapped to a Phase-1 hardening slice —
+> HS-1 migrate-on-boot race (no advisory lock; entrypoint comment is FALSE), HS-2 gateway per-pod in-memory
+> config diverges across replicas, HS-4 agent-worker no `max_jobs`+ONNX OOM, HS-6 legacy playbook executor
+> in-process `BackgroundTasks` (api-pinned, no lease), HS-7 collabora stateful → single-replica; HS-3
+> REFUTED (arq crons already cluster-wide singleton via `unique=True`), HS-5 PARTIAL (cost-governance gap,
+> not a break). Recommendations: cluster-per-customer, **managed-PaaS-by-default** (MinIO stays in-cluster —
+> Blob has no S3 API), **Terraform+AVM** (Bicep drop-in), keyless **Workload Identity** (append `/.default`
+> — the F072 bare-audience trap INVERTS on v2), migrate-as-Job, F070-on-AKS private networking = Phase 2
+> (cost cliff: Firewall ~$913 + WAF). **8 recommended ADRs F073–F080; 30-slice / 5-phase ladder; 14 open
+> decisions D1–D14** surfaced (charter's 4 + 10). **AWAITS MAINTAINER: ratify D1–D14 (esp. data-plane
+> default, Terraform-vs-Bicep, security-phasing, SSO-now-vs-fast-follow) — the ADR files + slices are drafted
+> as recommendations only, written per-slice once decided. No code implemented.**
 >
-> **③ Remaining slices:** B-7a profile manifests → B-7b wizard ([[pivot-modular-azure]] ladder; absorbs
-> ONBOARD-1/2 + G13/#473). Also pending: B-2c org-skill red-team eval, #490 GW-FILEIDS, AIC-3 (#456), SETUP-6.
+> **③ Remaining slices ◀ PICK UP HERE:** B-7a profile manifests → B-7b wizard ([[pivot-modular-azure]]
+> ladder; absorbs ONBOARD-1/2 + G13/#473). Also pending: B-2c org-skill red-team eval, #490 GW-FILEIDS,
+> AIC-3 (#456), SETUP-6. **K8S enterprise ladder (K8S-1…30) sequences against these once the maintainer
+> ratifies D1–D14 and sets priority.**
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 > ▶▶▶ **SHIPPED (2026-07-10): PUBLISH — admin skill fast-path (task #496, branch
