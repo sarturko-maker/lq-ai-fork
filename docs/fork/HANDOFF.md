@@ -7,7 +7,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 > ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ◀ PICK UP HERE
 > → ③ remaining slices (B-7a/B-7b wizard ladder).**
 >
-> **① UP-SEC-1 ✅ SHIPPED (task #498, branch `up-sec-1-gateway-key-chat-idor`, PR #TBD).** Two
+> **① UP-SEC-1 ✅ SHIPPED (task #498, branch `up-sec-1-gateway-key-chat-idor`, PR #256).** Two
 > confirmed-live security bugs (inherited from baseline `f91149a`, present at HEAD), **re-authored** in our
 > own tree — NOT cherry-picked (upstream FROZEN, ADR-F001); recorded in `UPSTREAM.md` awareness note, not the
 > sync log (no upstream code taken). **SEC-1:** the gateway `/v1` router (chat/completions, embeddings,
