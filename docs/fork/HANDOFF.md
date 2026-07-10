@@ -5,8 +5,8 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 > ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ✅ DELIVERED
-> (folded into #257) → ③ K8S SCALE-SAFE CLEANUP bugs (CLEAN-1 ✅ shipped #258) ◀ PICK UP HERE (continue
-> CLEAN-2 = HS-4 `max_jobs`), then B-7a/B-7b wizard.**
+> (folded into #257) → ③ K8S SCALE-SAFE CLEANUP bugs (CLEAN-1 ✅ #258, CLEAN-2 ✅ #259) ◀ PICK UP HERE
+> (continue CLEAN-3 = HS-6 playbook executor → arq), then B-7a/B-7b wizard.**
 >
 > **① UP-SEC-1 ✅ SHIPPED (task #498, branch `up-sec-1-gateway-key-chat-idor`, PR #256).** Two
 > confirmed-live security bugs (inherited from baseline `f91149a`, present at HEAD), **re-authored** in our
@@ -58,11 +58,15 @@ then CLAUDE.md, then the ADRs/plans named below.
 > hardened so a failed upgrade can't read as success). 60 migration tests pass; ruff/format/mypy clean.
 > **TRAP (recorded): run container ruff with the REPO ROOT mounted** — mounting only `api/` hides the root
 > `ruff.toml` (line-length=100) so ruff falls back to 88 and rewraps the whole file into diff churn.
-> **CLEAN-2 (HS-4) ◀ NEXT** — add `max_jobs` to `api/app/workers/arq_setup.py` WorkerSettings (new setting,
-> e.g. `lq_ai_agent_worker_concurrency`, default 2–4) mirroring `document_pipeline.py`'s cap (`max_jobs =
-> settings.lq_ai_ingest_worker_concurrency` at `_populate_class_attrs`, config field `config.py:88`); stops
-> the ONNX agent worker running 10 concurrent jobs. Small.
-> **CLEAN-3 (HS-6)** — migrate the classic playbook executor off FastAPI `BackgroundTasks`
+> **CLEAN-2 (HS-4) ✅ SHIPPED (PR #259, branch `clean-2-agent-worker-maxjobs`).** New config
+> `lq_ai_agent_worker_concurrency` (default 4, tunable) wired as `WorkerSettings.max_jobs` in
+> `arq_setup._populate_class_attrs()`, mirroring `document_pipeline`; bounds the ONNX agent worker below
+> arq's default 10. Test in `test_arq_smoke.py`. **Review surfaced a latent durability bug (filed #504,
+> NOT fixed here):** the orphan sweep false-fails an UNCLAIMED queued run after `agent_run_claim_grace_seconds`
+> (1200s) though a claimed run can hold a slot up to `AGENT_RUN_JOB_TIMEOUT_SECONDS` (5520s) — the cap makes
+> it more reachable. Corrected the now-misleading `config.py` comment; grace value left unchanged (coupled to
+> the SSE stale-run threshold `agent_runs.py:234` → own slice).
+> **CLEAN-3 (HS-6) ◀ NEXT** — migrate the classic playbook executor off FastAPI `BackgroundTasks`
 > (`api/app/api/playbooks.py:728`, `_run_in_background` :950-982) onto arq (enqueue + worker consumer) +
 > extend the F009 startup orphan-sweep to `PlaybookExecution`. Real slice; maintainer said FIX (playbooks
 > widely used). Durability parity with every other run type.

@@ -584,13 +584,22 @@ class Settings(BaseSettings):
     # runner heartbeats (throttled) from inside its stream loop and at the
     # guarded_tool_call chokepoint; the sweep settles stale runs as FAILED
     # (never re-enqueues). A false-orphan is fenced-safe but rude, so the
-    # orphan threshold is sized at 8 missed beats. The claim grace must
-    # exceed the SHARED queue's worst-case pickup delay — legacy playbook/
-    # tabular jobs run up to 900s each, and a queued-but-unclaimed agent
-    # run has no heartbeat to read — so 1200s: a legitimately queued run
-    # behind a legacy burst is never falsely failed, at the cost of slow
-    # detection for the rare lost-enqueue zombie (the api already settles
-    # enqueue FAILURES immediately at POST time).
+    # CLAIMED-run orphan threshold is sized at 8 missed beats.
+    #
+    # The claim grace bounds how long an UNCLAIMED 'running' run may sit before
+    # the sweep settles it FAILED — a backstop for a worker that died between
+    # enqueue and claim (the api already settles enqueue FAILURES at POST). It
+    # also feeds the SSE stale-run threshold (api/agent_runs.py), so its value is
+    # NOT isolated to the sweep.
+    # KNOWN LIMITATION (CLEAN-2 / HS-4 follow-up): a claimed agent run can hold a
+    # worker slot for up to AGENT_RUN_JOB_TIMEOUT_SECONDS (5520s), well above this
+    # 1200s grace. On a single worker now bounded to
+    # lq_ai_agent_worker_concurrency slots, a run queued behind a saturated worker
+    # can exceed the grace and be falsely FAILED even though it was legitimately
+    # waiting. The scaling answer is more worker REPLICAS (not a deeper
+    # single-worker backlog); a real fix (distinguish "queued behind full slots"
+    # from "lost enqueue", or track the job timeout, minding the SSE coupling) is
+    # its own durability slice.
     agent_run_heartbeat_seconds: float = Field(
         default=15.0,
         gt=0,
@@ -610,8 +619,29 @@ class Settings(BaseSettings):
         description=(
             "An unclaimed 'running' run older than this is settled FAILED "
             "by the orphan sweep (lost enqueue / worker died before claim / "
-            "pre-F1-S1 legacy rows). Must exceed the shared queue's "
-            "worst-case pickup delay (legacy job_timeout 900s)."
+            "pre-F1-S1 legacy rows). Ideally exceeds the queue's worst-case "
+            "pickup delay; note a claimed agent run can occupy a slot up to "
+            "AGENT_RUN_JOB_TIMEOUT_SECONDS (5520s) — see the KNOWN LIMITATION "
+            "above (CLEAN-2/HS-4). Also feeds the SSE stale-run threshold."
+        ),
+    )
+
+    # Concurrency cap for the shared deep-agent / playbook / tabular / autonomous
+    # arq worker (arq_setup.WorkerSettings). arq defaults to 10 concurrent jobs;
+    # each agent run drives in-process retrieval (ONNX embedder + cross-encoder,
+    # loaded once per process but spiking CPU/memory per concurrent embed) and can
+    # fan out subagents, so 10 unbounded jobs can OOM a modestly-sized worker pod
+    # (HS-4). Bound it — mirrors the ingest worker's lq_ai_ingest_worker_concurrency.
+    # 4 is conservative for a few-GB pod; horizontal scale is by worker replicas,
+    # each honouring this cap.
+    lq_ai_agent_worker_concurrency: int = Field(
+        default=4,
+        gt=0,
+        description=(
+            "Max concurrent jobs for the deep-agent/playbook/tabular arq worker "
+            "(arq_setup.WorkerSettings.max_jobs). Replaces arq's unbounded default "
+            "of 10; each agent run loads in-process ONNX retrieval models. 4 is "
+            "conservative — raise on larger worker pods."
         ),
     )
 

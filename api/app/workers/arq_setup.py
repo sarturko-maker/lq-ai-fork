@@ -347,6 +347,11 @@ def _populate_class_attrs() -> None:
 
         WorkerSettings.redis_settings = _build_redis_settings()  # type: ignore[attr-defined]
         WorkerSettings.cron_jobs = _build_cron_jobs()  # type: ignore[attr-defined]
+        # HS-4: cap concurrency. arq defaults to 10 jobs; this worker loads the
+        # in-process ONNX retrieval stack (embedder + cross-encoder) per agent
+        # run and fans out subagents, so an unbounded 10 can OOM the pod. Mirrors
+        # document_pipeline.WorkerSettings.max_jobs.
+        WorkerSettings.max_jobs = get_settings().lq_ai_agent_worker_concurrency  # type: ignore[attr-defined]
         if not any(getattr(f, "name", None) == "agent_run_job" for f in WorkerSettings.functions):
             WorkerSettings.functions.append(
                 # At-most-once (ADR-F009): max_tries=1 — verified at arq

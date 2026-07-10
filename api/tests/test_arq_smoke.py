@@ -49,6 +49,29 @@ def test_worker_settings_class_shape() -> None:
 
 
 @pytest.mark.unit
+def test_worker_settings_caps_concurrency() -> None:
+    """HS-4: the shared deep-agent/playbook/tabular worker bounds ``max_jobs``
+    from config instead of inheriting arq's unbounded default of 10.
+
+    Each agent run loads the in-process ONNX retrieval stack (embedder +
+    cross-encoder) and can fan out subagents, so an uncapped worker can OOM a
+    modestly-sized pod. ``_populate_class_attrs`` ran at import (arq is installed
+    in the test env), so the attribute is present and wired to the setting.
+    """
+
+    from app.config import Settings, get_settings
+
+    expected = get_settings().lq_ai_agent_worker_concurrency
+    assert isinstance(expected, int) and expected > 0
+    # The real wiring proof: the class attr arq reads was populated from config.
+    assert WorkerSettings.max_jobs == expected  # type: ignore[attr-defined]
+    # The SHIPPED default is bounded below arq's default of 10 (guards against
+    # silently dropping the cap). Checked against the declared field default, not
+    # the live setting, so an operator env override can't make this flaky.
+    assert Settings.model_fields["lq_ai_agent_worker_concurrency"].default < 10
+
+
+@pytest.mark.unit
 async def test_noop_job_returns_ok() -> None:
     """Direct invocation: the registered job is a coroutine that returns ``"ok"``."""
 
