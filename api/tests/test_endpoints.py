@@ -342,6 +342,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # B-2a (ADR-F067 D2/D3) — org-skills harness: propose + review queue + transitions.
     # Dedicated coverage in tests/test_org_skill_harness_api.py.
     ("POST", "/api/v1/user-skills/{skill_id}/propose"),
+    # PUBLISH (ADR-F067 fast-path) — admin one-click propose→approve→adopt.
+    # Dedicated coverage in tests/test_user_skill_publish.py.
+    ("POST", "/api/v1/user-skills/{skill_id}/publish"),
     ("GET", "/api/v1/user-skills/{skill_id}/proposals"),
     ("GET", "/api/v1/admin/org-skills"),
     ("POST", "/api/v1/admin/org-skills/{version_id}/approve"),

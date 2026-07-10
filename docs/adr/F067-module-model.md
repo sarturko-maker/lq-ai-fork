@@ -387,3 +387,46 @@ skill harness (and would surprise a future reader) are recorded here.
    proposes+approves it — the literal "invisible until re-approval" invariant, made visible on
    upgrade day. No shipped playbook is bound by default and fresh orgs are unaffected; a one-time
    auto-approve backfill was deliberately declined.
+
+## Implementation addendum — PUBLISH fast-path (2026-07-10, appended; the decisions above are unchanged)
+
+The admin skill fast-path landed as `POST /api/v1/user-skills/{skill_id}/publish` (no migration),
+collapsing propose → approve → adopt into ONE atomic action for a skill the admin authored
+themselves. Plan: `docs/fork/plans/PUBLISH-admin-skill-fast-path.md`.
+
+1. **Admin self-approve is legitimate and adds no authority.** Self-approval was already permitted
+   on the standalone approve path (D2 — "the audit row makes it visible"). Single-admin orgs have
+   no other approver. Publish collapses clicks, not checks.
+2. **Same frozen snapshot, same audit actions.** Publish writes the identical write-once
+   `org_skill_versions` row, `content_hash`, `org_library_entries` row, and the same three
+   content-free audit actions — `library.propose` + `library.approve` + `library.adopt` — three on
+   first publish, **two on a re-publish of an already-adopted slug** (the adopt is an
+   ON-CONFLICT-DO-NOTHING no-op). The `library.approve` row additionally carries a content-free
+   boolean `fast_path: true` so an auditor can tell one-click approvals apart. The runtime serve
+   path is byte-identical to the slow path.
+3. **Non-admin authors unchanged; owner-gated.** Publish is `AdminUser`-gated AND strictly
+   owner-scoped (`_load_owned_user_skill(user_id=admin.id)` — non-owned / team-scope / archived all
+   404). An admin publishes only their OWN skill; another user's content still travels
+   propose → separate-admin-approve → Library → bind. The D2 sole-path invariant is intact.
+4. **Every write-time gate runs.** The shared `freeze_and_validate_org_skill` helper enforces the
+   D3.3 CLOSED frontmatter allowlist (422, write-time-only — there is no serve-time backstop), the
+   well-formedness check (422), and the 32 KiB cap (422); publish and propose each additionally run
+   the D2 no-shadowing check (fail-closed, 409) and one-open-proposal-per-slug (409, slug-keyed
+   across ALL authors — an admin cannot fast-path around another author's in-flight proposal) in
+   the handler, before any row is written.
+5. **Publish is operator-fenced, consistent with ADR-F064.** It performs an approve of
+   tenant-authored content — the inner `tenant_admin_visibility` check excludes the platform
+   operator, exactly like the standalone approve. This slice deliberately does NOT touch the
+   standalone adopt/bind endpoints: F064 D2 keeps the operator on the areas/capabilities/Library
+   surface ("platform config, the fence's own scope"). Narrowing the operator off those surfaces
+   would supersede F064 — backlogged as `OPERATOR-NARROW-AGENT-CONFIG`, a deliberate separate
+   decision.
+6. **Segregation-of-duties is unsupported by design.** A publish-only "require a second approver"
+   flag would be security theater while the slow-path self-approve stays open. Any future
+   two-person rule MUST live at the shared `promote_to_approved` chokepoint honored by BOTH approve
+   and publish — never bolted onto publish alone.
+7. **Bind stays deliberate.** Publish stops at Library membership; attaching the capability to a
+   specific area Deep Agent remains a separate `practice_area.skill_attach`. The human-deliberation
+   checkpoint relocates from approve → bind. Idempotency: an unchanged re-publish of an
+   already-adopted slug is a **200 no-op** (no new snapshot, no audit rows); an edited re-publish
+   supersedes the prior approved snapshot via the shared two-step-flush chokepoint.

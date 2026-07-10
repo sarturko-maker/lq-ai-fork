@@ -32,21 +32,42 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field, ValidationError as PydanticValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationError as PydanticValidationError,
+    field_validator,
+)
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser, MutatingUser
+from app.api.admin import (
+    _OPERATOR_EXCLUDED_MSG,
+    OrgSkillVersionAdminRead,
+    _org_skill_user_email,
+    _to_org_skill_admin_read,
+    promote_to_approved,
+)
+from app.api.dependencies import (
+    ActiveUser,
+    AdminUser,
+    MutatingUser,
+    tenant_admin_visibility,
+)
 from app.audit import audit_action
 from app.db.session import get_db
+from app.errors import Forbidden
 from app.models.audit import AuditLog
 from app.models.org_skill import OrgSkillVersion
+from app.models.practice_area import OrgLibraryEntry
 from app.models.team import Team, TeamMember
 from app.models.user import User
 from app.models.user_skill import UserSkill
 from app.skills.org_proposal import (
     ORG_SKILL_MAX_BYTES,
+    OrgSkillContent,
     content_size_bytes,
     synthesize_org_skill,
     validate_org_frontmatter,
@@ -898,6 +919,44 @@ def _require_skill_registry(request: Request) -> MutableSkillRegistry:
     return holder
 
 
+def freeze_and_validate_org_skill(row: UserSkill) -> OrgSkillContent:
+    """Synthesize an org-skill snapshot from ``row`` and run the full write-time gate battery
+    (ADR-F067 D3), returning the frozen :class:`OrgSkillContent` — shared by ``propose`` and the
+    admin fast-path ``publish``.
+
+    In order (reject, don't sanitize): the D3.3 CLOSED frontmatter allowlist (422 naming every
+    offending dotted key), well-formedness via ``SkillFrontmatter.model_validate`` (422), then the
+    D3.6 32 KiB size cap (422). INJECTION-CRITICAL: this allowlist is the sole write-time line of
+    defense (there is no serve-time backstop) — do not reorder or loosen it. Pure validation: it
+    touches no DB and never flushes/commits; it raises ``HTTPException`` (422), which is why it
+    lives in the API layer, not the ``app.skills`` package. The caller owns the no-shadow (409),
+    one-open-proposal (409), row insert, audit and commit.
+    """
+    content = synthesize_org_skill(row)
+
+    offending = validate_org_frontmatter(content.frontmatter)
+    if offending:
+        raise HTTPException(
+            status_code=422,
+            detail=f"frontmatter keys not allowed for an org skill: {', '.join(offending)}",
+        )
+    try:
+        SkillFrontmatter.model_validate(content.frontmatter)
+    except PydanticValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    if content.size_bytes > ORG_SKILL_MAX_BYTES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"org skill content is {content.size_bytes} bytes, exceeding the "
+                f"{ORG_SKILL_MAX_BYTES}-byte cap"
+            ),
+        )
+
+    return content
+
+
 def _to_proposal_response(version: OrgSkillVersion) -> OrgSkillProposalResponse:
     size_bytes = content_size_bytes(version.raw_yaml, version.body)
     return OrgSkillProposalResponse(
@@ -977,27 +1036,7 @@ async def propose_user_skill(
 
     row = await _load_owned_user_skill(db, skill_id=skill_id, user_id=user.id)
 
-    content = synthesize_org_skill(row)
-
-    offending = validate_org_frontmatter(content.frontmatter)
-    if offending:
-        raise HTTPException(
-            status_code=422,
-            detail=f"frontmatter keys not allowed for an org skill: {', '.join(offending)}",
-        )
-    try:
-        SkillFrontmatter.model_validate(content.frontmatter)
-    except PydanticValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from None
-
-    if content.size_bytes > ORG_SKILL_MAX_BYTES:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"org skill content is {content.size_bytes} bytes, exceeding the "
-                f"{ORG_SKILL_MAX_BYTES}-byte cap"
-            ),
-        )
+    content = freeze_and_validate_org_skill(row)
 
     # D2 no-shadowing: fail CLOSED if the registry is unavailable — never proceed without the
     # shipped-slug collision check (mirrors app.api.skills._registry).
@@ -1040,6 +1079,10 @@ async def propose_user_skill(
         author_user_id=user.id,
     )
     db.add(version)
+    # Plain-str copy: rollback() expires `row`, and refreshing an expired
+    # attribute on an AsyncSession raises MissingGreenlet — the 409 detail
+    # below must not touch the ORM instance.
+    slug = row.slug
     try:
         await db.flush()
     except IntegrityError:
@@ -1048,7 +1091,7 @@ async def propose_user_skill(
         # (slug, version_no) race) collided with a concurrent propose.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"a concurrent proposal for slug {row.slug!r} was just recorded — retry",
+            detail=f"a concurrent proposal for slug {slug!r} was just recorded — retry",
         ) from None
 
     await audit_action(
@@ -1070,6 +1113,222 @@ async def propose_user_skill(
     await db.refresh(version)
 
     return _to_proposal_response(version)
+
+
+@router.post(
+    "/{skill_id}/publish",
+    response_model=OrgSkillVersionAdminRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Admin fast-path — publish your own skill straight into the Org Library (ADR-F067).",
+    responses={
+        200: {
+            "description": (
+                "No-op: an identical approved snapshot is already adopted into the Library"
+            )
+        },
+        403: {"description": "The platform operator is excluded from tenant-authored content"},
+        404: {"description": "User skill not found (including team-scope and archived rows)"},
+        409: {
+            "description": (
+                "Slug collides with a shipped skill, or an open proposal for this slug exists"
+            )
+        },
+        422: {"description": "Frontmatter fails the org allowlist, or exceeds the size cap"},
+    },
+)
+async def publish_user_skill(
+    skill_id: uuid.UUID,
+    request: Request,
+    response: Response,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> OrgSkillVersionAdminRead:
+    """POST /api/v1/user-skills/{id}/publish — the admin skill fast-path (ADR-F067 Publish).
+
+    Collapses the four-page journey (propose -> approve -> adopt -> bind) into ONE atomic action
+    for a skill the ADMIN AUTHORED THEMSELVES, stopping at Library membership (the deliberate
+    "Bind to an area ->" step stays separate). Introduces ZERO new authority: self-approval is
+    already permitted on the slow path (``admin.py`` approve, D2) — this collapses clicks, not
+    checks. Operator-fenced: it performs an approve of tenant-authored content, which ADR-F064
+    fences off the platform operator even though an operator passes the ``AdminUser`` gate
+    (org-admin ⊂ operator).
+
+    One transaction, exactly one ``commit()`` at the end. Runs the SAME write-time gate battery
+    (422s), mints the SAME frozen immutable ``org_skill_versions`` snapshot + content hash, and
+    writes the SAME three content-free audit actions as the slow path — ``library.propose`` +
+    ``library.approve`` (carrying a content-free ``fast_path: True`` so an auditor can tell
+    one-click approvals apart) + ``library.adopt``. Idempotency: re-publishing an UNCHANGED skill
+    already in the Library is a **200** no-op (mints no new snapshot, writes no audit); a
+    re-publish after an EDIT supersedes the prior approved snapshot (two audit rows — no new adopt
+    when already adopted).
+    """
+    # ADR-F064: publish performs an approve of tenant-authored content — the platform operator is
+    # excluded (the INNER tenant_admin_visibility check, not the looser raw AdminUser gate).
+    if not tenant_admin_visibility(admin):
+        raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
+
+    # (a) STRICTLY owner-scoped — an admin publishes ONLY a skill they themselves authored (the
+    # D2 keystone). A non-owned / team-scope / archived / unknown id all 404 identically.
+    row = await _load_owned_user_skill(db, skill_id=skill_id, user_id=admin.id)
+
+    # (b) Freeze + the full write-time gate battery (422s). Pure validation — no DB writes yet.
+    content = freeze_and_validate_org_skill(row)
+
+    # (c) No-op guard: if an identical approved snapshot is already adopted into the Library,
+    # return it 200 — mint no new snapshot, write no audit (kills double-click churn / genuine
+    # idempotency). Runs BEFORE any mutation.
+    current_approved = (
+        await db.execute(
+            select(OrgSkillVersion).where(
+                OrgSkillVersion.slug == row.slug,
+                OrgSkillVersion.state == "approved",
+            )
+        )
+    ).scalar_one_or_none()
+    if current_approved is not None and current_approved.content_hash == content.content_hash:
+        already_in_library = (
+            await db.execute(
+                select(OrgLibraryEntry.capability_key).where(
+                    OrgLibraryEntry.capability_kind == "skill",
+                    OrgLibraryEntry.capability_key == row.slug,
+                )
+            )
+        ).scalar_one_or_none()
+        if already_in_library is not None:
+            response.status_code = status.HTTP_200_OK
+            author_email = await _org_skill_user_email(db, current_approved.author_user_id)
+            approver_email = await _org_skill_user_email(db, current_approved.reviewed_by)
+            return _to_org_skill_admin_read(
+                current_approved,
+                author_email=author_email,
+                approver_email=approver_email,
+            )
+
+    # (d) D2 no-shadowing: fail CLOSED if the registry is unavailable — never proceed without the
+    # shipped-slug collision check (mirrors propose / app.api.skills._registry).
+    holder = _require_skill_registry(request)
+    if row.slug in holder.current().names():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"skill slug {row.slug!r} collides with a shipped skill",
+        )
+
+    # (e) One-open-proposal-per-slug — slug-keyed across ALL authors (same rule as propose): the
+    # admin should review an in-flight proposal, not race it.
+    open_proposal = (
+        await db.execute(
+            select(OrgSkillVersion.id).where(
+                OrgSkillVersion.slug == row.slug,
+                OrgSkillVersion.state == "proposed",
+            )
+        )
+    ).scalar_one_or_none()
+    if open_proposal is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"an open proposal already exists for slug {row.slug!r}",
+        )
+
+    # (f) Insert the immutable `proposed` snapshot — the FIRST mutation (reproduces the slow
+    # path's state history, reusing the one-open-proposal coupling and the transition guard).
+    max_version_no = (
+        await db.execute(
+            select(func.max(OrgSkillVersion.version_no)).where(OrgSkillVersion.slug == row.slug)
+        )
+    ).scalar_one()
+    version_no = (max_version_no or 0) + 1
+
+    version = OrgSkillVersion(
+        slug=row.slug,
+        version_no=version_no,
+        raw_yaml=content.raw_yaml,
+        body=content.body,
+        frontmatter=content.frontmatter,
+        content_hash=content.content_hash,
+        source_user_skill_id=row.id,
+        author_user_id=admin.id,
+    )
+    db.add(version)
+    # Plain-str copy: rollback() expires `row`, and refreshing an expired
+    # attribute on an AsyncSession raises MissingGreenlet — the 409 detail
+    # below must not touch the ORM instance.
+    slug = row.slug
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"a concurrent proposal for slug {slug!r} was just recorded — retry",
+        ) from None
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="library.propose",
+        resource_type="org_skill_version",
+        resource_id=str(version.id),
+        request=request,
+        details={
+            "kind": "skill",
+            "key": row.slug,
+            "version": version_no,
+            "content_hash": content.content_hash,
+            "size_bytes": content.size_bytes,
+        },
+    )
+
+    # (g) Approve via the shared chokepoint — ends at flush(), never commits, never audits itself.
+    superseded_version_no = await promote_to_approved(db, version, reviewer_id=admin.id)
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="library.approve",
+        resource_type="org_skill_version",
+        resource_id=str(version.id),
+        request=request,
+        details={
+            "kind": "skill",
+            "key": version.slug,
+            "version": version.version_no,
+            "content_hash": version.content_hash,
+            "size_bytes": content_size_bytes(version.raw_yaml, version.body),
+            "superseded_version": superseded_version_no,
+            "fast_path": True,
+        },
+    )
+
+    # (h) Idempotent adopt into the Library — deliberately NOT the `adopt` endpoint body (its
+    # except IntegrityError: rollback() would nuke this whole txn). ON CONFLICT DO NOTHING; audit
+    # library.adopt only when a row was actually inserted (RETURNING is empty on conflict). The
+    # just-flushed approved snapshot satisfies the catalog invariant in-session, so no
+    # _validate_catalog_key round-trip is needed.
+    adopt_stmt = (
+        pg_insert(OrgLibraryEntry)
+        .values(capability_kind="skill", capability_key=row.slug, adopted_by=admin.id)
+        .on_conflict_do_nothing(index_elements=["capability_kind", "capability_key"])
+        .returning(OrgLibraryEntry.capability_key)
+    )
+    adopted_key = (await db.execute(adopt_stmt)).scalar_one_or_none()
+    if adopted_key is not None:
+        await audit_action(
+            db,
+            user_id=admin.id,
+            action="library.adopt",
+            resource_type="org_library",
+            resource_id=row.slug,
+            request=request,
+            details={"kind": "skill", "key": row.slug},
+        )
+
+    # (i) One commit for the whole fast-path.
+    await db.commit()
+    await db.refresh(version)
+    author_email = await _org_skill_user_email(db, version.author_user_id)
+    approver_email = await _org_skill_user_email(db, version.reviewed_by)
+    return _to_org_skill_admin_read(
+        version, author_email=author_email, approver_email=approver_email
+    )
 
 
 @router.get(

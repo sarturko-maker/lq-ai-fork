@@ -2100,6 +2100,49 @@ async def _org_skill_version_for_transition(
     return version
 
 
+async def promote_to_approved(
+    db: AsyncSession, version: OrgSkillVersion, *, reviewer_id: _uuid_mod.UUID
+) -> int | None:
+    """Flip a ``proposed`` org-skill version to ``approved``, superseding any prior approved
+    snapshot of the same slug — the shared approve chokepoint (ADR-F067 D2).
+
+    INVARIANT: this ends at ``flush()`` — it NEVER ``commit()``s and NEVER writes an audit row.
+    The caller owns the transaction boundary (standalone approve commits after its audit; the
+    fast-path publish composes several of these steps into one commit), and the caller owns the
+    ``library.approve`` audit row. ``version`` must already be loaded in state ``'proposed'``
+    (the caller asserted the transition, e.g. via ``_org_skill_version_for_transition``).
+    Returns the ``version_no`` of the row it superseded, or ``None`` when there was no prior
+    approved snapshot — for the caller's audit ``superseded_version``.
+
+    The partial unique index ``ux_org_skill_versions_slug_approved`` permits at most one
+    'approved' row per slug. SQLAlchemy flushes same-table UPDATEs in primary-key order, so
+    demoting the prior approved row and THIS row in one flush could momentarily leave both
+    'approved' and trip the index. Lock + demote + FLUSH the prior row to 'superseded' first,
+    THEN flip this row to 'approved' and flush — the two-step flush the constraint forces.
+    """
+    prior = (
+        await db.execute(
+            select(OrgSkillVersion)
+            .where(
+                OrgSkillVersion.slug == version.slug,
+                OrgSkillVersion.state == "approved",
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    superseded_version_no: int | None = None
+    if prior is not None:
+        prior.state = "superseded"
+        superseded_version_no = prior.version_no
+        await db.flush()
+
+    version.state = "approved"
+    version.reviewed_by = reviewer_id
+    version.reviewed_at = datetime.now(UTC)
+    await db.flush()
+    return superseded_version_no
+
+
 @router.get(
     "/org-skills",
     response_model=OrgSkillVersionsListResponse,
@@ -2166,32 +2209,10 @@ async def approve_org_skill_version(
         raise Forbidden(message=_OPERATOR_EXCLUDED_MSG)
     version = await _org_skill_version_for_transition(db, version_id, expected_state="proposed")
 
-    # The partial unique index ux_org_skill_versions_slug_approved permits at most one
-    # 'approved' row per slug. SQLAlchemy flushes same-table UPDATEs in primary-key order, so
-    # demoting the prior approved row and THIS row in one flush could momentarily leave both
-    # 'approved' and trip the index. Lock + demote + FLUSH the prior row to 'superseded' first,
-    # THEN flip this row to 'approved' and flush — the two-step flush the constraint forces.
-    prior = (
-        await db.execute(
-            select(OrgSkillVersion)
-            .where(
-                OrgSkillVersion.slug == version.slug,
-                OrgSkillVersion.state == "approved",
-            )
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
-    superseded_version_no: int | None = None
-    if prior is not None:
-        prior.state = "superseded"
-        superseded_version_no = prior.version_no
-        await db.flush()
-
-    now = datetime.now(UTC)
-    version.state = "approved"
-    version.reviewed_by = admin.id
-    version.reviewed_at = now
-    await db.flush()
+    # The two-step supersede+flip lives in the shared `promote_to_approved` chokepoint (also the
+    # fast-path publish's approve step, ADR-F067). It ends at flush(); this endpoint owns the
+    # `library.approve` audit row and the commit.
+    superseded_version_no = await promote_to_approved(db, version, reviewer_id=admin.id)
 
     await audit_action(
         db,

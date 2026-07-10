@@ -140,6 +140,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # B-2a (fork, ADR-F067 D2/D3) — org-skills harness: author propose +
         # history, admin review queue + transitions
         "/api/v1/user-skills/{skill_id}/propose",
+        # PUBLISH (ADR-F067 fast-path) — admin one-click publish
+        "/api/v1/user-skills/{skill_id}/publish",
         "/api/v1/user-skills/{skill_id}/proposals",
         "/api/v1/admin/org-skills",
         "/api/v1/admin/org-skills/{version_id}/approve",
@@ -439,7 +441,8 @@ async def test_openapi_paths_match_sketch() -> None:
     # +1: HITL-3 (ADR-F071) — PUT /practice-areas/{key}/hitl-policy (185 -> 186).
     # +6: B-4 (ADR-F067 D2/D3) — org-playbooks harness: playbooks propose + proposals,
     #   admin/org-playbooks queue + approve/reject/revoke (186 -> 192).
-    assert len(actual) == 192  # +3: ADR-F054 capability panel (GET/PUT
+    # +1: PUBLISH (ADR-F067 fast-path) — POST /user-skills/{skill_id}/publish (192 -> 193).
+    assert len(actual) == 193  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH
