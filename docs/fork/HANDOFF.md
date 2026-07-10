@@ -4,7 +4,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 then CLAUDE.md, then the ADRs/plans named below.
 
 > ▶▶▶ **SHIPPED (2026-07-10): PUBLISH — admin skill fast-path (task #496, branch
-> `publish-admin-skill-fastpath`, PR #PRNUM).** One-click `POST /user-skills/{id}/publish` collapses
+> `publish-admin-skill-fastpath`, PR #255).** One-click `POST /user-skills/{id}/publish` collapses
 > propose→self-approve→adopt for a skill the ADMIN authored — zero new authority; identical governance
 > artifacts (frozen approved snapshot + Library entry + content-free audits `propose`/`approve
 > fast_path:true`/`adopt`; republish of adopted slug = 2 rows, adopt no-ops); Bind stays deliberate
