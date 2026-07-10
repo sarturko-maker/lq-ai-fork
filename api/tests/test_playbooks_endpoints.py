@@ -7,16 +7,16 @@ Exercises:
 * ``GET /api/v1/playbook-executions/{id}`` — auth gating, 404 paths,
   the round-trip read of a row written by the kick-off endpoint.
 
-The BackgroundTask is replaced with a no-op so these tests don't
-actually run the LangGraph workflow — the executor itself is
-covered by ``tests/playbooks/test_executor.py``.
+The arq enqueue is stubbed so these tests don't hit Redis or run the
+LangGraph workflow — the executor itself is covered by
+``tests/playbooks/test_executor.py`` and the worker orchestration by
+``tests/playbooks/test_playbook_worker.py``.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -136,8 +136,9 @@ async def test_execute_returns_202_with_pending_execution(
     _file, doc = await _make_document(db_session, owner=owner)
     playbook = await _make_playbook(db_session, author=owner)
 
-    # No-op the background task — executor itself is tested separately.
-    with patch.object(playbooks_module, "_run_in_background", new=_noop_background):
+    # Stub the enqueue so the endpoint doesn't hit Redis — the worker + executor
+    # are tested separately. A successful enqueue leaves the row at 'pending'.
+    with patch.object(playbooks_module, "enqueue_playbook_execution_job", new=_fake_enqueue):
         resp = await client.post(
             f"/api/v1/playbooks/{playbook.id}/execute",
             json={"target_document_id": str(doc.id)},
@@ -228,7 +229,7 @@ async def test_execute_admin_can_act_on_any_playbook(
     _file, doc = await _make_document(db_session, owner=admin)
     playbook = await _make_playbook(db_session, author=author)
 
-    with patch.object(playbooks_module, "_run_in_background", new=_noop_background):
+    with patch.object(playbooks_module, "enqueue_playbook_execution_job", new=_fake_enqueue):
         resp = await client.post(
             f"/api/v1/playbooks/{playbook.id}/execute",
             json={"target_document_id": str(doc.id)},
@@ -236,6 +237,30 @@ async def test_execute_admin_can_act_on_any_playbook(
         )
 
     assert resp.status_code == 202
+
+
+@pytest.mark.integration
+async def test_execute_settles_error_when_enqueue_fails(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """CLEAN-3a: a failed enqueue settles the row to 'error' (not stuck at
+    'pending') so the poll endpoint sees a terminal state — there is no orphan
+    sweep for playbook executions yet (CLEAN-3b)."""
+    owner = await _make_user(db_session)
+    _file, doc = await _make_document(db_session, owner=owner)
+    playbook = await _make_playbook(db_session, author=owner)
+
+    with patch.object(playbooks_module, "enqueue_playbook_execution_job", new=_fake_enqueue_fail):
+        resp = await client.post(
+            f"/api/v1/playbooks/{playbook.id}/execute",
+            json={"target_document_id": str(doc.id)},
+            headers=_bearer(owner),
+        )
+
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["status"] == "error"
+    assert "enqueue" in (body["error"] or "")
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +333,12 @@ async def test_get_execution_returns_404_for_unknown_id(
 # ---------------------------------------------------------------------------
 
 
-async def _noop_background(**_kwargs: Any) -> None:
-    """Replaces ``_run_in_background`` so endpoint tests don't actually run the workflow."""
-    return None
+async def _fake_enqueue(_execution_id: uuid.UUID) -> bool:
+    """Replaces ``enqueue_playbook_execution_job`` (success) so endpoint tests
+    don't hit Redis — the worker + executor are tested separately."""
+    return True
+
+
+async def _fake_enqueue_fail(_execution_id: uuid.UUID) -> bool:
+    """Enqueue-failure stub — exercises the endpoint's settle-to-'error' path."""
+    return False

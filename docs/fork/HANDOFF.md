@@ -5,8 +5,9 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 > ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ✅ DELIVERED
-> (folded into #257) → ③ K8S SCALE-SAFE CLEANUP bugs (CLEAN-1 ✅ #258, CLEAN-2 ✅ #259) ◀ PICK UP HERE
-> (continue CLEAN-3 = HS-6 playbook executor → arq), then B-7a/B-7b wizard.**
+> (folded into #257) → ③ K8S SCALE-SAFE CLEANUP bugs (CLEAN-1 ✅ #258, CLEAN-2 ✅ #259, CLEAN-3a ✅ #260;
+> CLEAN-3b GATED on maintainer greenlight — schema migration) ◀ PICK UP HERE (continue CLEAN-4 = HS-2
+> gateway read-only config), then B-7a/B-7b wizard.**
 >
 > **① UP-SEC-1 ✅ SHIPPED (task #498, branch `up-sec-1-gateway-key-chat-idor`, PR #256).** Two
 > confirmed-live security bugs (inherited from baseline `f91149a`, present at HEAD), **re-authored** in our
@@ -66,11 +67,16 @@ then CLAUDE.md, then the ADRs/plans named below.
 > (1200s) though a claimed run can hold a slot up to `AGENT_RUN_JOB_TIMEOUT_SECONDS` (5520s) — the cap makes
 > it more reachable. Corrected the now-misleading `config.py` comment; grace value left unchanged (coupled to
 > the SSE stale-run threshold `agent_runs.py:234` → own slice).
-> **CLEAN-3 (HS-6) ◀ NEXT** — migrate the classic playbook executor off FastAPI `BackgroundTasks`
-> (`api/app/api/playbooks.py:728`, `_run_in_background` :950-982) onto arq (enqueue + worker consumer) +
-> extend the F009 startup orphan-sweep to `PlaybookExecution`. Real slice; maintainer said FIX (playbooks
-> widely used). Durability parity with every other run type.
-> **CLEAN-4 (HS-2, code-side)** — add a read-only/immutable mode to the gateway config
+> **CLEAN-3a (HS-6) ✅ SHIPPED (PR #260, branch `clean-3a-playbook-execution-arq`).** Tier A: playbook
+> EXECUTION moved off FastAPI `BackgroundTasks` onto the arq worker — new `app/workers/playbook_worker.py`
+> (`playbook_execution_job` delegating to the UNCHANGED `run_playbook_execution`) + `enqueue_playbook_execution_job`
+> + `WorkerSettings.functions` registration; endpoint settles the row to `error` on enqueue failure (no sweep
+> yet). Faithful mirror of `tabular_worker`; writes `error` NOT `failed` (CHECK); results still polled (no SSE).
+> Review: correctness+security CLEAN; 2 nits fixed (stale executor docstrings; re-raise-branch test). 50 tests.
+> **CLEAN-3b (HS-6 durability) — GATED on maintainer greenlight (task #505):** Tier B lands an Alembic
+> migration (lease/heartbeat/claimed columns on `playbook_executions`, which has NONE) + a new orphan sweep so a
+> killed worker settles the row to `error` instead of hanging at `running`. Held because it's a schema change.
+> **CLEAN-4 (HS-2, code-side) ◀ NEXT** — add a read-only/immutable mode to the gateway config
 > (`gateway/app/config_holder.py`, `config_writer.py`) so runtime alias/key/tier writes 405/409 when the
 > config is mounted `:ro` — the code half of the multi-replica fix (immutable ConfigMap + KV CSI is the K8s
 > half, later). Small–medium.
