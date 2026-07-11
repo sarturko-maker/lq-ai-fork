@@ -231,10 +231,11 @@ async def _validate_owned_file_ids(
     for the existence of files they don't own (per CLAUDE.md
     information-leakage avoidance + the C4 file-ownership brief).
 
-    Returns the validated ids as strings (deduped, order-preserving) for
-    forwarding to the gateway as ``lq_ai_file_ids``. Empty input returns
-    an empty list without a DB round-trip — the back-compatible no-op
-    path.
+    Returns the validated ids as strings (deduped, order-preserving) so
+    the caller can load each file's content for per-message document
+    context (:func:`_load_attached_file_contexts`) and echo the ids back
+    as ``applied_file_ids``. Empty input returns an empty list without a
+    DB round-trip — the back-compatible no-op path.
     """
 
     if not file_ids:
@@ -1114,9 +1115,9 @@ async def send_message(
     # persisted or dispatched. Ownership is enforced id-probing-safe
     # (404 on foreign / nonexistent / soft-deleted, indistinguishable
     # from one another) so the caller can't enumerate file ids they
-    # don't own. Validated ids forward to the gateway as
-    # ``lq_ai_file_ids`` and echo back as ``applied_file_ids``. Empty /
-    # omitted is a no-op (no DB round-trip) — back-compatible.
+    # don't own. Validated ids drive per-message document-context
+    # injection (Part B below) and echo back as ``applied_file_ids``.
+    # Empty / omitted is a no-op (no DB round-trip) — back-compatible.
     effective_file_ids = await _validate_owned_file_ids(db, payload.file_ids, user.id)
 
     # Wave D.2 Task 3.0 — merge legacy ``skills`` with new
@@ -1383,7 +1384,7 @@ async def send_message(
             project_id=chat.project_id,
             request=request,
             details={
-                # All validated file_ids forwarded this turn, vs. the count
+                # All validated file_ids attached this turn, vs. the count
                 # whose extracted text was actually injected as document
                 # context (a file with no parsed text yet is attached but
                 # contributes nothing) — kept as distinct fields so Receipts
@@ -1419,7 +1420,6 @@ async def send_message(
         lq_ai_skills=list(effective_skills),
         lq_ai_skill_inputs=dict(effective_skill_inputs),
         lq_ai_inline_skills=list(inline_skill_refs),
-        lq_ai_file_ids=list(effective_file_ids),
         lq_ai_project_minimum_inference_tier=project_floor,
         lq_ai_privileged=project_privileged,
     )
@@ -1464,6 +1464,7 @@ async def send_message(
             user=user,
             gateway=gateway,
             request=gw_request,
+            applied_file_ids=list(effective_file_ids),
             chat=chat,
             assistant_message_id=assistant_message_id,
             user_message_id=user_message.id,
@@ -1478,6 +1479,7 @@ async def send_message(
         user=user,
         gateway=gateway,
         request=gw_request,
+        applied_file_ids=list(effective_file_ids),
         chat=chat,
         assistant_message_id=assistant_message_id,
         user_message_id=user_message.id,
@@ -2087,6 +2089,7 @@ async def _non_streaming_response(
     user: User,
     gateway: GatewayClient,
     request: ChatCompletionRequest,
+    applied_file_ids: list[str] | None = None,
     chat: Chat,
     assistant_message_id: uuid.UUID,
     user_message_id: uuid.UUID,
@@ -2186,7 +2189,7 @@ async def _non_streaming_response(
         routed_provider=response.routed_provider,
         cost_estimate=response.cost_estimate,
         applied_skills=applied_skills,
-        applied_file_ids=list(request.lq_ai_file_ids),
+        applied_file_ids=list(applied_file_ids or []),
         attached_skill_names=list(attached_skill_names or []),
         slash_unresolved=slash_unresolved,
     )
@@ -2210,6 +2213,7 @@ async def _stream_response(
     user: User,
     gateway: GatewayClient,
     request: ChatCompletionRequest,
+    applied_file_ids: list[str] | None = None,
     chat: Chat,
     assistant_message_id: uuid.UUID,
     user_message_id: uuid.UUID,
@@ -2405,9 +2409,9 @@ async def _stream_response(
                 },
                 "applied_skills": last_applied_skills or [],
                 # Donna — echo the validated, caller-owned file ids that
-                # were forwarded to the gateway for this turn (mirrors
+                # were injected as document context for this turn (mirrors
                 # ``applied_skills``; turn-scoped, not persisted).
-                "applied_file_ids": list(request.lq_ai_file_ids),
+                "applied_file_ids": list(applied_file_ids or []),
                 "citations": [],
                 "routed_inference_tier": last_tier,
                 "routed_provider": last_provider,

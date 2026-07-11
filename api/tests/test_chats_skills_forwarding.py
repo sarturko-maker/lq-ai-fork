@@ -415,7 +415,10 @@ def _stream_chunk(content: str) -> str:
 async def test_file_ids_forwarded_and_echoed_non_streaming(
     client: AsyncClient, db_user: User, db_session: AsyncSession
 ) -> None:
-    """Caller-owned file_ids forward as lq_ai_file_ids and echo back."""
+    """Caller-owned file_ids are validated and echoed back as
+    applied_file_ids. The ids themselves never egress to the gateway
+    (GW-FILEIDS #490): document context reaches the model as injected
+    message content, not as a wire field."""
 
     f = await _make_file(db_session, db_user)
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -430,7 +433,7 @@ async def test_file_ids_forwarded_and_echoed_non_streaming(
 
     assert response.status_code == 200
     sent = _json.loads(route.calls[0].request.read())
-    assert sent["lq_ai_file_ids"] == [str(f.id)]
+    assert "lq_ai_file_ids" not in sent
     body = response.json()
     assert body["applied_file_ids"] == [str(f.id)]
 
@@ -521,7 +524,7 @@ async def test_file_ids_soft_deleted_404(
 @pytest.mark.integration
 @respx.mock
 async def test_no_file_ids_means_empty_extension_field(client: AsyncClient, db_user: User) -> None:
-    """Omitted file_ids is back-compatible: empty/absent lq_ai_file_ids, empty echo."""
+    """Omitted file_ids: no lq_ai_file_ids wire field ever egresses, empty echo."""
 
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, json=_success_payload())
@@ -535,8 +538,8 @@ async def test_no_file_ids_means_empty_extension_field(client: AsyncClient, db_u
 
     assert response.status_code == 200
     sent = _json.loads(route.calls[0].request.read())
-    # exclude_none/exclude_default serialization may drop the empty list.
-    assert sent.get("lq_ai_file_ids", []) == []
+    # GW-FILEIDS #490: the ids never travel to the gateway as a wire field.
+    assert "lq_ai_file_ids" not in sent
     assert response.json()["applied_file_ids"] == []
 
 
@@ -721,11 +724,13 @@ async def test_attached_file_without_text_is_omitted_gracefully(
 
     assert response.status_code == 200, response.text
     sent = _json.loads(route.calls[0].request.read())
-    # file_ids still forwarded (Part A contract) but no attached-docs block.
-    assert sent["lq_ai_file_ids"] == [str(f.id)]
+    # No lq_ai_file_ids wire field (GW-FILEIDS #490); empty Document → no
+    # attached-docs block. The validated id still echoes back.
+    assert "lq_ai_file_ids" not in sent
     assert sent["messages"] == [
         {"role": "user", "content": "summarize", "lq_ai_skip_anonymization": False}
     ]
+    assert response.json()["applied_file_ids"] == [str(f.id)]
 
 
 @pytest.mark.integration
