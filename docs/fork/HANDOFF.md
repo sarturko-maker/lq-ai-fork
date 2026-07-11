@@ -43,10 +43,25 @@ then CLAUDE.md, then the ADRs/plans named below.
 > B-2c TESTS (all fixed). 15/15 red-team, 76/76 with B-2a/2b. Live masked-judge scenario
 > DEFERRED-ON-RECORD (R6 is a proven code invariant; box OOMs the arq worker) — bounded follow-up
 > for a maintainer/VM session. Evidence `docs/fork/evidence/modules-b2c/`.
-> ◀ PICK UP HERE: **DELEGATION IN FORCE (maintainer directive 2026-07-11: "run until your context
-> window runs out; I will pull this version into the enterprise VM on Azure and test live").
-> Workstream B is COMPLETE through B-2c. THEN HOLD: the next milestone is the maintainer's
-> enterprise-vs-product call;
+> ⑩ **HTTP keep-alive fix ✅ SHIPPED (PR #269, task #516; config-only, no code/mig).** The B-7 walk's
+> sporadic "Failed to fetch" was uvicorn's 5s default keep-alive < Caddy's ~120s upstream idle (and
+> browser wizard-gap reuse). `entrypoint.sh` now sets `--timeout-keep-alive` default 130s
+> (`LQ_AI_HTTP_KEEP_ALIVE_TIMEOUT`), above the proxy idle. Verified live (api logs "keep-alive 130s",
+> healthy, branding 200). Runbook §6b + .env.prod.example. **This is in the version to pull onto the VM.**
+>
+> ◀ PICK UP HERE: **AUTONOMOUS RUN WRAPPED — the delegated B-stack is COMPLETE and every remaining
+> queue item is gated on the maintainer's return.** This session shipped, all merged to main:
+> #265 CUSTODIAN plan · #266 B-7 acceptance evidence · #267 F081 living-redline (the maintainer's
+> redline-bug interjection, live-verified) · #268 B-2c org-skill red-team + deep security pass ·
+> #269 HTTP keep-alive fix. Main is deployable; **run the maintainer's AZURE-VM LIVE-TEST SCRIPT
+> below** on the pull.
+> **DECISIONS AWAITING THE MAINTAINER (do not pre-empt):** (1) the enterprise-vs-product direction
+> call — CUSTODIAN (`docs/fork/plans/CUSTODIAN-milestone.md`, #510–#514) starts ONLY if product is
+> chosen; (2) should the shipped Commercial profile enable `hitl_policy` on apply_redline by default
+> (B-7 walk finding — today `hitl={}` per parity); (3) the fate of the 5 untracked strays
+> (4× `api/tests/agents/scenarios/test_*_live.py` + `sample-documents/`) — commit as fixtures,
+> delete, or leave local? They are NOT gitignored and belong to no PR; local-only so the VM pull is
+> unaffected. **THEN HOLD: the next milestone is the maintainer's enterprise-vs-product call;
 > the product candidate is queued as **CUSTODIAN** (`docs/fork/plans/CUSTODIAN-milestone.md`,
 > tasks #510–#514; kills/fences recorded in MILESTONES.md § CUSTODIAN). GATED/deferred: CLEAN-3b
 > (#505, migration greenlight); AZ-4 parked; HS-7/deploy-layer; AZ-6 keyless-MI still unpushed
