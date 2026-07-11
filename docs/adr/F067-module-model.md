@@ -477,3 +477,41 @@ migration. Divergences and calls a future reader needs:
 8. **Playbook/knowledge bindings are out of B-7a manifest scope** — no shipped profile binds either,
    and both reference DB **ids** (not static keys), so they can't live in an in-repo manifest without
    a lookup. `ProfileBindings` covers skills + tool groups; it can grow the other kinds later.
+
+## Implementation addendum — B-7b (2026-07-11): the guided setup wizard
+
+B-7b is the web half of D4 — a guided admin flow over the shipped apply transaction. **No backend
+change** (no new endpoint, no migration): it drives the B-7a `GET /profiles`, `GET /profiles/{name}`,
+`POST /profiles/{name}/apply` plus the existing organization-profile (House Brief) and library reads.
+New web: `api/profiles.ts` client, a `StepRail` primitive (F013 tokens), the
+`(app)/admin/setup/` route + tested `page-helpers.ts`, an admin-nav link, and a cockpit-landing
+auto-launch hook.
+
+Maintainer-ratified decisions (2026-07-11): **Q1 auto-launch on a fresh org, skippable** (always
+reachable from the nav); **Q2 multi-step (StepRail + gated Next)**; **Q3 end at the receipt with a
+"Try it now" CTA** (invite via the existing users flow); **Q4 diff-preview before Apply**; **Q5
+profile-default + recommended, additive** (no deselect; removal stays on Store/Library).
+
+Build-time refinements (grounded in code, recorded so a future reader isn't surprised):
+
+1. **Auto-launch triggers on an EMPTY Library, not "no area configured."** A fresh org's practice-area
+   rows ARE `configured` (seeded 0053–0086); the empty Library (0088 users-empty gate) is the direct
+   G13 signal, so the cockpit-landing hook (`(app)/+page.svelte`) fires on `library.entries.length ===
+   0`, gated by a tenant-admin check (operator excluded, F064), a per-browser dismissal flag
+   (`lq-ai:setup-dismissed`, set on complete OR skip), and swallowing any probe error so the cockpit
+   never blocks on it. The pure predicate is `shouldAutoLaunchSetup(...)`, unit-tested.
+2. **The wizard collapsed to a pure profile-apply — one atomic transaction, no extra adopt calls.**
+   B-7a's parity oracle pinned each shipped area profile's bindings equal to
+   `RECOMMENDED_LIBRARY_SETS[area]`, so the "recommended extras beyond the profile" set is EMPTY for
+   commercial/privacy. The Q5 "additive recommended rail" therefore adds nothing for the shipped
+   profiles, and the adopt step is just the profile's own set applied atomically. Curation BEYOND a
+   profile (and any removal) stays on the always-available Store/Library pages — consistent with
+   apply's additive-only semantics (it never prunes).
+3. **Operator fenced client-side too.** The apply endpoint 403s the operator (F064), and `is_admin`
+   admits the operator elsewhere, so the setup route guard branches on `role === 'operator'`
+   (redirect) and the admin-nav "Set up" link is hidden for the operator — mirroring the server fence
+   rather than letting them walk into a 403.
+4. **Receipt keys off `area_created` + adopted counts.** On the fresh-org norm the seeded area is
+   *activated* (`area_created=false`); the copy says "{area} is ready" and reports the adopted/roster/
+   HITL counts. A re-apply that adopts nothing new (`on_conflict_do_nothing`) is rendered as success
+   ("already in your Library"), never a bare zero.
