@@ -845,8 +845,10 @@ ingress/Log-Analytics for customers with a landing-zone hub.
 
 ## CUSTODIAN — contract custodian-of-record (PLANNED 2026-07-11; plan: `docs/fork/plans/CUSTODIAN-milestone.md`)
 
-**Queued behind ① B-7 milestone acceptance (delegated agentic walk in progress) ② B-2c eval ③ the
-maintainer's enterprise-vs-product direction call — starts only if the product branch is chosen.**
+**Queued behind ① B-7 milestone acceptance — delegated walk PASSED 2026-07-11, evidence
+`docs/fork/evidence/b7-acceptance/`, formal sign-off = maintainer on return — ② the REDLINE-CONT
+living-redline fix (maintainer interjection 2026-07-11, ADR-F081) ③ B-2c eval ④ the maintainer's
+enterprise-vs-product direction call — starts only if the product branch is chosen.**
 From the 7-idea strategy review (grounded 8-agent evaluation, 2026-07-11). One story: the Commercial
 agent becomes the team's custodian of record for everything a contract **obliges** (deadlines),
 **threatens** (exposure), and **taught us** (whys/outcomes) — on top of redlining. All writes land in
