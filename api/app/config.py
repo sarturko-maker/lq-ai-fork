@@ -675,6 +675,21 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- Profile manifests (ADR-F067 D4, B-7a) -----
+    # Filesystem path the profile loader walks at API startup. Defaults to the
+    # repo's `profiles/` directory (sibling to `skills/`); resolved against the
+    # process working directory if relative — the API container's WORKDIR is
+    # `/app`, so `../profiles` anchors at `/profiles` (the Dockerfile COPY target
+    # and the dev bind mount). Fail-loud: a missing dir or a malformed manifest
+    # aborts boot (see app/profiles/bootstrap.py). Tests point this at a fixture.
+    profiles_dir: str = Field(
+        default="../profiles",
+        description=(
+            "Filesystem directory the profile-manifest loader walks at startup. "
+            "Default is the repo's `profiles/` folder."
+        ),
+    )
+
     # ----- M3-D1 slack-bridge integration -----
     # The slack-bridge runs the OAuth dance with Slack then POSTs the
     # resulting workspace record to

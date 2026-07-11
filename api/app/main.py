@@ -39,6 +39,7 @@ from app.clients.gateway import close_gateway_client, get_gateway_client
 from app.config import assert_boot_secrets_configured, get_settings
 from app.db.session import check_db, dispose_engine, get_session_factory
 from app.errors import LQAIError
+from app.profiles import install_profile_registry
 from app.security.rate_limit import RateLimiter, RedisRateLimitBackend
 from app.skills import install_sighup_reload, install_skill_registry, resolve_skill_dirs
 from app.storage import check_storage, ensure_bucket
@@ -88,6 +89,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         skills_dir,
         community_skills_dir=effective_community_dir,
     )
+
+    # Shipped agent-profile manifests (ADR-F067 D4, B-7a). API-process only (the
+    # worker never applies profiles) and installed AFTER the skill registry — the
+    # loader cross-validates each manifest's skill bindings against the live
+    # corpus. Fail-loud: a malformed manifest or missing dir aborts boot.
+    install_profile_registry(app, settings, skill_registry=skill_registry_holder.current())
 
     # First-run admin bootstrap (Task B2). If the DB is unreachable at
     # startup we log and continue — the readiness probe will reflect the

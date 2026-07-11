@@ -4,11 +4,34 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 then CLAUDE.md, then the ADRs/plans named below.
 
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
-> ▶▶▶ **NEXT (maintainer-set order, 2026-07-10): ① UP-SEC-1 ✅ SHIPPED → ② K8S-R research ✅ DELIVERED
-> (folded into #257) → ③ K8S SCALE-SAFE CLEANUP — APP-CODE MILESTONE COMPLETE (CLEAN-1 ✅ #258, CLEAN-2 ✅
-> #259, CLEAN-3a ✅ #260, CLEAN-4 ✅ #261). ◀ PICK UP HERE: B-7a/B-7b wizard. GATED/deferred: CLEAN-3b
-> (durability migration — needs maintainer greenlight, #505); HS-7/migrate-Job/immutable-ConfigMap =
-> deployment-layer with the K8s ladder.**
+> ▶▶▶ **NEXT (maintainer-set order): ① UP-SEC-1 ✅ #256 → ② K8S-R research ✅ #257 → ③ K8S SCALE-SAFE
+> CLEANUP — APP-CODE MILESTONE COMPLETE (CLEAN-1..4 ✅ #258–#261) → ④ B-7a profile manifests + apply
+> ✅ SHIPPED (branch `b7a-profile-manifests`, ADR-F067 B-7a addendum, NO migration).
+> ◀ PICK UP HERE: B-7b — the guided setup wizard (web over B-1/B-5 components + the Store add-all rail
+> + B-7a's `POST /profiles/{name}/apply`; absorbs ONBOARD-1/2 + G13/#473; acceptance = maintainer-walked
+> fresh-org journey). GATED/deferred: CLEAN-3b (durability migration — needs maintainer greenlight, #505);
+> HS-7/migrate-Job/immutable-ConfigMap = deployment-layer with the K8s ladder.**
+>
+> **④ B-7a — profile manifests + apply transaction ✅ SHIPPED (ADR-F067 D4 made real; backend-only, NO
+> migration).** In-repo `profiles/{commercial,privacy,blank}/` = folder-per-profile (`profile.yaml` +
+> verbatim `doctrine.md`, byte-parity with the seeded `profile_md`) + fail-loud loader `app/profiles/`
+> (API-lifespan-only, cross-validates skill/tool bindings + roster + HITL against the LIVE registries —
+> reuses `build_area_subagents`/`TOOL_GROUP_REGISTRY`/`hitl_eligible_tool_names`) + `app/schemas/profiles.py`
+> + router `app/api/profiles.py` (`GET /profiles`, `GET /profiles/{name}`, `POST /profiles/{name}/apply`).
+> Apply = ONE idempotent all-or-nothing txn (the `publish_user_skill` law: one commit, validate-before-write,
+> `on_conflict_do_nothing`, never the attach/adopt handler bodies) that create/patches the area + **adopts the
+> matching `org_library_entries`** + binds + sets roster + HITL → reproduces the seed AND kills the G13
+> fresh-org cliff (redlines out of the box). Operator FENCED (F064). **Decisions (maintainer AFK → recommended
+> defaults, in the ADR addendum): Q1 unit vocab = manifest-layer Literal only (DB stays free Text, no
+> migration, "Deal" untouched); Q2 apply = authoritative-overwrite + audit-diff (preview is B-7b); Q3 operator
+> fenced. `RECOMMENDED_LIBRARY_SETS` KEPT + cross-checked (full fold deferred — 3 of 5 areas have no manifest).
+> Playbook/knowledge bindings OUT of scope (DB ids, not static keys).** Gate: ruff+format+mypy clean;
+> profile suites **33 pass**; drift guards re-pinned (endpoints `_PARAM_VALUES["name"]`+3 routes; openapi
+> EXPECTED_PATHS +3 & len 193→196; mutation_rbac 142→143 & 193→196). Ground truth extracted from a throwaway
+> head-migrated pgvector (deterministic) — generation script in session scratchpad. **TRAP: the dev image
+> `lq-ai-api-dev` bakes STALE `/app/alembic` (pre-0088) and NO `/skills`/`/profiles` — mount host
+> `api/alembic` + `api/alembic.ini` + `skills` + `profiles` when running the container suite.** Dockerfile
+> bakes `COPY profiles/ /profiles/`; dev compose bind-mounts `./profiles:/profiles:ro` on api only.
 >
 > **① UP-SEC-1 ✅ SHIPPED (task #498, branch `up-sec-1-gateway-key-chat-idor`, PR #256).** Two
 > confirmed-live security bugs (inherited from baseline `f91149a`, present at HEAD), **re-authored** in our

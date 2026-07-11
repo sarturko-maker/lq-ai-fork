@@ -1,0 +1,19 @@
+name: privacy
+kind: area
+display_name: Privacy
+description: Data-protection programmes — DPA checklist review, vendor privacy first-pass, records of processing (ROPA), and assessments.
+area_key: privacy
+unit_label: Programme
+default_tier_floor: null
+default_budget_profile: null
+bindings:
+  skills:
+  - dpa-checklist-review
+  - vendor-privacy-policy-first-pass
+  - contract-qa
+  - matter-memory
+  tool_groups:
+  - ropa
+  - assessment
+agent_config: {}
+hitl: {}

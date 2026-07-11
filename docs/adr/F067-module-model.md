@@ -430,3 +430,50 @@ themselves. Plan: `docs/fork/plans/PUBLISH-admin-skill-fast-path.md`.
    checkpoint relocates from approve → bind. Idempotency: an unchanged re-publish of an
    already-adopted slug is a **200 no-op** (no new snapshot, no audit rows); an edited re-publish
    supersedes the prior approved snapshot via the shared two-step-flush chokepoint.
+
+## Implementation addendum — B-7a (2026-07-11, appended; the decisions above are unchanged)
+
+D4 (the agent profile) made real for the **backend**: shipped in-repo `profiles/*` manifests +
+a fail-loud loader (`app/profiles/`) + a transactional apply endpoint (`app/api/profiles.py`). No
+migration. Divergences and calls a future reader needs:
+
+1. **On-disk layout = folder-per-profile + sibling `doctrine.md`.** `profiles/<name>/profile.yaml`
+   carries the structured config; the doctrine text lives in a raw `profiles/<name>/doctrine.md`
+   read **verbatim** — NOT an inline YAML block. Rationale: the seeded `profile_md` uses trailing
+   whitespace/line-continuations that a YAML block scalar would silently chomp, breaking the
+   byte-parity oracle; a raw `.md` also diff-reviews as markdown. `blank` ships no doctrine.
+2. **Loader is FAIL-LOUD at boot**, the gateway `config_loader` policy — a malformed/unknown-key
+   manifest, an unknown skill/tool binding, a bad roster, or an ineligible HITL name raises
+   `ProfileLoadError` out of the lifespan (non-zero exit), unlike the skills loader's skip-and-warn.
+   This discharges D4's "refuse unknown kind/key at LOAD, never at apply-time surprise." The
+   cross-validation reuses the runtime seams (`build_area_subagents`, `TOOL_GROUP_REGISTRY` ∖
+   `COMPOSITION_ONLY_GROUP_KEYS`, `hitl_eligible_tool_names`), so a manifest can't encode a binding
+   apply would later refuse.
+3. **Registry is API-process only + not SIGHUP-reloadable** (shipped-static): `app/profiles/` has no
+   `Mutable*` holder and is installed only in the FastAPI lifespan (the arq worker never applies
+   profiles), two justified divergences from `install_skill_registry`.
+4. **`unit_label` closed vocabulary is manifest-layer only** (Q1). A Pydantic `Literal{Matter,
+   Project, Programme, Investigation}` validates the shipped manifests; the DB `unit_label` column,
+   `PracticeAreaCreate`, and the blank-apply override stay free Text. So B-7a needs **no migration**,
+   the live `m-and-a` "Deal" is untouched (and cannot get a manifest until reclassified), and an
+   admin can still label a bespoke area any noun. Enforcing it in the DB is a separate follow-up.
+5. **Apply = idempotent authoritative-overwrite + audit-diff** (Q2). It overwrites manifest-owned
+   area fields (doctrine/roster/unit/defaults/hitl) and additively adopts/binds via
+   `on_conflict_do_nothing`, recording the changed field NAMES in the `profile.apply` audit row
+   (never values, never silent). The diff **preview** before overwrite is B-7b's UI. Blank only
+   CREATES (409 on an existing key). Operator is **fenced** (`tenant_admin_visibility`, F064 — apply
+   mutates tenant config + Library). Reuses the `publish_user_skill` transaction law: one commit;
+   validate before the first write; never call the attach/adopt handler bodies (their
+   `except IntegrityError: rollback()` would nuke the txn).
+6. **Adoption is the G13 fix.** On a migrated org the area ROW pre-exists (0053–0086); on a *fresh*
+   org the Library is empty (0088's users-empty gate), so bound caps are inert. Apply writes BOTH
+   the bindings AND the matching `org_library_entries` adoptions — the parity oracle asserts the
+   manifest reproduces the seeded row AND that post-apply the caps are adopted. Applying Commercial
+   on a fresh org makes the agent redline out of the box.
+7. **`RECOMMENDED_LIBRARY_SETS` is kept, not folded** (yet). It still feeds the Store rail for all
+   five seeded areas (three have no B-7a manifest); B-7a ships three manifests + a parity test that
+   pins the commercial/privacy manifests' bindings equal to the constant. The full fold (generate
+   the rail from manifests, delete the constant) defers until every seeded area has a manifest.
+8. **Playbook/knowledge bindings are out of B-7a manifest scope** — no shipped profile binds either,
+   and both reference DB **ids** (not static keys), so they can't live in an in-repo manifest without
+   a lookup. `ProfileBindings` covers skills + tool groups; it can grow the other kinds later.

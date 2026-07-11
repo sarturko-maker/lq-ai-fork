@@ -254,6 +254,9 @@ services:
       BRAND_ACCENT_DARK: ${BRAND_ACCENT_DARK:-}
     volumes:
       - ./skills:/skills:ro
+      # B-7a (ADR-F067 D4): shipped agent-profile manifests, loaded at API boot
+      # (app/profiles/). api only — the workers never apply profiles.
+      - ./profiles:/profiles:ro
     ports:
       - "${API_BIND_ADDR:-127.0.0.1}:${API_HOST_PORT:-8000}:8000"
     healthcheck:

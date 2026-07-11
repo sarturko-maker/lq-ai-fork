@@ -46,6 +46,12 @@ RUN chmod +x /usr/local/bin/lq-ai-entrypoint
 # ./skills:/skills:ro bind mount (docker-compose.yml) happened to cover it.
 COPY skills/ /skills/
 
+# B-7a (ADR-F067 D4): the shipped agent-profile manifests, baked in for the same
+# reason as skills/ — they live outside api/ and the API loads them at boot
+# (app/profiles/), fail-loud if the dir is absent. Dev also bind-mounts
+# ./profiles:/profiles:ro so host edits are live without a rebuild.
+COPY profiles/ /profiles/
+
 EXPOSE 8000
 
 # The entrypoint runs `alembic upgrade head` before exec'ing uvicorn so a
