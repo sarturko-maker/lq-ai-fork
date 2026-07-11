@@ -8,11 +8,15 @@ then CLAUDE.md, then the ADRs/plans named below.
 > CLEANUP — APP-CODE MILESTONE COMPLETE (CLEAN-1..4 ✅ #258–#261) → ④ B-7a manifests+apply ✅ MERGED
 > **PR #262** (`c8fcd9ba`) → ⑤ B-7b guided setup wizard ✅ MERGED **PR #263** (`f6b06cb9`) → ⑥ #490
 > GW-FILEIDS stop-emit ✅ SHIPPED (this PR; api-only, NO migration).
-> ◀ PICK UP HERE: **B-7 milestone acceptance — the maintainer's live fresh-org walk** (reset a fresh org →
-> apply Commercial via the wizard → invite a member → member runs the Commercial agent → it redlines with
-> **no manual Library curation** — the G13 kill). Then the remaining Workstream-B backlog (B-2c eval ·
-> AZ-4 parked) or the K8s ladder — maintainer's call. GATED/deferred: CLEAN-3b (durability
-> migration — needs maintainer greenlight, #505); HS-7/migrate-Job/immutable-ConfigMap = deploy-layer.**
+> ◀ PICK UP HERE: **DELEGATION IN FORCE (maintainer directive 2026-07-11: "move through the
+> B stack yourself"): ⑴ B-7 milestone acceptance as a DELEGATED AGENTIC fresh-org walk (#508 — reset a
+> fresh org → wizard-apply Commercial → invite a member → member's agent redlines with no manual Library
+> curation; evidence to `docs/fork/evidence/b7-acceptance/`, formal sign-off = maintainer on return) →
+> ⑵ B-2c org-skills eval (#509, OOM-aware). THEN HOLD: the next milestone is the maintainer's
+> enterprise-vs-product call; the product candidate is queued as **CUSTODIAN**
+> (`docs/fork/plans/CUSTODIAN-milestone.md`, tasks #510–#514: OBLIG-1 → ADV-1 → OUTCOME-1 → WHY-1 →
+> EXPO-1; from the 2026-07-11 strategy review — kills/fences recorded in MILESTONES.md § CUSTODIAN).
+> GATED/deferred: CLEAN-3b (#505, migration greenlight); AZ-4 parked; HS-7/deploy-layer.**
 >
 > **⑥ #490 GW-FILEIDS — stop emitting `lq_ai_file_ids` ✅ SHIPPED (surgical Option A, maintainer-approved;
 > api-only, NO migration, NO gateway change).** The field was VESTIGIAL: the gateway is strip-only (GW-STRIP

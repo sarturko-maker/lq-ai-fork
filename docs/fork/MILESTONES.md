@@ -843,6 +843,41 @@ residency (K8S-26…28), multi-region HA (K8S-29/30). Phase-1 infra ≈ **$1,000
 tokens**; Phase-2 networking is the cost cliff (Azure Firewall ~$913/mo + WAF) — parameterise firewall/
 ingress/Log-Analytics for customers with a landing-zone hub.
 
+## CUSTODIAN — contract custodian-of-record (PLANNED 2026-07-11; plan: `docs/fork/plans/CUSTODIAN-milestone.md`)
+
+**Queued behind ① B-7 milestone acceptance (delegated agentic walk in progress) ② B-2c eval ③ the
+maintainer's enterprise-vs-product direction call — starts only if the product branch is chosen.**
+From the 7-idea strategy review (grounded 8-agent evaluation, 2026-07-11). One story: the Commercial
+agent becomes the team's custodian of record for everything a contract **obliges** (deadlines),
+**threatens** (exposure), and **taught us** (whys/outcomes) — on top of redlining. All writes land in
+the existing `matter_memory_entries` ledger; all trust flows through the shipped HITL confirm moment;
+every slice eval-gated on the existing CUAD/C9 substrate; zero new ingress/egress.
+
+- **OBLIG-1** — obligation dates: `trigger_at` ADR+migration (distinct from bi-temporal `valid_at` —
+  the keystone the other schema-touching slices serialize behind), coached `record_matter_fact`
+  extraction, cockpit "Upcoming obligations" (trust level + citation), CUAD notice/renewal eval gate.
+  Follow-on OBLIG-2: deterministic zero-LLM arq cron sweep + digest (never spawns a run).
+- **ADV-1** — hostile-reader: `adversarial-review` SKILL.md + Commercial roster subagent (+ profile
+  manifest), seeded-defect recall eval (C9 judge). Stance-distinct from `deal-review` or it dies in
+  review. NO simulated counterparty markup (needs a simulation-fence ADR — ADV-2, gated).
+- **OUTCOME-1** — clause-outcome ledger: ADR superseding F032's option-3 deferral; matter-scoped
+  (clause label, decision verb, round) rows written at `apply_decisions`. Intra-org ONLY; pre-builds
+  the ADR-F050 Practice Knowledge inputs.
+- **WHY-1** — why-on-approve: optional rationale on `ResumeDecision` approve → one human-attributed
+  `fact_type='decision'` row (NO migration; rationale kept out of audit rows).
+- **EXPO-1** — exposure snapshot: grid column pack + deterministic cap-arithmetic helper (AIC-2
+  pattern); bounds only — **never emit a probability/expected value** (permanent fence).
+
+Strategy kills recorded (do not re-litigate without new facts): **federated clause-outcome pooling**
+(antitrust/information-exchange + NDA exposure lives in the DATA, OSS doesn't dissolve it; sells
+against nothing-leaves-the-building; reversible pseudonymizer ≠ statistical disclosure control) ·
+**agent-to-agent negotiation protocol** (docx tracked-changes IS the adopted protocol; Adeu fluency
+is the moat; value zero until a real counterparty runs an agent — watch-trigger: a both-sides
+customer or a credible neutral standard) · **contract-DSL/state-machine compiler** and **actuarial
+expected-value layer** (anti-thesis, permanent) · **agent gym** parked as a post-distribution-push
+credibility play (first move if revived: 3-day probe decoupling the masked-judge scorer + one
+synthetic pack behind a CLI; ADR-F001 forecloses "under the LegalQuants banner").
+
 ## Backlog
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
