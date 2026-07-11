@@ -15,11 +15,13 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
-	import { projectsApi } from '$lib/lq-ai/api';
+	import { libraryApi, projectsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
+	import { auth } from '$lib/lq-ai/auth/store';
 	import type { MatterActivity } from '$lib/lq-ai/api/agents';
 	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 	import type { Project } from '$lib/lq-ai/types';
+	import { SETUP_DISMISSED_KEY, shouldAutoLaunchSetup } from './admin/setup/page-helpers';
 	import AreaGrid from '$lib/lq-ai/cockpit/AreaGrid.svelte';
 	import CenteredEntry from '$lib/lq-ai/cockpit/CenteredEntry.svelte';
 	import ConversationHost from '$lib/lq-ai/cockpit/ConversationHost.svelte';
@@ -58,7 +60,47 @@
 		}
 	}
 
-	onMount(loadProjects);
+	/**
+	 * B-7b (ADR-F067 D4) — auto-launch the guided setup wizard on a fresh org.
+	 * A tenant-admin (the operator is fenced out of apply, ADR-F064) who hasn't
+	 * completed or skipped the wizard on this browser, on an org whose Library is
+	 * still empty (the direct G13 signal — seeded bindings are inert until
+	 * something is adopted), is sent to the wizard. Skippable + always reachable
+	 * from the admin nav. The probe never blocks the cockpit (any failure is
+	 * swallowed), and short-circuits before any request for non-admins / operators
+	 * / already-dismissed browsers.
+	 */
+	async function maybeAutoLaunchSetup() {
+		const user = $auth.user;
+		if (!user?.is_admin || user.role === 'operator') return;
+		let dismissed = false;
+		try {
+			dismissed = localStorage.getItem(SETUP_DISMISSED_KEY) === '1';
+		} catch {
+			dismissed = true; // storage disabled — don't nag
+		}
+		if (dismissed) return;
+		try {
+			const lib = await libraryApi.getLibrary();
+			if (
+				shouldAutoLaunchSetup({
+					isAdmin: user.is_admin,
+					role: user.role,
+					dismissed: false,
+					libraryEmpty: lib.entries.length === 0
+				})
+			) {
+				goto('/lq-ai/admin/setup');
+			}
+		} catch {
+			// never block the cockpit landing on the first-run probe
+		}
+	}
+
+	onMount(() => {
+		void loadProjects();
+		void maybeAutoLaunchSetup();
+	});
 
 	function nav(url: string) {
 		goto(url, { keepFocus: true, noScroll: true });

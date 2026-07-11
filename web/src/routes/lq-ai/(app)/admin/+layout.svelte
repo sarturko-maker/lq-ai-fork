@@ -9,6 +9,10 @@
 	// editor — operator-only server-side, so the link hides for non-operators
 	// (the page keeps its own guard; the server 403s regardless).
 	$: navLinks = [
+		// B-7b (ADR-F067 D4) — the guided setup wizard; operator-fenced client-side
+		// to mirror the apply endpoint's operator 403 (ADR-F064). Front of the nav:
+		// the onboarding front door (also auto-launches on a fresh org's landing).
+		...($auth.user?.role !== 'operator' ? [{ href: '/lq-ai/admin/setup', label: 'Set up' }] : []),
 		{ href: '/lq-ai/admin/audit-log', label: 'Audit log' },
 		{ href: '/lq-ai/admin/users', label: 'Users' },
 		// SETUP-4b (ADR-F062 addendum) — plain admin links, NOT operator-gated.

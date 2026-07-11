@@ -30,6 +30,7 @@ export * as enhancePromptApi from './enhancePrompt';
 export * as autonomousApi from './autonomous';
 export * as agentsApi from './agents';
 export * as practiceAreasApi from './practiceAreas';
+export * as profilesApi from './profiles';
 export * as matterMemoryApi from './matterMemory';
 export * as matterCapabilitiesApi from './matterCapabilities';
 export * as matterFilesApi from './matterFiles';

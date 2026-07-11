@@ -5,15 +5,38 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 > ▶▶▶ **NEXT (maintainer-set order): ① UP-SEC-1 ✅ #256 → ② K8S-R research ✅ #257 → ③ K8S SCALE-SAFE
-> CLEANUP — APP-CODE MILESTONE COMPLETE (CLEAN-1..4 ✅ #258–#261) → ④ B-7a profile manifests + apply
-> ✅ SHIPPED (branch `b7a-profile-manifests`, ADR-F067 B-7a addendum, NO migration).
-> ◀ PICK UP HERE: B-7b — the guided setup wizard (web over B-1/B-5 components + the Store add-all rail
-> + B-7a's `POST /profiles/{name}/apply`; absorbs ONBOARD-1/2 + G13/#473; acceptance = maintainer-walked
-> fresh-org journey). GATED/deferred: CLEAN-3b (durability migration — needs maintainer greenlight, #505);
-> HS-7/migrate-Job/immutable-ConfigMap = deployment-layer with the K8s ladder.**
+> CLEANUP — APP-CODE MILESTONE COMPLETE (CLEAN-1..4 ✅ #258–#261) → ④ B-7a manifests+apply ✅ MERGED
+> **PR #262** (`c8fcd9ba`) → ⑤ B-7b guided setup wizard ✅ SHIPPED (this PR; web-only, NO migration, NO
+> new endpoint).
+> ◀ PICK UP HERE: **B-7 milestone acceptance — the maintainer's live fresh-org walk** (reset a fresh org →
+> apply Commercial via the wizard → invite a member → member runs the Commercial agent → it redlines with
+> **no manual Library curation** — the G13 kill). Then the remaining Workstream-B backlog (B-2c eval · #490
+> GW-FILEIDS · AZ-4 parked) or the K8s ladder — maintainer's call. GATED/deferred: CLEAN-3b (durability
+> migration — needs maintainer greenlight, #505); HS-7/migrate-Job/immutable-ConfigMap = deploy-layer.**
 >
-> **④ B-7a — profile manifests + apply transaction ✅ SHIPPED (ADR-F067 D4 made real; backend-only, NO
-> migration).** In-repo `profiles/{commercial,privacy,blank}/` = folder-per-profile (`profile.yaml` +
+> **⑤ B-7b — guided setup wizard ✅ SHIPPED (web-only, NO migration, NO new endpoint; ADR-F067 B-7b
+> addendum).** `/lq-ai/admin/setup` multi-step flow (new `StepRail` primitive + gated Next) over the B-7a
+> profiles API: pick profile → (name the area, blank only) → House Brief (embeds B-1) → review & activate
+> (diff-preview) → done + "Try it now". New web: `api/profiles.ts` client (+ barrel), `StepRail.svelte`,
+> the `(app)/admin/setup/` route + tested `page-helpers.ts`, a "Set up" admin-nav link, and a cockpit-
+> landing auto-launch hook. **Auto-launch triggers on an EMPTY Library** (the true G13 signal — a fresh
+> org's seeded areas ARE `configured`), gated by a tenant-admin check (operator FENCED, F064) + a per-
+> browser dismissal flag (`lq-ai:setup-dismissed`, set on complete OR skip). **Collapsed to a pure
+> profile-apply** (one atomic txn) since B-7a pinned `bindings == RECOMMENDED_LIBRARY_SETS[area]` → no
+> extra non-atomic adopt calls; curation/removal stays on Store/Library (additive-only). Decisions
+> ratified by the maintainer 2026-07-11: auto-launch skippable · multi-step (StepRail) · additive curation
+> · diff-preview yes · end-at-receipt. **Gate:** `npm run check` 0 errors; full vitest **114 files / 1360
+> pass** (new `setup/page-helpers` **26**); eslint clean on the slice files (170 pre-existing repo errors
+> are NOT CI-gated — CI = svelte-check + Vitest); prettier-formatted. 4-lens adversarial review (11 agents:
+> correctness/security/simplification/a11y) — security CLEAN; **6 confirmed findings ALL FIXED** (2 should-
+> fix: blank-receipt-name, stale-detail race-guard; 1 a11y should-fix: key `aria-describedby`; 3 nits: dead
+> `bindingsWrittenCount`, profile card → `Card interactive`, StepRail focus ring). **TRAP: `npm run
+> test:frontend` is `vitest` (WATCH mode) — CI runs it once via `CI=true`; run `CI=true npx vitest run`
+> locally or it hangs.** Web bundle rebuilt on the dev stack (prebuilt bundle — rebuild before UI verify).
+> **Maintainer live UAT still on record** (the fresh-org walk above).
+>
+> **④ B-7a — profile manifests + apply transaction ✅ MERGED PR #262 (`c8fcd9ba`; ADR-F067 D4 made real;
+> backend-only, NO migration).** In-repo `profiles/{commercial,privacy,blank}/` = folder-per-profile (`profile.yaml` +
 > verbatim `doctrine.md`, byte-parity with the seeded `profile_md`) + fail-loud loader `app/profiles/`
 > (API-lifespan-only, cross-validates skill/tool bindings + roster + HITL against the LIVE registries —
 > reuses `build_area_subagents`/`TOOL_GROUP_REGISTRY`/`hitl_eligible_tool_names`) + `app/schemas/profiles.py`
@@ -26,7 +49,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 > migration, "Deal" untouched); Q2 apply = authoritative-overwrite + audit-diff (preview is B-7b); Q3 operator
 > fenced. `RECOMMENDED_LIBRARY_SETS` KEPT + cross-checked (full fold deferred — 3 of 5 areas have no manifest).
 > Playbook/knowledge bindings OUT of scope (DB ids, not static keys).** Gate: ruff+format+mypy clean;
-> profile suites **33 pass**; drift guards re-pinned (endpoints `_PARAM_VALUES["name"]`+3 routes; openapi
+> profile suites **35 pass**; CI green (API 19m33s / Gateway / Web); drift guards re-pinned (endpoints `_PARAM_VALUES["name"]`+3 routes; openapi
 > EXPECTED_PATHS +3 & len 193→196; mutation_rbac 142→143 & 193→196). Ground truth extracted from a throwaway
 > head-migrated pgvector (deterministic) — generation script in session scratchpad. **TRAP: the dev image
 > `lq-ai-api-dev` bakes STALE `/app/alembic` (pre-0088) and NO `/skills`/`/profiles` — mount host

@@ -274,6 +274,15 @@ roster; copy-not-link, admin owns the rows afterwards).
 
 ### B-7b — the guided wizard
 
+**Status: SHIPPED 2026-07-11** (web-only, NO migration, NO new endpoint; ADR-F067 B-7b addendum).
+`/lq-ai/admin/setup` multi-step flow (StepRail + gated Next) over the B-7a profiles API: pick profile
+→ (name, blank only) → House Brief → review & activate → done + "Try it now". Auto-launches on a fresh
+org's cockpit landing (triggers on an EMPTY Library — the true G13 signal; skippable + operator-fenced).
+Collapsed to a pure profile-apply (one atomic txn) since B-7a pinned `bindings ==
+RECOMMENDED_LIBRARY_SETS[area]`. New: `api/profiles.ts` client + `StepRail` primitive; `page-helpers`
+suite 26 tests. **Maintainer acceptance walk (fresh-org journey → invite member → agent redlines) still
+on record.** Decisions ratified 2026-07-11 (auto-launch skippable · multi-step · additive curation).
+
 **Goal:** the maintainer's flow, end to end: pick a starting profile (Commercial / Privacy /
 blank) → House Brief (B-1 page embedded) → review + adopt modules (Store rail + org Library,
 adoption UNSKIPPABLE so no fresh org ships bare agents — G13(c)) → confirm bindings → sub-agents
