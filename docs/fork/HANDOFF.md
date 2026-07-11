@@ -17,15 +17,48 @@ then CLAUDE.md, then the ADRs/plans named below.
 > findings: (a) sporadic dev-rig SPA "Failed to fetch" (stale keep-alive pattern; follow-up task);
 > (b) fresh-org Commercial has `hitl={}` per profile parity ⇒ no redline confirm pause — matches
 > B-7a's seeded-state oracle, flag to maintainer whether the shipped profile should turn HITL on.
-> ◀ PICK UP HERE: **DELEGATION IN FORCE (maintainer directive 2026-07-11: "move through the
-> B stack yourself"), with a maintainer INTERJECTION taking priority: ⑴ #515 REDLINE-CONT — "further
-> redline creates a NEW document" bug → living-redline convergence (ADR-F081,
-> `docs/fork/plans/REDLINE-LIVING-DOC.md`; in flight on branch `fork/redline-living-doc`) →
-> ⑵ B-2c org-skills eval (#509, OOM-aware). THEN HOLD: the next milestone is the maintainer's
-> enterprise-vs-product call; the product candidate is queued as **CUSTODIAN**
-> (`docs/fork/plans/CUSTODIAN-milestone.md`, tasks #510–#514: OBLIG-1 → ADV-1 → OUTCOME-1 → WHY-1 →
-> EXPO-1; from the 2026-07-11 strategy review — kills/fences recorded in MILESTONES.md § CUSTODIAN).
-> GATED/deferred: CLEAN-3b (#505, migration greenlight); AZ-4 parked; HS-7/deploy-layer.**
+> ⑧ **#515 REDLINE-CONT ✅ SHIPPED (PR #267, ADR-F081 — the maintainer's "further redline creates a
+> NEW document" interjection).** `apply_redline` now CONVERGES on the working head IN PLACE (one
+> living redlined document per source; WOPI-mirrored snapshot-then-mutate; `(lawyer draft)` snapshot
+> preserves human bytes at the authorship boundary; `start_fresh` branches a matter-uniquely-named
+> new doc). Review-hardened: step-1 commit bumps `updated_at` (arms the WOPI 1010 backstop) and
+> step 2 RE-LOCKS + re-CASes before overwriting (blocker: the inter-commit clobber window);
+> wedge-aware CAS repairs a row left stale by a step-2 commit failure instead of wedging the doc;
+> converge is anchored on the redline filename so a "(response)" outbound record is never mutated.
+> `created_by_run_id` now means "run that LAST WROTE the bytes"; matter-files exposes `updated_at`;
+> web announce re-keys to (id, updated_at) so round-2+ auto-open works; open editor reloads when
+> pristine / banners when dirty; `GET /files/{id}/content` drops pinned Content-Length. Live-proven
+> two-round run: same row id, w:ins/w:del 7/8 → 12/9 with all round-1 regions byte-preserved —
+> evidence + README `docs/fork/evidence/f081-living-redline/`. Suite 3722/1-flake (max_steps
+> cap test — passes alone + full-file; green in CI); web 1368; 20-agent adversarial review, 12
+> confirmed findings all fixed. Follow-ups: MILESTONES § Backlog NAME-DEDUP; #516 dev-rig fetch
+> flake.
+> ◀ PICK UP HERE: **DELEGATION IN FORCE (maintainer directive 2026-07-11: "run until your context
+> window runs out; I will pull this version into the enterprise VM on Azure and test live"):
+> ⑴ B-2c org-skills eval (#509, OOM-aware, run alone — spec in
+> `docs/fork/plans/MODULES-milestone.md` § B-2c: hostile-skill corpus through propose→approve,
+> masked-judge scenario pack, evidence to `docs/fork/evidence/modules-b2c/`, findings-not-gates
+> per ADR-F015). THEN HOLD: the next milestone is the maintainer's enterprise-vs-product call;
+> the product candidate is queued as **CUSTODIAN** (`docs/fork/plans/CUSTODIAN-milestone.md`,
+> tasks #510–#514; kills/fences recorded in MILESTONES.md § CUSTODIAN). GATED/deferred: CLEAN-3b
+> (#505, migration greenlight); AZ-4 parked; HS-7/deploy-layer; AZ-6 keyless-MI still unpushed
+> pending the maintainer's pre-push diff review.**
+>
+> **MAINTAINER'S AZURE-VM LIVE-TEST SCRIPT (for the travelling UAT — pull main, rebuild per the
+> runbook incl. `docs/fork/plans/azure-vm-sandbox-runbook.md` + the self-host traps: rebuild
+> SERIAL with cache, never `--no-cache ×4` on the no-swap VM; stale web bundle hides features):**
+> ① Fresh-org wizard (B-7 formal sign-off): empty Library → auto-launch → apply Commercial →
+> agent redlines with zero manual curation (the delegated walk's evidence to compare against:
+> `docs/fork/evidence/b7-acceptance/`). ② **F081 living redline (this slice):** upload an MSA →
+> "redline it" → Collabora opens → "further redline: also …" → SAME document updates in place
+> (Documents tab shows ONE "(redlined)" row; the open editor reloads when pristine or shows the
+> reload banner when dirty); try `start_fresh` ("set that aside, redline the original again") →
+> a separate "(redlined v2)" appears. ③ HITL-3 UAT (still on record): set Commercial
+> `hitl_policy` = apply_redline → run → "Waiting for your go-ahead" card → Approve. ④ B-4/PUBLISH
+> UATs on record (org playbook propose→approve→agent cites it; user-skill "Publish to org").
+> ⑤ Decide: should the shipped Commercial profile enable HITL on apply_redline by default
+> (fresh-org walk finding — today `hitl={}` per parity)? ⑥ AZ-6 keyless-MI: review + push the
+> `az-6-keyless-managed-identity` branch, then runbook §4c smoke on the VM.
 >
 > **⑥ #490 GW-FILEIDS — stop emitting `lq_ai_file_ids` ✅ SHIPPED (surgical Option A, maintainer-approved;
 > api-only, NO migration, NO gateway change).** The field was VESTIGIAL: the gateway is strip-only (GW-STRIP

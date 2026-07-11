@@ -10,6 +10,7 @@ import {
 	canHandBack,
 	handBackInstruction,
 	nextFitAction,
+	reloadNonceAction,
 	saveStateLabel,
 	saveStatePulses,
 	saveStateTone,
@@ -85,6 +86,21 @@ describe('saveTickOutcome', () => {
 		expect(saveTickOutcome(false, 'dirty')).toBe('pending'); // not yet saved — keep waiting
 		expect(saveTickOutcome(true, 'saving')).toBe('pending');
 		expect(saveTickOutcome(false, 'loading')).toBe('pending');
+	});
+});
+
+describe('reloadNonceAction — in-place agent update (ADR-F081)', () => {
+	it('reloads immediately when nothing is unsaved', () => {
+		expect(reloadNonceAction('clean')).toBe('reload');
+		expect(reloadNonceAction('saved')).toBe('reload');
+		expect(reloadNonceAction('loading')).toBe('reload');
+	});
+	it('banners (never a destructive reload) on unsaved edits or a save in flight', () => {
+		expect(reloadNonceAction('dirty')).toBe('banner');
+		expect(reloadNonceAction('saving')).toBe('banner');
+	});
+	it('decides for every save-state (exhaustive)', () => {
+		for (const s of ALL) expect(['reload', 'banner']).toContain(reloadNonceAction(s));
 	});
 });
 

@@ -156,6 +156,7 @@ describe('in-app Word editor (ADR-F047, Slice 4)', () => {
 			size_bytes: 4242,
 			ingestion_status: 'ready',
 			created_at: '2026-06-25T12:00:00Z',
+			updated_at: null,
 			created_by_run_id: 'feeed000-0000-0000-0000-0000000000b2'
 		};
 		let filesCalls = 0;

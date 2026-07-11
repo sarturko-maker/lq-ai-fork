@@ -1482,6 +1482,8 @@ export interface MatterFile {
 	size_bytes: number;
 	ingestion_status: string;
 	created_at: string;
+	/** Non-null once the bytes were mutated in place (ADR-F081 living redline). */
+	updated_at: string | null;
 	created_by_run_id: string | null;
 }
 

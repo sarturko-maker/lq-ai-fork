@@ -9,6 +9,7 @@ Drives ``_apply_redline`` through a real test DB with a real ``RedlineService``
 
 from __future__ import annotations
 
+import hashlib
 import io
 import uuid
 from collections.abc import AsyncIterator
@@ -24,6 +25,7 @@ from app.agents.commercial_tools import (
     COMMERCIAL_TOOL_NAMES,
     _apply_redline,
     _extract_counterparty_position,
+    _lawyer_draft_filename,
     _preview_redline,
     _reconcile_positions,
     _redlined_filename,
@@ -149,13 +151,27 @@ def _binding(user_id: uuid.UUID, project_id: uuid.UUID) -> MatterBinding:
     )
 
 
-def _patch_storage(monkeypatch: pytest.MonkeyPatch, *, source: bytes) -> dict[str, object]:
-    captured: dict[str, object] = {}
+def _patch_storage(
+    monkeypatch: pytest.MonkeyPatch, *, source: bytes | list[bytes]
+) -> dict[str, object]:
+    """Fake the four storage calls the redline persist paths make.
+
+    ``source`` may be a LIST of byte strings: successive downloads pop from it
+    (the last entry repeats) — this is how a test stages a concurrent-writer
+    race between the render download and the wedge-aware CAS's re-download
+    (ADR-F081). ``uploads``/``copies``/``deletes`` record every call in order;
+    the flat ``path``/``body`` keys keep last-write semantics for the
+    create-path tests.
+    """
+    captured: dict[str, object] = {"uploads": [], "copies": [], "deletes": []}
+    downloads = list(source) if isinstance(source, list) else [source]
 
     @asynccontextmanager
     async def fake_download(*, storage_path: str) -> AsyncIterator[AsyncIterator[bytes]]:
+        data = downloads.pop(0) if len(downloads) > 1 else downloads[0]
+
         async def _gen() -> AsyncIterator[bytes]:
-            yield source
+            yield data
 
         yield _gen()
 
@@ -163,9 +179,18 @@ def _patch_storage(monkeypatch: pytest.MonkeyPatch, *, source: bytes) -> dict[st
         captured["path"] = storage_path
         captured["body"] = body
         captured["content_type"] = content_type
+        captured["uploads"].append((storage_path, body))  # type: ignore[union-attr]
+
+    async def fake_copy(*, source_path: str, dest_path: str) -> None:
+        captured["copies"].append((source_path, dest_path))  # type: ignore[union-attr]
+
+    async def fake_delete(*, storage_path: str) -> None:
+        captured["deletes"].append(storage_path)  # type: ignore[union-attr]
 
     monkeypatch.setattr(commercial_tools.storage, "stream_download", fake_download)
     monkeypatch.setattr(commercial_tools.storage, "upload_bytes", fake_upload)
+    monkeypatch.setattr(commercial_tools.storage, "copy_object", fake_copy)
+    monkeypatch.setattr(commercial_tools.storage, "delete_object", fake_delete)
     return captured
 
 
@@ -426,6 +451,15 @@ def test_response_filename_version_bumps() -> None:
     assert _response_filename("contract (response v7).docx") == "contract (response v8).docx"
 
 
+def test_lawyer_draft_filename() -> None:
+    """The ADR-F081 human-bytes snapshot name — the mirror of WOPI's "(agent
+    draft)": stable, extension-preserving, docx-appended for a bare name."""
+    assert _lawyer_draft_filename("contract (redlined).docx") == (
+        "contract (redlined) (lawyer draft).docx"
+    )
+    assert _lawyer_draft_filename("noext") == "noext (lawyer draft).docx"
+
+
 def test_versioned_filename_survives_pathological_version_digits() -> None:
     """An adversarial upload named with a huge version digit run must not crash
     the run at persist time (Python's ~4300-digit int() conversion limit): past
@@ -441,8 +475,15 @@ async def _seed_redlined_child(
     *,
     user_id: uuid.UUID,
     project_id: uuid.UUID,
+    hash_sha256: str = "1" * 64,
+    created_by_run_id: uuid.UUID | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """Seed a prior redline output as a lineage child of the matter's contract.docx.
+
+    ``hash_sha256`` must match the bytes the storage fake serves for the ADR-F081
+    converge path to pass its CAS guard (a mismatch IS the drift-rejection case).
+    ``created_by_run_id`` None = human-authored head (snapshot branch); set = the
+    agent's own untouched output (plain overwrite branch).
 
     Returns (source_file_id, child_file_id)."""
     async with factory() as db:
@@ -453,28 +494,37 @@ async def _seed_redlined_child(
             filename="contract (redlined).docx",
             mime_type=OOXML_DOCX_MIME,
             size_bytes=1234,
-            hash_sha256="1" * 64,
+            hash_sha256=hash_sha256,
             storage_path=str(uuid.uuid4()),
             ingestion_status="ready",
             parent_file_id=source.id,
+            created_by_run_id=created_by_run_id,
         )
         db.add(child)
         await db.commit()
         return source.id, child.id
 
 
-async def test_apply_redline_default_continues_from_working_version(
+async def test_apply_redline_converges_on_working_head_and_snapshots_human_bytes(
     commit_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
     matter: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
     """By default a follow-up apply_redline resolves the named document to the
-    agent's latest working version (the lineage leaf), says so in the result,
-    chains the new output onto that leaf, and version-bumps the name (ADR-F066)."""
+    latest working version and UPDATES IT IN PLACE (ADR-F081) — same row, same
+    filename, same storage key — so the matter keeps one living redlined
+    document. A human-authored head (created_by_run_id NULL: the lawyer edited
+    it since the agent last wrote) is preserved first as an immutable
+    ``(lawyer draft)`` snapshot, mirroring WOPI PutFile's authorship-boundary
+    snapshot."""
     user_id, project_id = matter
-    _patch_storage(monkeypatch, source=_docx_bytes(CAP))
+    source_bytes = _docx_bytes(CAP)
+    captured = _patch_storage(monkeypatch, source=source_bytes)
     run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
-    _, child_id = await _seed_redlined_child(commit_factory, user_id=user_id, project_id=project_id)
+    prior_hash = hashlib.sha256(source_bytes).hexdigest()
+    _, child_id = await _seed_redlined_child(
+        commit_factory, user_id=user_id, project_id=project_id, hash_sha256=prior_hash
+    )
 
     async with commit_factory() as db:
         out = await _apply_redline(
@@ -487,17 +537,363 @@ async def test_apply_redline_default_continues_from_working_version(
             service=RedlineService(),
             run_id=run_id,
         )
-        await db.commit()
+        # NO commit here — the converge path commits INSIDE the tool body
+        # (ADR-F081: the guard's failed-audit rollback must not be able to
+        # discard row metadata for already-overwritten bytes). The fresh-session
+        # assertions below pin that in-body commit.
 
-    # transparency: the result names the resolved working version + the escape hatch
-    assert 'Continued from your latest working version "contract (redlined).docx"' in out
+    # transparency: the result names the resolved working version, says it was
+    # updated in place, mentions the preserved lawyer draft + the escape hatch
+    assert 'Continuing from your latest working version "contract (redlined).docx"' in out
+    assert 'updated "contract (redlined).docx" in place' in out
+    assert "lawyer draft" in out
     assert "start_fresh=true" in out
 
     async with commit_factory() as db:
         files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        by_name = {f.filename: f for f in files}
+        # exactly: the original, the living head, and one snapshot — no v2 sibling
+        assert set(by_name) == {
+            "contract.docx",
+            "contract (redlined).docx",
+            "contract (redlined) (lawyer draft).docx",
+        }
+        head = by_name["contract (redlined).docx"]
+        assert head.id == child_id  # the SAME row, mutated
+        assert head.created_by_run_id == run_id
+        assert head.updated_at is not None  # resolver leaf pick + WOPI 1010 backstop
+        body = captured["body"]
+        assert isinstance(body, bytes)
+        assert head.hash_sha256 == hashlib.sha256(body).hexdigest()
+        assert head.size_bytes == len(body)
+        assert head.is_snapshot is False
+        # the overwrite landed at the head's OWN storage key (no orphaned object)
+        assert captured["path"] == head.storage_path
+        # the lawyer's prior bytes survive as an immutable snapshot of the head
+        snap = by_name["contract (redlined) (lawyer draft).docx"]
+        assert snap.is_snapshot is True
+        assert snap.parent_file_id == head.id
+        assert snap.hash_sha256 == prior_hash
+        assert snap.created_by_run_id is None  # the preserved bytes are the lawyer's
+        assert snap.storage_path == str(snap.id)  # ADR 0005 key == row id
+        assert captured["copies"] == [(head.storage_path, str(snap.id))]
+
+        # audit receipt: in-place semantics recorded, counts/IDs only
+        audit = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "commercial.redline_applied",
+                        AuditLog.user_id == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(audit) == 1
+        details = audit[0].details
+        assert details["updated_in_place"] is True
+        assert details["snapshot_file_id"] == str(snap.id)
+        assert details["redlined_sha256"] == head.hash_sha256
+        assert "twelve" not in str(details) and "three" not in str(details)
+
+
+async def test_apply_redline_agent_head_overwrites_without_snapshot(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """An agent-authored head (created_by_run_id set — the agent's own untouched
+    output) is overwritten with NO snapshot: tracked changes are additive, so the
+    prior round is recoverable by rejecting the newest change regions (ADR-F081).
+    Provenance follows to the newest run."""
+    user_id, project_id = matter
+    source_bytes = _docx_bytes(CAP)
+    _patch_storage(monkeypatch, source=source_bytes)
+    run_1 = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    run_2 = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    _, child_id = await _seed_redlined_child(
+        commit_factory,
+        user_id=user_id,
+        project_id=project_id,
+        hash_sha256=hashlib.sha256(source_bytes).hexdigest(),
+        created_by_run_id=run_1,
+    )
+
+    async with commit_factory() as db:
+        out = await _apply_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[
+                {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
+            ],
+            service=RedlineService(),
+            run_id=run_2,
+        )
+        # no commit — pins the tool-body commit (see the converge test)
+
+    assert 'updated "contract (redlined).docx" in place' in out
+    assert "lawyer draft" not in out  # no snapshot on agent-over-agent
+
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        assert {f.filename for f in files} == {"contract.docx", "contract (redlined).docx"}
+        head = next(f for f in files if f.filename == "contract (redlined).docx")
+        assert head.id == child_id
+        assert head.created_by_run_id == run_2  # the run that last wrote the bytes
+        assert not any(f.is_snapshot for f in files)
+
+
+async def test_apply_redline_cas_rejects_a_genuine_race(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """A GENUINE race: the storage bytes (and the row hash) moved on after the
+    render — the wedge-aware CAS re-downloads, sees storage ≠ what was rendered
+    over, and rejects with NOTHING written (ADR-F081: never clobber a
+    concurrent write)."""
+    user_id, project_id = matter
+    rendered_over = _docx_bytes(CAP)
+    interloper = _docx_bytes(CAP + " Amended by a concurrent save.")
+    # first download (the render) sees the old bytes; the CAS re-download sees
+    # the interloper's bytes, which match the row the interloper committed
+    captured = _patch_storage(monkeypatch, source=[rendered_over, interloper])
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    interloper_hash = hashlib.sha256(interloper).hexdigest()
+    await _seed_redlined_child(
+        commit_factory, user_id=user_id, project_id=project_id, hash_sha256=interloper_hash
+    )
+
+    async with commit_factory() as db:
+        out = await _apply_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[
+                {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
+            ],
+            service=RedlineService(),
+            run_id=run_id,
+        )
+
+    assert "changed while this redline was being prepared" in out
+    assert captured["uploads"] == [] and captured["copies"] == []  # nothing written
+
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        assert {f.filename for f in files} == {"contract.docx", "contract (redlined).docx"}
+        head = next(f for f in files if f.filename == "contract (redlined).docx")
+        assert head.hash_sha256 == interloper_hash  # untouched
+        assert head.created_by_run_id is None
+
+
+async def test_apply_redline_repairs_a_stale_row_wedge(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """The WEDGE: a prior apply's step-2 commit failed after the overwrite, so
+    the row hash disagrees with the head's OWN storage bytes. The render is
+    over the true current bytes, so the apply must PROCEED and repair the row —
+    a blind CAS rejection here would wedge the living document forever
+    (review should-fix, ADR-F081)."""
+    user_id, project_id = matter
+    source_bytes = _docx_bytes(CAP)
+    captured = _patch_storage(monkeypatch, source=source_bytes)
+    run_old = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    run_new = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    # row hash is stale garbage; storage (the fake) serves the real bytes — the
+    # exact state a step-2 commit failure leaves behind
+    _, child_id = await _seed_redlined_child(
+        commit_factory,
+        user_id=user_id,
+        project_id=project_id,
+        hash_sha256="1" * 64,
+        created_by_run_id=run_old,
+    )
+
+    async with commit_factory() as db:
+        out = await _apply_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[
+                {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
+            ],
+            service=RedlineService(),
+            run_id=run_new,
+        )
+
+    assert 'updated "contract (redlined).docx" in place' in out
+
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        assert {f.filename for f in files} == {"contract.docx", "contract (redlined).docx"}
+        head = next(f for f in files if f.filename == "contract (redlined).docx")
+        assert head.id == child_id
+        body = captured["body"]
+        assert isinstance(body, bytes)
+        assert head.hash_sha256 == hashlib.sha256(body).hexdigest()  # row repaired
+        assert head.created_by_run_id == run_new
+
+
+async def test_apply_redline_never_converges_on_a_response_document(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """A "(response)" document is the per-round OUTBOUND record — even when the
+    resolver lands on it as the newest working leaf, apply_redline must branch a
+    NEW row rather than mutate it (ADR-F081 redline-name anchor; review catch)."""
+    user_id, project_id = matter
+    _patch_storage(monkeypatch, source=_docx_bytes(CAP))
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    async with commit_factory() as db:
+        source = (await db.execute(select(File).where(File.owner_id == user_id))).scalar_one()
+        response = File(
+            owner_id=user_id,
+            project_id=project_id,
+            filename="contract (response).docx",
+            mime_type=OOXML_DOCX_MIME,
+            size_bytes=1234,
+            hash_sha256="2" * 64,
+            storage_path=str(uuid.uuid4()),
+            ingestion_status="ready",
+            parent_file_id=source.id,
+        )
+        db.add(response)
+        await db.commit()
+        response_id = response.id
+
+    async with commit_factory() as db:
+        out = await _apply_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[
+                {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
+            ],
+            service=RedlineService(),
+            run_id=run_id,
+        )
+        await db.commit()  # create path defers to the caller's commit, as before
+
+    assert "Applied" in out
+
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        untouched = next(f for f in files if f.id == response_id)
+        assert untouched.hash_sha256 == "2" * 64  # the outbound record is immutable
+        assert untouched.updated_at is None
         new = next(f for f in files if f.created_by_run_id == run_id)
-        assert new.filename == "contract (redlined v2).docx"  # version-aware naming
-        assert new.parent_file_id == child_id  # chained onto the working version
+        assert new.id != response_id
+        assert new.parent_file_id == response_id  # chained, not converged
+        assert new.filename == "contract (response) (redlined).docx"
+
+
+async def test_apply_redline_snapshot_commit_failure_cleans_up_and_writes_nothing(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """Step-1 failure discipline (mirrors WOPI): if the snapshot row's commit
+    fails, the orphan snapshot OBJECT is deleted, the live object is untouched,
+    no snapshot row survives, and the error propagates (ADR-F081)."""
+    user_id, project_id = matter
+    source_bytes = _docx_bytes(CAP)
+    captured = _patch_storage(monkeypatch, source=source_bytes)
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    prior_hash = hashlib.sha256(source_bytes).hexdigest()
+    await _seed_redlined_child(
+        commit_factory, user_id=user_id, project_id=project_id, hash_sha256=prior_hash
+    )
+
+    async with commit_factory() as db:
+        real_commit = db.commit
+
+        async def failing_commit() -> None:
+            monkeypatch.setattr(db, "commit", real_commit)  # fail only the first
+            raise RuntimeError("simulated step-1 commit failure")
+
+        monkeypatch.setattr(db, "commit", failing_commit)
+        with pytest.raises(RuntimeError, match="simulated step-1 commit failure"):
+            await _apply_redline(
+                db,
+                _binding(user_id, project_id),
+                document_name="contract.docx",
+                edits=[
+                    {
+                        "target_text": "three (3)",
+                        "new_text": "twelve (12)",
+                        "rationale": _RATIONALE,
+                    }
+                ],
+                service=RedlineService(),
+                run_id=run_id,
+            )
+
+    # the snapshot copy was made, then deleted as an orphan; nothing was uploaded
+    copies = captured["copies"]
+    assert isinstance(copies, list) and len(copies) == 1
+    assert captured["deletes"] == [copies[0][1]]
+    assert captured["uploads"] == []
+
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        assert {f.filename for f in files} == {"contract.docx", "contract (redlined).docx"}
+        head = next(f for f in files if f.filename == "contract (redlined).docx")
+        assert head.hash_sha256 == prior_hash  # untouched
+        assert head.created_by_run_id is None  # the flip rolled back with the commit
+
+
+async def test_apply_redline_head_deleted_between_render_and_persist(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """The deleted-head guard: if the resolved row vanishes before persist, the
+    tool reports it and writes nothing (ADR-F081 behavior matrix)."""
+    from types import SimpleNamespace
+
+    user_id, project_id = matter
+    captured = _patch_storage(monkeypatch, source=_docx_bytes(CAP))
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+
+    real_render = commercial_tools._render_redline
+
+    async def render_then_ghost(*args: object, **kwargs: object) -> object:
+        rendered = await real_render(*args, **kwargs)  # type: ignore[arg-type]
+        assert not isinstance(rendered, str)
+        # simulate the row disappearing after the render resolved it
+        ghost_row = SimpleNamespace(file_id=uuid.uuid4(), filename=rendered.row.filename)
+        return commercial_tools._RenderedRedline(
+            row=ghost_row,  # type: ignore[arg-type]
+            proposal=rendered.proposal,
+            redlined=rendered.redlined,
+            result=rendered.result,
+            source_sha256=rendered.source_sha256,
+            continuity_note=rendered.continuity_note,
+        )
+
+    monkeypatch.setattr(commercial_tools, "_render_redline", render_then_ghost)
+
+    async with commit_factory() as db:
+        out = await _apply_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[
+                {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
+            ],
+            service=RedlineService(),
+            run_id=run_id,
+        )
+
+    assert "was deleted while the redline was being prepared" in out
+    assert captured["uploads"] == [] and captured["copies"] == []
 
 
 async def test_apply_redline_start_fresh_hits_the_named_row(
@@ -506,11 +902,13 @@ async def test_apply_redline_start_fresh_hits_the_named_row(
     matter: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
     """start_fresh=True pins the literally-named original even when a redlined
-    child exists on the lineage chain (the explicit restart, ADR-F066)."""
+    child exists on the lineage chain (the explicit restart, ADR-F066). The new
+    branch is a NEW row (never an in-place update) with a matter-unique name —
+    the living head already holds "contract (redlined).docx" (ADR-F081)."""
     user_id, project_id = matter
     _patch_storage(monkeypatch, source=_docx_bytes(CAP))
     run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
-    source_id, _ = await _seed_redlined_child(
+    source_id, child_id = await _seed_redlined_child(
         commit_factory, user_id=user_id, project_id=project_id
     )
 
@@ -528,12 +926,13 @@ async def test_apply_redline_start_fresh_hits_the_named_row(
         )
         await db.commit()
 
-    assert "Continued from" not in out
+    assert "Continuing from" not in out
 
     async with commit_factory() as db:
         files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
         new = next(f for f in files if f.created_by_run_id == run_id)
-        assert new.filename == "contract (redlined).docx"  # named from the original
+        assert new.id != child_id  # a fresh branch, not an in-place update
+        assert new.filename == "contract (redlined v2).docx"  # matter-unique name
         assert new.parent_file_id == source_id  # chained onto the original
 
 
@@ -558,7 +957,7 @@ async def test_preview_redline_default_notes_working_version(
             service=RedlineService(),
         )
 
-    assert 'Continued from your latest working version "contract (redlined).docx"' in out
+    assert 'Continuing from your latest working version "contract (redlined).docx"' in out
     assert "NOTHING has been saved" in out
     assert "body" not in captured  # still a pure dry run
 

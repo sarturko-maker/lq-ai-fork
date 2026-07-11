@@ -344,6 +344,11 @@ async def test_round_trip_bytes_match_on_download(
     assert download.headers["content-disposition"] == 'attachment; filename="contract.pdf"'
     # Defensive header — clients must not sniff a different MIME.
     assert download.headers.get("x-content-type-options") == "nosniff"
+    # Deliberately NO pinned Content-Length: two paths mutate bytes in place
+    # (WOPI PutFile, ADR-F047; redline convergence, ADR-F081), and pinning the
+    # row's size_bytes across a mutation window would emit a truncated/hung
+    # response — the endpoint streams chunked instead (same as WOPI GetFile).
+    assert "content-length" not in download.headers
 
 
 @pytest.mark.integration

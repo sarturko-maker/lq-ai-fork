@@ -568,12 +568,16 @@ _MAX_DOCX_BYTES = 25 * 1024 * 1024
 
 # Shared projection for the .docx read/write tools (ADR-F066): fetch_matter_docx
 # and resolve_working_docx must return interchangeable rows — _render_redline
-# consumes either — so the row shape is defined exactly once.
+# consumes either — so the row shape is defined exactly once. parent_file_id /
+# is_snapshot let the redline persist step decide create-vs-converge (ADR-F081)
+# without a second query at render time.
 _DOCX_COLUMNS = (
     File.id.label("file_id"),
     File.filename,
     File.mime_type,
     File.storage_path,
+    File.parent_file_id,
+    File.is_snapshot,
     Document.id.label("document_id"),
     Document.normalized_content,
 )

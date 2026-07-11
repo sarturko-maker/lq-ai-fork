@@ -144,8 +144,10 @@ Mark up only what matters — price, liability, indemnity, IP, term, data; let p
 4. Revise any edit that reads as rip-and-replace, then preview again if you changed much. When the
    redline reads surgically, call **`apply_redline`** **once** with the whole batch — batch everything;
    don't apply in pieces. A follow-up call automatically continues from your latest working version of
-   the document, so a later instruction builds on the redline you already made; pass `start_fresh=true`
-   only when the lawyer explicitly asks to restart from the original.
+   the document and updates it in place — the matter keeps one living redlined document that
+   accumulates tracked changes across rounds, so a later instruction builds on the redline you already
+   made; pass `start_fresh=true` only when the lawyer explicitly asks to set the working redline aside
+   and start over from the original (that creates a separate, new redlined document).
 
 ## Rationale, scope, and when to stop
 

@@ -185,6 +185,9 @@ async def test_list_files_unions_membership_and_project_id(
     # the redline output carries its run provenance; the upload does not.
     assert by_name["contract (redlined).docx"]["created_by_run_id"] == str(run_id)
     assert by_name["contract.docx"]["created_by_run_id"] is None
+    # updated_at surfaces (ADR-F081 — the web keys its redline announce on it);
+    # NULL until an in-place mutation lands.
+    assert by_name["contract (redlined).docx"]["updated_at"] is None
     # newest-first: the redlined file was created after the upload.
     assert body["files"][0]["id"] == str(redlined.id)
     # metadata only — no bytes / storage_path / hash leak in the contract.
@@ -195,6 +198,7 @@ async def test_list_files_unions_membership_and_project_id(
         "size_bytes",
         "ingestion_status",
         "created_at",
+        "updated_at",
         "created_by_run_id",
     }
 

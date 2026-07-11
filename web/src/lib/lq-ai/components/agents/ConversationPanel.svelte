@@ -5,7 +5,19 @@
 	 * as DocumentEditorPanel.svelte + DocumentsPanel.svelte).
 	 */
 	import type { AgentRunCreate } from '$lib/lq-ai/api/agents';
+	import type { MatterFile } from '$lib/lq-ai/types';
 	import { formatCostUSD } from '$lib/lq-ai/playbookCost';
+
+	/**
+	 * The redline announce/auto-open dedupe key (ADR-F081): a follow-up redline now
+	 * UPDATES the working head file IN PLACE (same id, bumped `updated_at`), so
+	 * keying on the id alone would never re-fire the auto-open on round 2+. Keying
+	 * on id + content version re-announces each in-place update exactly once while
+	 * already-seen versions stay silent.
+	 */
+	export function redlineAnnounceKey(f: Pick<MatterFile, 'id' | 'updated_at'>): string {
+		return `${f.id}:${f.updated_at ?? ''}`;
+	}
 
 	export function buildRunPayload(args: {
 		prompt: string;
@@ -81,7 +93,9 @@
 		AgentThreadDetailResponse,
 		ResumeDecision
 	} from '$lib/lq-ai/api/agents';
-	import type { FileMeta, MatterFile, Project } from '$lib/lq-ai/types';
+	// `MatterFile` is imported in the `<script module>` block above (Svelte merges
+	// both blocks into one module, so a re-import here would be a duplicate).
+	import type { FileMeta, Project } from '$lib/lq-ai/types';
 	import {
 		MAX_POLL_FAILURES,
 		POLL_INTERVAL_MS,
@@ -207,14 +221,16 @@
 
 	// ADR-F047 (Slice 4): auto-open the in-app editor when the agent FRESHLY produces
 	// a redline — but never when merely revisiting a matter that already has old
-	// outputs. We snapshot the redline ids that exist when the thread is FIRST opened
-	// (the baseline) and only announce ids that appear later. The baseline must be
-	// captured independently of the completed-run trigger below: in the headline flow
-	// (a fresh conversation whose first ask is a redline) the redline-producing run is
-	// itself the first completion, so seeding off "the first loadProducedFiles call"
-	// would mark the new redline as already-seen and never open it. A memoized promise
-	// guarantees the baseline is settled before any announcement.
-	const announcedRedlineIds = new Set<string>();
+	// outputs. We snapshot the redline CONTENT-VERSION keys (`redlineAnnounceKey`:
+	// id + updated_at — an in-place update bumps the key, ADR-F081) that exist when
+	// the thread is FIRST opened (the baseline) and only announce keys that appear
+	// later. The baseline must be captured independently of the completed-run trigger
+	// below: in the headline flow (a fresh conversation whose first ask is a redline)
+	// the redline-producing run is itself the first completion, so seeding off "the
+	// first loadProducedFiles call" would mark the new redline as already-seen and
+	// never open it. A memoized promise guarantees the baseline is settled before
+	// any announcement.
+	const announcedRedlineKeys = new Set<string>();
 	let redlineBaseline: Promise<void> | null = null;
 	function ensureRedlineBaseline(projectId: string): Promise<void> {
 		if (!redlineBaseline) {
@@ -222,7 +238,8 @@
 				try {
 					const { files } = await matterFilesApi.listMatterFiles(projectId);
 					for (const f of files) {
-						if (f.created_by_run_id && isRedlineOutput(f.filename)) announcedRedlineIds.add(f.id);
+						if (f.created_by_run_id && isRedlineOutput(f.filename))
+							announcedRedlineKeys.add(redlineAnnounceKey(f));
 					}
 				} catch {
 					// non-fatal — worst case a pre-existing redline auto-opens once.
@@ -246,8 +263,9 @@
 			producedByRun = map;
 
 			for (const f of files) {
-				if (f.created_by_run_id && isRedlineOutput(f.filename) && !announcedRedlineIds.has(f.id)) {
-					announcedRedlineIds.add(f.id);
+				const key = redlineAnnounceKey(f);
+				if (f.created_by_run_id && isRedlineOutput(f.filename) && !announcedRedlineKeys.has(key)) {
+					announcedRedlineKeys.add(key);
 					dispatch('redlineready', { fileId: f.id, filename: f.filename });
 				}
 			}

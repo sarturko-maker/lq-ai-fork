@@ -413,18 +413,23 @@ async def get_file_content(
 
     Headers set:
     * ``Content-Type``: from the stored ``mime_type``.
-    * ``Content-Length``: from the stored ``size_bytes``.
     * ``Content-Disposition``: ``attachment; filename="..."`` with an
       RFC 5987 ``filename*`` for non-ASCII filenames.
     * ``X-Content-Type-Options: nosniff``: defensive — clients (esp.
       browsers) must not infer a MIME from sniffing.
+
+    Deliberately NO ``Content-Length``: two paths now mutate a file's bytes in
+    place (the editor's PutFile save-back, ADR-F047, and the redline convergence,
+    ADR-F081), and the row's ``size_bytes`` is a separate source of truth from
+    the object — pinning the header to the row would emit a truncated/hung
+    response across a mutation window. Chunked streaming keeps the declared
+    length equal to the bytes actually sent (same reasoning as WOPI GetFile).
     """
 
     file_uuid = _validate_file_id(file_id)
     row = await _load_visible_file(db, file_uuid, user.id)
 
     headers = {
-        "Content-Length": str(row.size_bytes),
         "Content-Disposition": _content_disposition_attachment(row.filename),
         "X-Content-Type-Options": "nosniff",
     }

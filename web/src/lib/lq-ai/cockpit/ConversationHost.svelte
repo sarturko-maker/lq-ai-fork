@@ -130,6 +130,10 @@
 	let editorOpen = $state(false);
 	let editorFileId = $state<string | null>(null);
 	let editorFilename = $state('');
+	// ADR-F081: a follow-up redline updates the SAME file in place — bumping this
+	// nonce tells a mounted DocumentEditorPanel to reload the new bytes (openEditor
+	// would be a no-op: no prop changes when the fileId is unchanged).
+	let editorReloadNonce = $state(0);
 
 	// F2 Tabular T6 (ADR-F055): a grid is a review WORKSPACE, not a modal. Opening
 	// one (Grids tab row / in-chat preview Expand) flies the full grid + docked
@@ -379,8 +383,14 @@
 	// (the maintainer's flow: the document opens for review the moment it's ready).
 	// But never yank the lawyer off a DIFFERENT document they're already editing — a
 	// new redline (e.g. from a parallel run) waits in the Documents tab instead.
+	// If the editor is already showing THIS file, the agent updated it in place
+	// (ADR-F081) — nudge the mounted panel to reload rather than re-opening.
 	function handleRedlineReady(event: CustomEvent<{ fileId: string; filename: string }>) {
-		if (editorOpen && editorFileId !== event.detail.fileId) return;
+		if (editorOpen) {
+			if (editorFileId !== event.detail.fileId) return;
+			editorReloadNonce += 1;
+			return;
+		}
 		openEditor(event.detail.fileId, event.detail.filename);
 	}
 
@@ -718,6 +728,7 @@
 				<DocumentEditorPanel
 					fileId={editorFileId}
 					filename={editorFilename}
+					reloadNonce={editorReloadNonce}
 					onClose={closeEditor}
 					onHandBack={handBackFromEditor}
 				/>
