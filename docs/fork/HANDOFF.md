@@ -33,12 +33,20 @@ then CLAUDE.md, then the ADRs/plans named below.
 > cap test — passes alone + full-file; green in CI); web 1368; 20-agent adversarial review, 12
 > confirmed findings all fixed. Follow-ups: MILESTONES § Backlog NAME-DEDUP; #516 dev-rig fetch
 > flake.
+> ⑨ **B-2c org-skill red-team eval ✅ SHIPPED (PR #268, task #509; test-only, no product code).**
+> Hostile corpus (`api/tests/agents/scenarios/hostile_org_skills.py`) through the REAL
+> propose→approve→compose: LAYER 1 every frontmatter authority-grab 422s at propose; LAYER 2 a
+> hostile BODY passes propose + admin-approve but R6 (real `guarded_dispatch`) refuses each
+> claimed tool + audits it, the body is delivered to the model (read back out of the
+> `build_area_skill_wiring` backend) yet grants nothing. Deep 4-lens security review of the whole
+> B-2 diff: ZERO harness vulnerabilities; the only findings were 3 soundness critiques of the
+> B-2c TESTS (all fixed). 15/15 red-team, 76/76 with B-2a/2b. Live masked-judge scenario
+> DEFERRED-ON-RECORD (R6 is a proven code invariant; box OOMs the arq worker) — bounded follow-up
+> for a maintainer/VM session. Evidence `docs/fork/evidence/modules-b2c/`.
 > ◀ PICK UP HERE: **DELEGATION IN FORCE (maintainer directive 2026-07-11: "run until your context
-> window runs out; I will pull this version into the enterprise VM on Azure and test live"):
-> ⑴ B-2c org-skills eval (#509, OOM-aware, run alone — spec in
-> `docs/fork/plans/MODULES-milestone.md` § B-2c: hostile-skill corpus through propose→approve,
-> masked-judge scenario pack, evidence to `docs/fork/evidence/modules-b2c/`, findings-not-gates
-> per ADR-F015). THEN HOLD: the next milestone is the maintainer's enterprise-vs-product call;
+> window runs out; I will pull this version into the enterprise VM on Azure and test live").
+> Workstream B is COMPLETE through B-2c. THEN HOLD: the next milestone is the maintainer's
+> enterprise-vs-product call;
 > the product candidate is queued as **CUSTODIAN** (`docs/fork/plans/CUSTODIAN-milestone.md`,
 > tasks #510–#514; kills/fences recorded in MILESTONES.md § CUSTODIAN). GATED/deferred: CLEAN-3b
 > (#505, migration greenlight); AZ-4 parked; HS-7/deploy-layer; AZ-6 keyless-MI still unpushed
