@@ -410,9 +410,10 @@ class MessageCreateRequest(BaseModel):
 
     Each id is validated server-side to exist and be owned by the
     caller (id-probing-safe: a foreign or unknown id 404s exactly like
-    ``GET /files/{id}``). Validated ids are forwarded to the gateway as
-    ``lq_ai_file_ids`` alongside ``lq_ai_skills`` and echoed back as
-    ``applied_file_ids`` on the response / SSE ``complete`` frame.
+    ``GET /files/{id}``). Each validated file's extracted text is
+    injected as a per-message document-context system message, and the
+    ids are echoed back as ``applied_file_ids`` on the response / SSE
+    ``complete`` frame.
 
     This is a **separate channel from** ``skill_inputs``: file_ids are
     NOT bound to a skill file-input via ``skill_inputs`` (no
@@ -562,8 +563,8 @@ class MessagePostResponse(BaseModel):
     cost_estimate: float | None = None
     applied_skills: list[str] = Field(default_factory=list)
     applied_file_ids: list[str] = Field(default_factory=list)
-    """Donna: caller-owned file ids that were validated and forwarded to
-    the gateway as ``lq_ai_file_ids`` for this turn — the echo of
+    """Donna: caller-owned file ids that were validated and injected as
+    per-message document context for this turn — the echo of
     :attr:`MessageCreateRequest.file_ids`. Mirrors how ``applied_skills``
     is echoed, but turn-scoped: there is no ``messages.file_ids`` column,
     so this surfaces only on the send response (and the SSE ``complete``

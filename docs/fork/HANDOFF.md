@@ -6,13 +6,32 @@ then CLAUDE.md, then the ADRs/plans named below.
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 > ▶▶▶ **NEXT (maintainer-set order): ① UP-SEC-1 ✅ #256 → ② K8S-R research ✅ #257 → ③ K8S SCALE-SAFE
 > CLEANUP — APP-CODE MILESTONE COMPLETE (CLEAN-1..4 ✅ #258–#261) → ④ B-7a manifests+apply ✅ MERGED
-> **PR #262** (`c8fcd9ba`) → ⑤ B-7b guided setup wizard ✅ SHIPPED (this PR; web-only, NO migration, NO
-> new endpoint).
+> **PR #262** (`c8fcd9ba`) → ⑤ B-7b guided setup wizard ✅ MERGED **PR #263** (`f6b06cb9`) → ⑥ #490
+> GW-FILEIDS stop-emit ✅ SHIPPED (this PR; api-only, NO migration).
 > ◀ PICK UP HERE: **B-7 milestone acceptance — the maintainer's live fresh-org walk** (reset a fresh org →
 > apply Commercial via the wizard → invite a member → member runs the Commercial agent → it redlines with
-> **no manual Library curation** — the G13 kill). Then the remaining Workstream-B backlog (B-2c eval · #490
-> GW-FILEIDS · AZ-4 parked) or the K8s ladder — maintainer's call. GATED/deferred: CLEAN-3b (durability
+> **no manual Library curation** — the G13 kill). Then the remaining Workstream-B backlog (B-2c eval ·
+> AZ-4 parked) or the K8s ladder — maintainer's call. GATED/deferred: CLEAN-3b (durability
 > migration — needs maintainer greenlight, #505); HS-7/migrate-Job/immutable-ConfigMap = deploy-layer.**
+>
+> **⑥ #490 GW-FILEIDS — stop emitting `lq_ai_file_ids` ✅ SHIPPED (surgical Option A, maintainer-approved;
+> api-only, NO migration, NO gateway change).** The field was VESTIGIAL: the gateway is strip-only (GW-STRIP
+> #489) and the model gets file CONTENT via the api-side document-context system message
+> (`_load_attached_file_contexts`, Decision M2-1). Diff: removed the emit (`chats.py` gw_request build) +
+> deleted the schema field (`app/schemas/gateway.py`); threaded `applied_file_ids` (from
+> `effective_file_ids`) into `_non_streaming_response`/`_stream_response` so the client echo (JSON +
+> SSE `complete`) stays intact — it previously read `request.lq_ai_file_ids` and would have gone silently
+> empty; re-pointed 3 forwarding-test assertions to `"lq_ai_file_ids" not in sent`; rewrote every stale
+> "forwarded to the gateway" docstring/comment (incl. `docs/api/backend-openapi.yaml` ×3, HONEST-STATE,
+> PRD — review-caught). The per-message `file_ids` REQUEST channel (validation/injection/echo) is KEPT —
+> ripping it out was considered and rejected. Gateway leak-guard strip tests untouched. **Gate:** slice
+> ruff+format clean; `mypy app` clean (240 files); full api suite **3652 passed / 0 failed / 2 skipped**
+> (dev image, repo-root mount); 4-lens adversarial review + adversarial verify (13 agents) — security
+> CLEAN, 3 confirmed doc-staleness findings ALL FIXED, 2 param-default objections refuted; **live verify
+> on rebuilt api trio: file-attach chat round-trip → 200, model described the attached doc's content,
+> `applied_file_ids` echo intact, gateway (deepseek/tier 4) accepted.** **TRAP (recipe): running the api
+> suite with only `api/`→`/app` mounted fails 44 tests spuriously — `test_setup_tenant_wizard.py` resolves
+> `parents[2]/scripts/`; mount the REPO ROOT and run from `<root>/api`.**
 >
 > **⑤ B-7b — guided setup wizard ✅ SHIPPED (web-only, NO migration, NO new endpoint; ADR-F067 B-7b
 > addendum).** `/lq-ai/admin/setup` multi-step flow (new `StepRail` primitive + gated Next) over the B-7a
@@ -420,7 +439,8 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   false-positive strip, no aliasing, no log leak); 1 trivial doc nit fixed (kept accurate history +
 >   added forward pointer), 2 rejected on sound grounds. **Follow-up (own ticket #490, GW-FILEIDS):**
 >   the api chat path emits `lq_ai_file_ids` but the gateway has NO consumer yet — either build gateway
->   file-content injection or stop emitting it. Orthogonal to the leak fix.
+>   file-content injection or stop emitting it. Orthogonal to the leak fix. *(RESOLVED — ⑥ above:
+>   surgical stop-emit shipped 2026-07-11.)*
 > - **B-6 HITL-3 ✓ SHIPPED (branch `b6-hitl-3-confirm-card`, ADR-F071 HITL-3 addendum; task #492) —
 >   the cockpit confirm card + admin stop-and-ask policy write. NO migration. Web-heavy + ONE admin
 >   endpoint.** Vocabulary LOCKED (maintainer): card title **"Waiting for your go-ahead"** / buttons

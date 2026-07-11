@@ -6748,10 +6748,11 @@ components:
             validated server-side to exist and be owned by the caller;
             a foreign, unknown, or soft-deleted id returns 404
             (id-probing-safe — indistinguishable from "not found").
-            Validated ids are forwarded to the gateway as `lq_ai_file_ids`
-            alongside `lq_ai_skills` and echoed back as `applied_file_ids`
-            on the response / SSE `complete` frame. Capped at 16 entries.
-            Omitted / empty is back-compatible.
+            Each validated file's extracted text is injected as a
+            per-message document-context system message, and the ids are
+            echoed back as `applied_file_ids` on the response / SSE
+            `complete` frame. Capped at 16 entries. Omitted / empty is
+            back-compatible.
 
     MessagePostResponse:
       type: object
@@ -6794,7 +6795,7 @@ components:
           items: {type: string, format: uuid}
           description: |
             Donna: caller-owned file ids that were validated and
-            forwarded to the gateway as `lq_ai_file_ids` for this turn —
+            injected as per-message document context for this turn —
             the echo of `MessageCreate.file_ids` (mirrors
             `applied_skills`). Turn-scoped: there is no
             `messages.file_ids` column, so this surfaces only on the send
@@ -6871,8 +6872,8 @@ components:
           type: array
           items: {type: string, format: uuid}
           description: |
-            Donna: caller-owned file ids forwarded to the gateway as
-            `lq_ai_file_ids` for this turn — the echo of
+            Donna: caller-owned file ids validated and injected as
+            per-message document context for this turn — the echo of
             `MessageCreate.file_ids` (mirrors `applied_skills`).
             Turn-scoped; not persisted. Empty when none attached.
         routed_inference_tier:

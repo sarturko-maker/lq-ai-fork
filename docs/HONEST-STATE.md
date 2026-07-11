@@ -52,7 +52,7 @@ The surface in-house counsel touches every day. Every row is wired end-to-end in
 | Audit log of all sensitive actions | M1 | `api/app/audit.py`; admin reads at `/lq-ai/admin/audit-log` |
 | FTS over chat history | M1 | `api/app/api/chats.py` (search route); migration `0016_chat_messages_fts.py` |
 | GDPR-aligned export and account deletion | M1 | `api/app/workers/user_export.py`; `api/app/workers/user_deletion.py`; `api/app/api/users.py` |
-| Per-message ephemeral file attach (`MessageCreate.file_ids` → `applied_file_ids` echo; separate channel from `skill_inputs`, injected as document-context per Decision M2-1) | post-v0.4.0 (#116/#117) | `api/app/schemas/chats.py` (`file_ids`, `applied_file_ids`); `api/app/schemas/gateway.py` (`lq_ai_file_ids`) |
+| Per-message ephemeral file attach (`MessageCreate.file_ids` → `applied_file_ids` echo; separate channel from `skill_inputs`, injected as document-context per Decision M2-1; ids stay api-side — no gateway wire field since GW-FILEIDS #490) | post-v0.4.0 (#116/#117) | `api/app/schemas/chats.py` (`file_ids`, `applied_file_ids`); `api/app/api/chats.py` (`_load_attached_file_contexts`) |
 | Self-service profile edit (`PATCH /api/v1/users/me`, `display_name` only; email is [DE-329](PRD.md#9-deferred-enhancements-and-identified-future-work)) | post-v0.4.0 (#118) | `api/app/api/users.py` |
 | Pending-deletion visibility (`deletion_scheduled_at` on `GET /users/me`; `/users/me/delete/cancel` clears it) | post-v0.4.0 (#120) | `api/app/api/users.py` |
 
