@@ -562,6 +562,19 @@ all three families are agent-capable.
   rotate its keys (the VM's disk held `.env.prod`); if you tear down everything,
   the keys die with the resource.
 
+## 6b. Troubleshooting — sporadic "Failed to fetch" in the SPA
+
+If the app shows an occasional **"Failed to fetch"** on an otherwise-valid request
+(a login POST, a setup-wizard step) that succeeds on retry, it is an HTTP
+keep-alive mismatch, not a real failure: the api's uvicorn server closes an idle
+keep-alive connection that Caddy (or the browser) still believes is live and then
+reuses, so the request fails mid-flight. The api now defaults its keep-alive
+timeout to **130 s** (`LQ_AI_HTTP_KEEP_ALIVE_TIMEOUT`, set in `entrypoint.sh`),
+comfortably above Caddy's ~120 s upstream idle, so the proxy/browser is always the
+side that closes an idle connection. If you front the api with a different proxy
+whose upstream idle exceeds 130 s, raise `LQ_AI_HTTP_KEEP_ALIVE_TIMEOUT` in
+`.env.prod` to exceed it and rebuild the api container.
+
 ## 7. What this sandbox does NOT cover (honest scope)
 
 - **AKS / enterprise posture** — that is AZ-6, unplanned. This is one VM, one
