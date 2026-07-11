@@ -339,3 +339,17 @@ passed / 0 failed; mypy + ruff clean; web svelte-check 0 + Vitest 976; a live he
 check (editor → close → primed composer) — evidence `docs/fork/evidence/libreoffice-slice5/`. **The
 editor milestone is complete;** the production licence posture (self-build vs subscription) remains the
 deferred productionisation decision.
+
+## Addendum — ADR-F081 amends the "only in-place mutator" invariant (2026-07-11)
+
+Slice 3's invariant "PutFile is the only path that mutates bytes in place (every other path creates
+a new row)" no longer holds: [F081](F081-living-redline-document.md) makes `apply_redline` converge
+on the working head — a follow-up redline overwrites the head's bytes in place under the same
+snapshot-then-mutate, two-durable-steps discipline this ADR defined (authorship boundary inverted:
+the agent preserves the LAWYER's bytes as a `… (lawyer draft).docx` snapshot before overwriting,
+mirroring PutFile's `… (agent draft).docx` snapshot of agent bytes). `LastModifiedTime =
+updated_at or created_at` stays honest because the F081 path bumps `updated_at` identically, and
+the `X-COOL-WOPI-Timestamp` save-race backstop is now load-bearing in both directions (it is what
+keeps a lawyer's save warn-not-clobber after an agent update lands under an open session). The C7a
+`GET /files/{id}/content` Content-Length deferral recorded above is resolved the GetFile way in the
+F081 slice (header dropped, chunked streaming).

@@ -81,6 +81,18 @@
 	}
 
 	/**
+	 * What a `reloadNonce` bump does (ADR-F081: the agent updated THIS document's
+	 * bytes in place). With nothing unsaved the panel reloads immediately (a fresh
+	 * Collabora session over the new bytes); with unsaved edits — or a save still
+	 * in flight — it shows the update banner instead, because a forced reload
+	 * would destroy them. Pure so the "never destroy unsaved work" call is
+	 * unit-tested; the effect around it is glue.
+	 */
+	export function reloadNonceAction(s: EditorSaveState): 'reload' | 'banner' {
+		return s === 'dirty' || s === 'saving' ? 'banner' : 'reload';
+	}
+
+	/**
 	 * Minimal shape of Collabora's same-origin client map (internal API). We do NOT
 	 * use its `getScaleZoom` (it reports a base-2 zoom delta, but the real pixel
 	 * scaling is ~1.2×/level, so a computed jump undershoots) — we iterate off the
@@ -164,11 +176,15 @@
 	let {
 		fileId,
 		filename,
+		reloadNonce = 0,
 		onClose,
 		onHandBack
 	}: {
 		fileId: string;
 		filename: string;
+		// ADR-F081: bumped by the host when the agent updates THIS file's bytes in
+		// place — the panel reloads (or banners, if edits are unsaved). Optional.
+		reloadNonce?: number;
 		onClose: () => void;
 		// ADR-F047 Slice 5: hand back to the agent. Optional — when absent (e.g. a
 		// view-only mount) the button is not rendered and the editor is save+close only.
@@ -190,6 +206,9 @@
 	// error shows if that save fails (we never hand back unsaved work).
 	let handingBack = $state(false);
 	let handBackError = $state('');
+	// ADR-F081: the agent updated this document while the lawyer has unsaved edits —
+	// show the dismissible "Reload latest" banner instead of destroying their work.
+	let updateBanner = $state(false);
 
 	// Reskin: open Collabora in its slim CLASSIC toolbar (not the heavy tabbed
 	// notebookbar) and drop the properties sidebar + ruler, so the editor reads
@@ -214,6 +233,8 @@
 		phase = 'loading';
 		saveState = 'loading';
 		errorMsg = '';
+		// Any (re)load serves the current bytes — a pending update banner is stale.
+		updateBanner = false;
 		try {
 			const { src, session: s } = await editorApi.openEditorSession(id, window.location.origin);
 			if (gen !== loadGen) return; // superseded by a newer open
@@ -244,6 +265,28 @@
 	$effect(() => {
 		void load(fileId);
 	});
+
+	// ADR-F081: the host bumped reloadNonce — the agent rewrote THIS file's bytes in
+	// place (same fileId, so the load effect above never re-fires). Clean → reload a
+	// fresh Collabora session over the new bytes; unsaved edits (or a save mid-flight)
+	// → banner, never a destructive reload. Tracking the LAST value (DocumentsPanel's
+	// reloadKey pattern) also inertly absorbs the initial value on mount — whether
+	// that is 0 (first open) or a carried-over count (the host's nonce survives an
+	// editor close/reopen).
+	// svelte-ignore state_referenced_locally
+	let lastReloadNonce = reloadNonce;
+	$effect(() => {
+		if (reloadNonce === lastReloadNonce) return;
+		lastReloadNonce = reloadNonce;
+		if (reloadNonceAction(saveState) === 'banner') updateBanner = true;
+		else void load(fileId);
+	});
+
+	// "Reload latest" from the update banner: the lawyer chose to drop their unsaved
+	// edits and open the agent's new version. load() clears the banner itself.
+	function reloadLatest() {
+		void load(fileId);
+	}
 
 	// Collabora posts save/load status to our origin (CheckFileInfo
 	// PostMessageOrigin). The editor is same-origin, so reject anything else.
@@ -566,6 +609,44 @@
 			</Button>
 		</div>
 	</header>
+
+	{#if updateBanner}
+		<!-- ADR-F081: the agent updated this document in place while the lawyer has
+		     unsaved edits — offer the reload, never force it. -->
+		<div
+			class="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-muted/60 px-3 py-2"
+			data-testid="lq-editor-update-banner"
+			transition:fade={{ duration: 120 }}
+		>
+			<p class="min-w-0 text-xs text-muted-foreground">
+				The agent updated this document. Reload to open the latest version — unsaved changes here
+				will be lost.
+			</p>
+			<div class="flex shrink-0 items-center gap-1.5">
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					class="h-7 px-2.5"
+					data-testid="lq-editor-reload-latest"
+					onclick={reloadLatest}
+				>
+					Reload latest
+				</Button>
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					class="h-7 px-2"
+					aria-label="Dismiss update notice"
+					data-testid="lq-editor-update-dismiss"
+					onclick={() => (updateBanner = false)}
+				>
+					<XIcon class="size-3.5" aria-hidden="true" />
+				</Button>
+			</div>
+		</div>
+	{/if}
 
 	<div class="relative min-h-0 flex-1">
 		{#if phase === 'loading'}

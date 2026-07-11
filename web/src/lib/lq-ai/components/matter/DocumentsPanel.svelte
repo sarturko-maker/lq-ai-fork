@@ -255,7 +255,8 @@
 										{/if}
 									</div>
 									<p class="mt-0.5 text-xs text-muted-foreground tabular-nums">
-										{formatBytes(f.size_bytes)} · {timeAgo(f.created_at, nowMs)}
+										<!-- updated_at set = bytes mutated in place (ADR-F081) — show the freshest instant -->
+										{formatBytes(f.size_bytes)} · {timeAgo(f.updated_at ?? f.created_at, nowMs)}
 										{#if f.ingestion_status !== 'ready'}
 											· {f.ingestion_status}
 										{/if}

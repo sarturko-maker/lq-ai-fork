@@ -60,6 +60,13 @@ Status: **R-0 diagnosis DONE (2026-07-07, code trace).** Root cause, exactly:
   told to start afresh); (v) deterministic tests incl. the WOPI-mutated case; live verify on the
   Test 1 matter.
 
+- R-2 (2026-07-11, ADR-F081 — amends R-1's output side): R-1 made the INPUT continuous but every
+  apply still minted a new `(redlined vN)` row — the maintainer's "further redline creates a NEW
+  document" bug. Follow-up applies now UPDATE the working head in place (WOPI-symmetric
+  snapshot-then-mutate; lawyer-authored bytes preserved as a `(lawyer draft)` snapshot first);
+  `start_fresh` still branches a new, matter-uniquely named document. See ADR-F081 +
+  `docs/fork/plans/REDLINE-LIVING-DOC.md`.
+
 ## Workstream AZ — Azure Foundry  *(research now; implement after maintainer approves Phase 1)*
 
 - AZ-R (Phase 1): **DONE 2026-07-07 — full report: `docs/fork/plans/AZURE-FOUNDRY-phase1.md`**

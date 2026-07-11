@@ -67,10 +67,13 @@ class File(Base):
         server_default=text("'pending'"),
     )
     ingestion_error: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Work-product provenance (C7a, ADR-F046): the agent run that produced this
-    # file (e.g. a redline output). NULL for human uploads. ``SET NULL`` on run
-    # delete keeps the file (the work product outlives the run record). Lets the
-    # cockpit tie a downloadable output back to the run that made it.
+    # Work-product provenance (C7a, ADR-F046; semantics extended by ADR-F081):
+    # the agent run that LAST WROTE this file's bytes — set at creation for an
+    # agent output, re-pointed by an in-place redline convergence, and flipped
+    # to NULL by the editor's first human save (ADR-F047). NULL for human
+    # uploads and human-edited heads. ``SET NULL`` on run delete keeps the file
+    # (the work product outlives the run record). Lets the cockpit tie a
+    # downloadable output back to the run that last produced it.
     created_by_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("agent_runs.id", ondelete="SET NULL", name="fk_files_created_by_run_id"),
@@ -100,11 +103,13 @@ class File(Base):
         server_default=text("now()"),
     )
     # Content last-modified time. NULL until the file's bytes are first mutated
-    # in place (the in-app editor's PutFile save-back, ADR-F047 Slice 3): every
-    # other write path creates a NEW row rather than mutating one, so for them
-    # ``created_at`` already IS the last-modified time. WOPI ``LastModifiedTime``
-    # therefore reads ``updated_at or created_at`` (and a save-back also makes
-    # the ``X-COOL-WOPI-Timestamp`` "changed in storage" race-check meaningful).
+    # in place — the in-app editor's PutFile save-back (ADR-F047 Slice 3) or a
+    # redline converging on the working head (ADR-F081); every other write path
+    # creates a NEW row rather than mutating one, so for those ``created_at``
+    # already IS the last-modified time. WOPI ``LastModifiedTime`` reads
+    # ``updated_at or created_at`` (and both mutators bump it, which keeps the
+    # ``X-COOL-WOPI-Timestamp`` "changed in storage" race-check meaningful and
+    # the F066 resolver's ``coalesce(updated_at, created_at)`` leaf pick honest).
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

@@ -5,7 +5,11 @@
  * purely computational.
  */
 import { describe, expect, it } from 'vitest';
-import { buildRunPayload, formatRunCostUSD } from '../components/agents/ConversationPanel.svelte';
+import {
+	buildRunPayload,
+	formatRunCostUSD,
+	redlineAnnounceKey
+} from '../components/agents/ConversationPanel.svelte';
 
 const ALL_PROFILES = ['economy', 'balanced', 'generous'] as const;
 
@@ -134,5 +138,35 @@ describe('formatRunCostUSD — post-run cost estimate label (F2 Slice O-2)', () 
 	it('hides the caption for non-finite or negative values (defensive)', () => {
 		expect(formatRunCostUSD('not-a-number')).toBeNull();
 		expect(formatRunCostUSD(-1)).toBeNull();
+	});
+});
+
+describe('redlineAnnounceKey — redline announce dedupe (ADR-F081 in-place updates)', () => {
+	it('same id + NEW updated_at → a different key (the update re-announces once)', () => {
+		const before = redlineAnnounceKey({ id: 'f1', updated_at: null });
+		const after = redlineAnnounceKey({ id: 'f1', updated_at: '2026-07-11T10:00:00Z' });
+		expect(after).not.toBe(before);
+	});
+
+	it('same id + same updated_at → the same key (an already-seen version never re-fires)', () => {
+		const a = redlineAnnounceKey({ id: 'f1', updated_at: '2026-07-11T10:00:00Z' });
+		const b = redlineAnnounceKey({ id: 'f1', updated_at: '2026-07-11T10:00:00Z' });
+		expect(a).toBe(b);
+		expect(redlineAnnounceKey({ id: 'f1', updated_at: null })).toBe(
+			redlineAnnounceKey({ id: 'f1', updated_at: null })
+		);
+	});
+
+	it('a second in-place update bumps the key again (each version announces exactly once)', () => {
+		const v1 = redlineAnnounceKey({ id: 'f1', updated_at: '2026-07-11T10:00:00Z' });
+		const v2 = redlineAnnounceKey({ id: 'f1', updated_at: '2026-07-11T11:30:00Z' });
+		expect(v2).not.toBe(v1);
+	});
+
+	it('different files never collide, even with identical updated_at', () => {
+		const t = '2026-07-11T10:00:00Z';
+		expect(redlineAnnounceKey({ id: 'f1', updated_at: t })).not.toBe(
+			redlineAnnounceKey({ id: 'f2', updated_at: t })
+		);
 	});
 });

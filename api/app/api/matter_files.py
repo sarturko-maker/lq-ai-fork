@@ -39,9 +39,14 @@ router = APIRouter(prefix="/matters", tags=["matter-files"])
 class MatterFileRead(BaseModel):
     """One file in a matter, as the cockpit Documents tab renders it.
 
-    ``created_by_run_id`` is the work-product provenance (ADR-F046): non-NULL for an
-    agent output (e.g. a redline), NULL for a human upload. The run timeline filters
-    on it to show the download inline under the run that produced the file.
+    ``created_by_run_id`` is the work-product provenance (ADR-F046/F081): non-NULL for
+    an agent output (e.g. a redline) — since ADR-F081 it names the run that LAST WROTE
+    the bytes, not only the row's creator — NULL for a human upload or a file the
+    lawyer has since edited. The run timeline filters on it to show the download
+    inline under the run. ``updated_at`` is non-NULL once the bytes have been mutated
+    in place (an editor save-back, ADR-F047, or a redline convergence, ADR-F081); the
+    web keys its "new redline ready" announce on ``(id, updated_at)`` so an in-place
+    update re-fires it.
     """
 
     id: uuid.UUID
@@ -50,6 +55,7 @@ class MatterFileRead(BaseModel):
     size_bytes: int
     ingestion_status: str
     created_at: datetime
+    updated_at: datetime | None
     created_by_run_id: uuid.UUID | None
 
 
@@ -100,6 +106,7 @@ async def list_matter_files(
                 size_bytes=f.size_bytes,
                 ingestion_status=f.ingestion_status,
                 created_at=f.created_at,
+                updated_at=f.updated_at,
                 created_by_run_id=f.created_by_run_id,
             )
             for f in rows

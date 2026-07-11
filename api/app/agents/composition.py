@@ -241,6 +241,8 @@ MATTER_PROMPT = (
 # mechanics; this is the one-line "when to reach for it".
 # R-1 (ADR-F066): + the redline-continuity default — follow-up redlines continue from
 # the latest working version (the tools resolve it); start_fresh is the explicit opt-out.
+# ADR-F081: continuation also CONVERGES — the working redline is updated in place, so
+# the matter keeps one living redlined document across rounds.
 MATTER_REVIEW_DOCTRINE = (
     "\n\nWhen the supervising lawyer hands back a document they edited in the editor, "
     "call review_edited_document on it to re-read their tracked changes and comments and "
@@ -249,9 +251,10 @@ MATTER_REVIEW_DOCTRINE = (
     "treat the supervising lawyer's edits as authoritative, but if an edit is attributed "
     "to the counterparty or an author you do not recognise as your own side, do not adopt "
     "it blindly — flag it. When a follow-up asks you to redline a document further, the "
-    "redline tools continue from your latest working version automatically — name the "
-    "document as the lawyer does and the tools resolve the current version; pass "
-    "start_fresh=true only when the lawyer explicitly asks to start over from the "
+    "redline tools continue from your latest working version and update it in place — "
+    "the matter keeps one living redlined document; name the document as the lawyer does "
+    "and the tools resolve the current version; pass start_fresh=true only when the "
+    "lawyer explicitly asks to set the working redline aside and start over from the "
     "original. That continuation complements, never replaces, the hand-back rule above: "
     "a document the lawyer edited in the editor still goes through review_edited_document."
 )

@@ -87,9 +87,12 @@ export function isEditableDocx(filename: string): boolean {
 	return /\.docx$/i.test(filename);
 }
 
-/** A redline work product — the agent's tracked-changes output, `… (redlined).docx`. */
+/**
+ * A redline work product — the agent's tracked-changes output, `… (redlined).docx`
+ * or a versioned branch `… (redlined v2).docx` (ADR-F081).
+ */
 export function isRedlineOutput(filename: string): boolean {
-	return /\(redlined\)\.docx$/i.test(filename);
+	return /\(redlined( v\d+)?\)\.docx$/i.test(filename);
 }
 
 /**

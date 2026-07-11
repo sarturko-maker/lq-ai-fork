@@ -98,9 +98,15 @@ describe('isRedlineOutput', () => {
 		expect(isRedlineOutput('Cirrus MSA (redlined).docx')).toBe(true);
 		expect(isRedlineOutput('x (REDLINED).DOCX')).toBe(true);
 	});
+	it('matches a versioned redline branch (ADR-F081)', () => {
+		expect(isRedlineOutput('Cirrus MSA (redlined v2).docx')).toBe(true);
+		expect(isRedlineOutput('Cirrus MSA (redlined v10).docx')).toBe(true);
+	});
 	it('does not match uploads or other agent outputs', () => {
 		expect(isRedlineOutput('Cirrus MSA.docx')).toBe(false);
 		expect(isRedlineOutput('NDA (response).docx')).toBe(false);
+		expect(isRedlineOutput('x (redlinedv2).docx')).toBe(false); // missing the space
+		expect(isRedlineOutput('x (redlined v).docx')).toBe(false); // missing the number
 	});
 });
 

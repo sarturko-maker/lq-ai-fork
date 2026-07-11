@@ -50,6 +50,7 @@ from app.agents.redline_service import (
 )
 from app.agents.tools import (
     MatterBinding,
+    _matter_files_query,
     download_matter_docx,
     fetch_matter_docx,
     load_matter_docx_bytes,
@@ -150,12 +151,14 @@ def build_commercial_tools(
 
         IMPORTANT — batch your edits: pass ALL the edits for a document in a
         SINGLE call. A follow-up call CONTINUES from your latest working version
-        of the named document automatically (ADR-F066): name the document as the
-        lawyer does and the tool resolves the current version, so a later batch
-        builds on the redline you already made. Still review the whole document
-        first and cover every change for it in one call. Set ``start_fresh=true``
-        ONLY when the lawyer explicitly asks to restart from the original
-        document, setting aside your earlier redlines.
+        of the named document and UPDATES IT IN PLACE (ADR-F066/F081): the
+        matter keeps ONE living redlined document that accumulates tracked
+        changes across rounds — name the document as the lawyer does and the
+        tool resolves and updates the current version. Still review the whole
+        document first and cover every change for it in one call. Set
+        ``start_fresh=true`` ONLY when the lawyer explicitly asks to set the
+        working redline aside and start over from the original document (this
+        creates a separate, new redlined document).
 
         Redline like a lawyer (this is enforced — over-broad edits are rejected):
         - **Quote the clause; change only the necessary words.** Set
@@ -211,7 +214,8 @@ def build_commercial_tools(
         same surgical gate and Adeu rendering as apply_redline and returns the
         rendered ``[-struck-]``/``[+inserted+]`` view of the changed paragraphs,
         but writes no file. Like apply_redline, it previews against your latest
-        working version of the named document by default (ADR-F066); pass
+        working version of the named document by default (ADR-F066; apply will
+        then update that same living document in place); pass
         ``start_fresh=true`` only to preview against the original instead. Read
         the preview as the supervising lawyer will, then:
         - if a clause shows a large struck-and-retyped block, you re-worded more
@@ -352,6 +356,10 @@ class _RenderedRedline:
     proposal: ApplyRedlineInput
     redlined: bytes
     result: RedlineApplyResult
+    # Hash of the source bytes the redline was rendered over — the persist step's
+    # CAS guard (ADR-F081): if the head row's hash has moved on since the render,
+    # the write is rejected rather than clobbering a concurrent edit.
+    source_sha256: str = ""
     # ADR-F066 transparency: set when the resolved working version differs from
     # the literally-named document — the tool's result must say what it did.
     continuity_note: str | None = None
@@ -392,9 +400,9 @@ async def _render_redline(
             "search_documents (empty query) to list the matter's documents."
         )
     continuity_note = (
-        f'Continued from your latest working version "{row.filename}" (derived '
-        f'from "{proposal.document_name}"); pass start_fresh=true to redline the '
-        "original instead."
+        f'Continuing from your latest working version "{row.filename}" (derived '
+        f'from "{proposal.document_name}"); pass start_fresh=true to start a '
+        "separate redline from the original instead."
         if not start_fresh and row.filename.lower() != proposal.document_name.lower()
         else None
     )
@@ -478,6 +486,7 @@ async def _render_redline(
         proposal=proposal,
         redlined=result.docx_bytes,
         result=result,
+        source_sha256=hashlib.sha256(data).hexdigest(),
         continuity_note=continuity_note,
     )
 
@@ -551,12 +560,45 @@ async def _apply_redline(
     result = rendered.result
     redlined = rendered.redlined
 
-    # 7. Persist as a new matter document (ready; not re-ingested — work product,
-    #    not a search source). Flush BEFORE the object PUT so a constraint failure
-    #    rolls the row back without orphaning bytes (ADR 0005 GC reaps the rare
-    #    commit-after-PUT orphan).
+    # 7. Persist. Re-fetch the resolved version as a LOCKED ORM row: the render
+    #    projection carries no provenance columns, and FOR UPDATE closes the
+    #    resolve→persist TOCTOU window against a concurrent writer (ADR-F081).
+    head = (
+        await db.execute(select(File).where(File.id == row.file_id).with_for_update())
+    ).scalar_one_or_none()
+    if head is None or head.deleted_at is not None:
+        return (
+            f'"{row.filename}" was deleted while the redline was being prepared. '
+            "Nothing was written — list the matter's documents and try again."
+        )
+
+    # Output convergence (ADR-F081): a derived working head that IS a redline
+    # output is updated IN PLACE — the matter keeps ONE living redlined document
+    # across rounds. Everything else creates a new derived row: a root upload
+    # (first redline), an explicitly named snapshot, start_fresh, and any
+    # non-redline derivative — in particular a "(response)" document, the
+    # per-round OUTBOUND record respond_to_counterparty dispatched, which must
+    # never be mutated after the fact (review catch).
+    if (
+        not start_fresh
+        and head.parent_file_id is not None
+        and not head.is_snapshot
+        and _is_redline_filename(head.filename)
+    ):
+        # CAS guard, wedge-aware (ADR-F081): a genuine race rejects — never
+        # clobber a concurrent write; a stale-row wedge (a prior apply's step-2
+        # commit failure) proceeds and is repaired by this write.
+        if await _cas_state(head, rendered) == "race":
+            return _race_rejection(head.filename)
+        return await _update_working_head(db, binding, head=head, rendered=rendered, run_id=run_id)
+
+    # 7a. Persist as a new matter document (ready; not re-ingested — work product,
+    #     not a search source). Flush BEFORE the object PUT so a constraint failure
+    #     rolls the row back without orphaning bytes (ADR 0005 GC reaps the rare
+    #     commit-after-PUT orphan). The name is matter-unique so a fresh branch
+    #     never collides with the living head's stable name (ADR-F081).
     new_file_id = uuid.uuid4()
-    redlined_name = _redlined_filename(row.filename)
+    redlined_name = await _unique_redlined_filename(db, binding, row.filename)
     file_row = File(
         id=new_file_id,
         owner_id=binding.user_id,
@@ -567,8 +609,8 @@ async def _apply_redline(
         hash_sha256=hashlib.sha256(redlined).hexdigest(),
         storage_path=str(new_file_id),
         ingestion_status="ready",
-        # Work-product provenance (ADR-F046): ties this output to the run that
-        # produced it, so the cockpit can surface the download inline under the run.
+        # Work-product provenance (ADR-F046/F081): the run that last wrote the bytes,
+        # so the cockpit can surface the download inline under the run.
         created_by_run_id=run_id,
         # Document lineage (ADR-F066): the redline derives from the source row, so
         # the working-version resolver can continue from the agent's latest output.
@@ -581,7 +623,8 @@ async def _apply_redline(
     )
 
     # Domain receipt — counts/types/IDs only (no clause text); the guard also
-    # writes its generic tool_call row.
+    # writes its generic tool_call row. redlined_sha256 keeps the receipt
+    # resolvable to the exact bytes this apply produced (ADR-F081).
     await audit_action(
         db,
         user_id=binding.user_id,
@@ -592,8 +635,10 @@ async def _apply_redline(
         practice_area_id=binding.practice_area_id,
         details={
             "source_file_id": str(row.file_id),
+            "updated_in_place": False,
             "proposed_edits": len(proposal.edits),
             "applied_regions": result.edits_applied,
+            "redlined_sha256": file_row.hash_sha256,
         },
     )
 
@@ -604,6 +649,194 @@ async def _apply_redline(
         f'"{redlined_name}" in this matter — download it to review and accept or '
         f"reject each change. Every change is tracked; substantive ones carry a "
         f"comment explaining the rationale."
+    )
+
+
+def _race_rejection(filename: str) -> str:
+    """Fix-and-retry text for a genuine concurrent-write race (ADR-F081 CAS)."""
+    return (
+        f'"{filename}" changed while this redline was being prepared '
+        "(another edit landed first). Nothing was written — call apply_redline "
+        "again to redline the current version."
+    )
+
+
+async def _cas_state(head: File, rendered: _RenderedRedline) -> str:
+    """The ADR-F081 CAS guard, wedge-aware. Returns:
+
+    - ``"ok"`` — the head row still describes the bytes the redline was rendered
+      over; proceed.
+    - ``"wedge"`` — the ROW disagrees with its own storage while the render
+      matches the CURRENT storage bytes: a prior apply's step-2 commit failed
+      after the overwrite (row metadata stale, bytes newer). The render is over
+      the true current bytes, so proceeding is safe and REPAIRS the row —
+      rejecting here would wedge the living document forever (every retry
+      re-renders over the same bytes and re-mismatches the stale row hash).
+    - ``"race"`` — the storage bytes moved on since the render (an editor save
+      or a concurrent run landed first): reject, never clobber.
+
+    The extra storage read happens only on a hash mismatch — the happy path
+    stays one download per apply.
+    """
+    if not rendered.source_sha256 or head.hash_sha256 == rendered.source_sha256:
+        return "ok"
+    current = await download_matter_docx(head.storage_path)
+    if current is not None and hashlib.sha256(current).hexdigest() == rendered.source_sha256:
+        logger.warning(
+            "redline head row is stale against its own storage — repairing via this apply",
+            extra={"event": "redline_head_row_repair", "file_id": str(head.id)},
+        )
+        return "wedge"
+    return "race"
+
+
+async def _update_working_head(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    head: File,
+    rendered: _RenderedRedline,
+    run_id: uuid.UUID,
+) -> str:
+    """Converge the redline onto the living working head (ADR-F081).
+
+    Mirrors WOPI PutFile's snapshot-then-mutate discipline (ADR-F047 Slice 3),
+    with the authorship boundary inverted: WOPI preserves AGENT bytes before the
+    first human overwrite; this preserves HUMAN bytes (the lawyer's Collabora
+    edits, ``created_by_run_id IS NULL``) before an agent overwrite. Two durable
+    steps — the snapshot row + provenance flip + a first ``updated_at`` bump
+    commit BEFORE the live object is touched, so a retry after a later failure
+    can never re-snapshot overwritten bytes and a concurrent editor save inside
+    the window trips WOPI's timestamp backstop instead of passing it. Because
+    that commit RELEASES the caller's FOR UPDATE lock, step 2 re-acquires the
+    row and re-runs the CAS before any byte is overwritten (review blocker: the
+    inter-commit window must not clobber a writer that slipped in).
+    Agent-over-agent rounds do not snapshot: tracked changes are additive, so
+    the prior version is recoverable by rejecting the newest change regions.
+
+    The caller holds the head row FOR UPDATE and has already passed the CAS.
+    ``head`` identity fields are copied to locals before any commit
+    (MissingGreenlet discipline).
+    """
+    proposal = rendered.proposal
+    result = rendered.result
+    redlined = rendered.redlined
+    head_id = head.id
+    head_filename = head.filename
+    head_storage_path = head.storage_path
+
+    # Durable step 1 (only at the authorship boundary): preserve the lawyer's
+    # bytes as an immutable prior version, flip the head to agent-authored, and
+    # COMMIT before any overwrite (mirrors wopi.put_file_contents). The
+    # updated_at bump here is deliberate: the commit releases the row lock, and
+    # a Collabora save landing in the window must hit the X-COOL-WOPI-Timestamp
+    # backstop (409/1010 → the editor warns) rather than sail through it.
+    snapshot_name: str | None = None
+    snapshot_id: uuid.UUID | None = None
+    if head.created_by_run_id is None:
+        snapshot_id = uuid.uuid4()
+        snapshot_name = await _unique_matter_filename(
+            db, binding, _lawyer_draft_filename(head_filename), label="lawyer draft"
+        )
+        await storage.copy_object(source_path=head_storage_path, dest_path=str(snapshot_id))
+        try:
+            db.add(
+                File(
+                    id=snapshot_id,
+                    owner_id=head.owner_id,
+                    project_id=head.project_id,
+                    filename=snapshot_name,
+                    mime_type=head.mime_type,
+                    size_bytes=head.size_bytes,
+                    hash_sha256=head.hash_sha256,
+                    storage_path=str(snapshot_id),
+                    ingestion_status=head.ingestion_status,
+                    created_by_run_id=None,  # the preserved bytes are the lawyer's
+                    parent_file_id=head.id,
+                    is_snapshot=True,
+                )
+            )
+            head.created_by_run_id = run_id  # flip now: a retry must never re-snapshot
+            head.updated_at = datetime.now(UTC)  # arm the WOPI 1010 backstop in the window
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            # The live object is untouched; the snapshot copy is a row-less orphan.
+            try:
+                await storage.delete_object(storage_path=str(snapshot_id))
+            except Exception:
+                logger.warning(
+                    "failed to clean up orphan lawyer-draft snapshot",
+                    extra={
+                        "event": "redline_snapshot_cleanup_failed",
+                        "snapshot_id": str(snapshot_id),
+                    },
+                )
+            raise
+
+        # The step-1 commit released the FOR UPDATE lock — re-acquire the head
+        # and re-run the CAS before any byte is overwritten. A writer that
+        # slipped into the window (an editor save, a concurrent run) re-stamps
+        # both the bytes and the provenance itself, so aborting here leaves a
+        # consistent head plus our (now redundant, still true) lawyer-draft
+        # snapshot.
+        relocked = (
+            await db.execute(select(File).where(File.id == head_id).with_for_update())
+        ).scalar_one_or_none()
+        if relocked is None or relocked.deleted_at is not None:
+            return (
+                f'"{head_filename}" was deleted while the redline was being applied. '
+                "Nothing further was written — list the matter's documents and try again."
+            )
+        head = relocked
+        if await _cas_state(head, rendered) == "race":
+            return _race_rejection(head_filename)
+
+    # Durable step 2: overwrite the live object at the head's OWN storage key
+    # (key reuse is load-bearing — no GC sweep exists, a new key would leak the
+    # old object), then bump the row and COMMIT IN THE TOOL BODY: the guard's
+    # failed-audit rollback must not be able to discard row metadata for bytes
+    # that are already overwritten in storage.
+    await storage.upload_bytes(
+        storage_path=head_storage_path, body=redlined, content_type=OOXML_DOCX_MIME
+    )
+    head.hash_sha256 = hashlib.sha256(redlined).hexdigest()
+    head.size_bytes = len(redlined)
+    # Load-bearing twice: the F066 resolver's coalesce(updated_at, created_at)
+    # leaf pick, and WOPI's X-COOL-WOPI-Timestamp save-race backstop (409/1010).
+    head.updated_at = datetime.now(UTC)
+    head.created_by_run_id = run_id
+    await audit_action(
+        db,
+        user_id=binding.user_id,
+        action="commercial.redline_applied",
+        resource_type="file",
+        resource_id=str(head.id),
+        project_id=binding.project_id,
+        practice_area_id=binding.practice_area_id,
+        details={
+            "source_file_id": str(head.id),
+            "updated_in_place": True,
+            "snapshot_file_id": str(snapshot_id) if snapshot_id else None,
+            "proposed_edits": len(proposal.edits),
+            "applied_regions": result.edits_applied,
+            "redlined_sha256": head.hash_sha256,
+        },
+    )
+    await db.commit()
+
+    note = f"{rendered.continuity_note} " if rendered.continuity_note else ""
+    snapshot_note = (
+        f' The lawyer\'s manual edits were preserved first as "{snapshot_name}".'
+        if snapshot_name
+        else ""
+    )
+    return (
+        f"{note}Applied {len(proposal.edits)} edit(s) ({result.edits_applied} tracked "
+        f'change region(s)) and updated "{head_filename}" in place — the living '
+        f"redline now carries the earlier tracked changes plus these new ones."
+        f"{snapshot_note} The supervising lawyer reviews and accepts or rejects each "
+        f"change; substantive ones carry a comment explaining the rationale."
     )
 
 
@@ -1147,6 +1380,60 @@ def _extract_docx_text(data: bytes) -> str:
 def _redlined_filename(original: str) -> str:
     """``contract.docx`` → ``contract (redlined).docx`` → ``… (redlined v2).docx``."""
     return _versioned_filename(original, "redlined")
+
+
+# The redline output naming this module itself produces (mirrors the web's
+# ``isRedlineOutput``). The ADR-F081 converge predicate is anchored on it so a
+# non-redline derivative — a "(response)" outbound record above all — can never
+# be mutated in place. Filenames are stable post-creation (WOPI RENAME_FILE is
+# disabled), so the anchor is deterministic.
+_REDLINE_NAME_RE = re.compile(r"\(redlined(?: v\d{1,8})?\)\.docx$", re.IGNORECASE)
+
+
+def _is_redline_filename(filename: str) -> bool:
+    return _REDLINE_NAME_RE.search(filename) is not None
+
+
+async def _unique_matter_filename(
+    db: AsyncSession, binding: MatterBinding, candidate: str, *, label: str
+) -> str:
+    """Matter-unique output name (ADR-F081): bump ``(label)`` → ``(label v2)`` →
+    ``v3``… while the candidate collides with an existing matter filename.
+    Bounded; on a pathological matter the last candidate is returned as-is
+    (duplicate names were tolerated before this helper existed)."""
+    taken = {
+        r.filename.lower()
+        for r in (await db.execute(_matter_files_query(binding, File.filename))).all()
+    }
+    name = candidate
+    for _ in range(200):
+        if name.lower() not in taken:
+            break
+        name = _versioned_filename(name, label)
+    return name
+
+
+async def _unique_redlined_filename(
+    db: AsyncSession, binding: MatterBinding, source_filename: str
+) -> str:
+    """A NEW redline branch (first redline or ``start_fresh``) must not collide
+    with the living head's stable name (ADR-F081)."""
+    return await _unique_matter_filename(
+        db, binding, _redlined_filename(source_filename), label="redlined"
+    )
+
+
+def _lawyer_draft_filename(original: str) -> str:
+    """Name for the preserved human-edited prior version (ADR-F081):
+    ``<stem> (lawyer draft)<ext>`` — the mirror of WOPI's ``(agent draft)``
+    snapshot naming. Provenance is carried by the snapshot row itself; the
+    marker is human-readable disambiguation in the Documents tab. Callers pass
+    the result through :func:`_unique_matter_filename` so repeated
+    lawyer-edit → converge cycles don't mint identical snapshot names."""
+    stem, dot, ext = original.rpartition(".")
+    if not dot:
+        stem, ext = original, "docx"
+    return f"{stem} (lawyer draft).{ext}"
 
 
 def _rejection_text(exc: ValidationError, *, tool: str = "apply_redline") -> str:

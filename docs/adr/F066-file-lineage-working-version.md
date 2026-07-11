@@ -1,6 +1,11 @@
 # F066 — File lineage + working-version resolution (redline continuity)
 
-Status: accepted (maintainer approved the spec 2026-07-07)
+Status: accepted (maintainer approved the spec 2026-07-07); amended in part by
+[F081](F081-living-redline-document.md) (2026-07-11): a follow-up `apply_redline` now UPDATES the
+resolved working head in place — the write-side "new row per output" bullet and the
+`(redlined v2)`/`v3` naming chain apply only to branch-creating cases (first redline from a root;
+`start_fresh`). Migration 0089, the resolver, `start_fresh`, and the response-path semantics are
+unchanged.
 Date: 2026-07-07
 Deciders: maintainer + agent lead
 Slice: R-1

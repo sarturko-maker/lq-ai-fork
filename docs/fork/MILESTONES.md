@@ -884,6 +884,12 @@ synthetic pack behind a CLI; ADR-F001 forecloses "under the LegalQuants banner")
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **NAME-DEDUP follow-ups (ADR-F081 review, 2026-07-11):** `respond_to_counterparty` re-runs in the
+  same round mint sibling rows with the identical "(response).docx" name (its `_response_filename`
+  bump never triggers — the source is always the exact-named counterparty doc); WOPI's first-save
+  snapshots likewise all reuse "(agent draft).docx". Route both through the matter-unique naming
+  helper `_unique_matter_filename` when next touching those paths.
+
 ### Upstream awareness review (2026-07-10) — see `docs/fork/plans/UPSTREAM-REVIEW-2026-07.md`
 
 - **UP-SEC-1 — gateway-key enforcement + chat project IDOR/KB scoping** ✅ **SHIPPED** (branch
