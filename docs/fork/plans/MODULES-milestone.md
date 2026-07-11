@@ -243,6 +243,18 @@ counts/IDs only).
 
 ### B-7a — profile manifests + apply transaction
 
+**Status: SHIPPED 2026-07-11** (backend-only, NO migration; ADR-F067 B-7a addendum). In-repo
+`profiles/{commercial,privacy,blank}/` (folder-per-profile: `profile.yaml` + a verbatim
+`doctrine.md`) + a fail-loud loader package `app/profiles/` (installed API-only in the lifespan,
+cross-validates skill/tool bindings + roster + HITL against the live registries) + three admin
+endpoints (`GET /profiles`, `GET /profiles/{name}`, `POST /profiles/{name}/apply`). Apply is a single
+idempotent, all-or-nothing transaction (create/patch area + adopt Library + bind + roster + HITL,
+`on_conflict_do_nothing`, operator-fenced) that reproduces the seeded state AND adopts the Library —
+killing the G13 fresh-org cliff. The parity oracle (`test_profile_parity.py`) pins each manifest
+byte-for-byte against the seeded `practice_areas` row. Decisions (maintainer AFK, defaults taken,
+recorded in the addendum): unit vocabulary manifest-layer-only (no DB CHECK); apply overwrites +
+audit-diffs; `RECOMMENDED_LIBRARY_SETS` kept + cross-checked (full fold deferred). Next: **B-7b**.
+
 **Goal:** F067 D4 made real: shipped `profiles/*.yaml` manifests (Commercial, Privacy, blank) —
 doctrine, unit vocabulary (incl. the maintainer's unit-of-work TYPES refinement: Matter /
 Project / Programme / Investigation), tier/budget defaults, module bindings by kind+key, sub-agent

@@ -50,6 +50,7 @@ from app.api import (
     organization_profile,
     playbooks as playbooks_api,
     practice_areas,
+    profiles,
     projects,
     ropa,
     saved_prompts,
@@ -171,6 +172,10 @@ api_router.include_router(autonomous.router, dependencies=_active)
 api_router.include_router(agent_runs.router, dependencies=_active)
 # F1-S2 (fork, ADR-F002): practice areas — curated cockpit left rail.
 api_router.include_router(practice_areas.router, dependencies=_active)
+# B-7a (ADR-F067 D4): shipped agent-profile manifests — list/detail + the
+# transactional apply endpoint the setup wizard (B-7b) drives. Admin-gated at the
+# handler level; apply fences the operator out (tenant config + Library writes).
+api_router.include_router(profiles.router, dependencies=_active)
 # M3-A2: Playbook executor — two endpoints under different prefixes
 # (``/playbooks/{id}/execute`` and ``/playbook-executions/{id}``) so
 # they live alongside the M3-A4 list/CRUD endpoints in the same module.

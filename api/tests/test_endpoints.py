@@ -82,6 +82,8 @@ _PARAM_VALUES: dict[str, str] = {
     "entry_id": _DUMMY_UUID,
     # B-2a (fork) — org-skills harness transitions (ADR-F067 D2/D3)
     "version_id": _DUMMY_UUID,
+    # B-7a (fork) — profile manifests (ADR-F067 D4); `{name}` is a profile slug
+    "name": "commercial",
 }
 
 
@@ -440,6 +442,11 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # tests/test_practice_area_knowledge_api.py.
     ("POST", "/api/v1/practice-areas/{key}/knowledge-bases"),
     ("DELETE", "/api/v1/practice-areas/{key}/knowledge-bases/{kb_id}"),
+    # B-7a (fork, ADR-F067 D4) — profile manifests + apply. Dedicated coverage in
+    # tests/test_profiles_apply_api.py.
+    ("GET", "/api/v1/profiles"),
+    ("GET", "/api/v1/profiles/{name}"),
+    ("POST", "/api/v1/profiles/{name}/apply"),
     ("GET", "/api/v1/matters/{project_id}/capabilities"),
     ("PATCH", "/api/v1/matters/{project_id}/capabilities"),
     # PRIV-3 (fork) — ROPA register read API (ADR-F019). Dedicated coverage in

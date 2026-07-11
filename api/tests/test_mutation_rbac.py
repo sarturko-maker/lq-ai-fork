@@ -152,8 +152,11 @@ def test_mutating_route_entry_count_pinned() -> None:
     MutatingUser-gated; POST approve/reject/revoke, AdminUser-gated): 137 → 141.
     PUBLISH (ADR-F067 fast-path) adds 1 mutating route (POST
     /user-skills/{skill_id}/publish, AdminUser-gated — passes the drift guard
-    automatically, no allowlist entry): 141 → 142."""
-    assert len(_mutating_routes()) == 142
+    automatically, no allowlist entry): 141 → 142.
+    B-7a (ADR-F067 D4) adds 1 mutating route (POST /profiles/{name}/apply,
+    AdminUser-gated — passes the drift guard automatically, no allowlist entry):
+    142 → 143."""
+    assert len(_mutating_routes()) == 143
 
 
 @pytest.mark.unit
@@ -170,13 +173,15 @@ def test_api_v1_path_count_pinned() -> None:
     B-4 (ADR-F067 D2/D3) adds 6 paths (playbooks propose + proposals;
     admin/org-playbooks + approve/reject/revoke): 186 → 192.
     PUBLISH (ADR-F067 fast-path) adds 1 path (POST
-    /user-skills/{skill_id}/publish): 192 → 193."""
+    /user-skills/{skill_id}/publish): 192 → 193.
+    B-7a (ADR-F067 D4) adds 3 paths (GET /profiles, GET /profiles/{name},
+    POST /profiles/{name}/apply): 193 → 196."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 193
+    assert len(paths) == 196
 
 
 @pytest.mark.unit
