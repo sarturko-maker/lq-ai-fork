@@ -8,10 +8,19 @@ then CLAUDE.md, then the ADRs/plans named below.
 > CLEANUP — APP-CODE MILESTONE COMPLETE (CLEAN-1..4 ✅ #258–#261) → ④ B-7a manifests+apply ✅ MERGED
 > **PR #262** (`c8fcd9ba`) → ⑤ B-7b guided setup wizard ✅ MERGED **PR #263** (`f6b06cb9`) → ⑥ #490
 > GW-FILEIDS stop-emit ✅ SHIPPED (this PR; api-only, NO migration).
+> ⑺ **B-7 MILESTONE ACCEPTANCE ✅ PASSED (delegated agentic fresh-org walk, #508, 2026-07-11)** — all
+> three stages on a throwaway `lq_ai_b7walk` org (fresh migrate → bootstrap admin → forced password
+> change → **wizard auto-launch on empty Library** → Commercial activated, 11 Library adoptions →
+> member invited + accepted → member's Commercial agent redlined a real MSA: 15 `w:ins`/7 `w:del`
+> verified at OOXML level, zero manual Library curation). Evidence + walkthrough README:
+> `docs/fork/evidence/b7-acceptance/`. **Formal sign-off remains the maintainer's on return.** Walk
+> findings: (a) sporadic dev-rig SPA "Failed to fetch" (stale keep-alive pattern; follow-up task);
+> (b) fresh-org Commercial has `hitl={}` per profile parity ⇒ no redline confirm pause — matches
+> B-7a's seeded-state oracle, flag to maintainer whether the shipped profile should turn HITL on.
 > ◀ PICK UP HERE: **DELEGATION IN FORCE (maintainer directive 2026-07-11: "move through the
-> B stack yourself"): ⑴ B-7 milestone acceptance as a DELEGATED AGENTIC fresh-org walk (#508 — reset a
-> fresh org → wizard-apply Commercial → invite a member → member's agent redlines with no manual Library
-> curation; evidence to `docs/fork/evidence/b7-acceptance/`, formal sign-off = maintainer on return) →
+> B stack yourself"), with a maintainer INTERJECTION taking priority: ⑴ #515 REDLINE-CONT — "further
+> redline creates a NEW document" bug → living-redline convergence (ADR-F081,
+> `docs/fork/plans/REDLINE-LIVING-DOC.md`; in flight on branch `fork/redline-living-doc`) →
 > ⑵ B-2c org-skills eval (#509, OOM-aware). THEN HOLD: the next milestone is the maintainer's
 > enterprise-vs-product call; the product candidate is queued as **CUSTODIAN**
 > (`docs/fork/plans/CUSTODIAN-milestone.md`, tasks #510–#514: OBLIG-1 → ADV-1 → OUTCOME-1 → WHY-1 →
