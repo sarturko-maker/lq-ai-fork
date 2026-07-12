@@ -30,6 +30,42 @@
 		return null;
 	}
 
+	/**
+	 * Warning-chip label when the file is a byte-identical copy of an earlier
+	 * file in this matter (ADR-F082 workspace awareness), or null when unique.
+	 * Says "identical to", not "duplicate of" — the check is byte-identity ONLY,
+	 * and the wording must not teach that edited/revised versions get flagged.
+	 * The filename is untrusted — rendered as plain text, never `{@html}`.
+	 */
+	export function duplicateBadge(file: Pick<MatterFile, 'duplicate_of'>): string | null {
+		return file.duplicate_of ? `identical to ${file.duplicate_of.filename}` : null;
+	}
+
+	/**
+	 * Tooltip for the identical-copy badge: states what it means (byte-for-byte
+	 * identity) AND what its absence does not mean (edited or revised versions
+	 * are not flagged), so a lawyer never over-trusts a missing badge (ADR-F082).
+	 */
+	export function duplicateTooltip(file: Pick<MatterFile, 'duplicate_of'>): string | null {
+		return file.duplicate_of
+			? `Byte-for-byte identical to ${file.duplicate_of.filename}. Edited or revised versions are not flagged.`
+			: null;
+	}
+
+	/**
+	 * The agent-recorded description shown as the row's muted subtitle (ADR-F082),
+	 * with a "(may be stale)" hint when the bytes were mutated after the summary
+	 * was written; null when the agent hasn't read the file yet. Blank/whitespace
+	 * summaries collapse to null so an empty line never renders.
+	 */
+	export function summarySubtitle(
+		file: Pick<MatterFile, 'summary' | 'summary_stale'>
+	): string | null {
+		const summary = file.summary?.trim();
+		if (!summary) return null;
+		return file.summary_stale ? `${summary} (may be stale)` : summary;
+	}
+
 	/** True while a run is mid-flight — the live "Updating…" indicator + poll driver. */
 	export function isUpdatingLive(runActive: boolean): boolean {
 		return runActive;
@@ -237,6 +273,8 @@
 				<ul class="space-y-2" data-testid="lq-documents-list">
 					{#each files as f (f.id)}
 						{@const badge = fileOriginBadge(f)}
+						{@const dupBadge = duplicateBadge(f)}
+						{@const subtitle = summarySubtitle(f)}
 						<li
 							class="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3"
 							data-testid="lq-documents-row"
@@ -253,7 +291,30 @@
 												class="shrink-0">{badge}</Badge
 											>
 										{/if}
+										{#if dupBadge}
+											<!-- byte-identical copy (ADR-F082) — amber warning idiom (Alert / ProvenancePill);
+											     the duplicated filename is plain text, never {@html} -->
+											<Badge
+												variant="outline"
+												class="max-w-48 shrink-0 border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+												title={duplicateTooltip(f)}
+												data-testid="lq-documents-duplicate"
+											>
+												<span class="truncate">{dupBadge}</span>
+											</Badge>
+										{/if}
 									</div>
+									{#if subtitle}
+										<!-- agent-recorded description (ADR-F082) — plain text, never {@html};
+										     "(may be stale)" appended when the bytes changed after it was written -->
+										<p
+											class="mt-0.5 truncate text-xs text-muted-foreground"
+											title={subtitle}
+											data-testid="lq-documents-summary"
+										>
+											{subtitle}
+										</p>
+									{/if}
 									<p class="mt-0.5 text-xs text-muted-foreground tabular-nums">
 										<!-- updated_at set = bytes mutated in place (ADR-F081) — show the freshest instant -->
 										{formatBytes(f.size_bytes)} · {timeAgo(f.updated_at ?? f.created_at, nowMs)}

@@ -52,7 +52,8 @@ class TierMemoryMiddleware(AgentMiddleware):
     """Appends the per-run read-only memory-tier blocks to the system prompt.
 
     ``tier_text`` is the already-rendered concatenation of the present data
-    tiers (House Brief → Matter File → Matter Corrections → Matter Roster), in
+    tiers (House Brief → Practice Playbook → Matter File → Matter Corrections →
+    Matter Roster → Matter Documents), in
     the same deliberate order as the legacy ``system_prompt_for`` assembly. An
     empty string is a no-op (degradation preserved: an absent/empty tier adds
     nothing). The blocks land AFTER the static base prompt on every model call.

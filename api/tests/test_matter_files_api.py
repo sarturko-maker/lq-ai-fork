@@ -90,6 +90,8 @@ async def _make_file(
     created_by_run_id: uuid.UUID | None = None,
     deleted: bool = False,
     created_at: datetime | None = None,
+    hash_sha256: str | None = None,
+    summary: str | None = None,
 ) -> File:
     f = File(
         owner_id=owner.id,
@@ -97,10 +99,13 @@ async def _make_file(
         filename=filename,
         mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         size_bytes=2048,
-        hash_sha256="0" * 64,
+        # Unique per file by default — real uploads differ; a test that WANTS the
+        # byte-identical case (ADR-F082 duplicate_of) passes an explicit shared hash.
+        hash_sha256=hash_sha256 or (uuid.uuid4().hex + uuid.uuid4().hex),
         storage_path=str(uuid.uuid4()),
         ingestion_status="ready",
         created_by_run_id=created_by_run_id,
+        summary=summary,
     )
     # ``now()`` is constant within a transaction, so set an explicit timestamp when a
     # test asserts the newest-first ordering (in production each file is created in its
@@ -191,6 +196,8 @@ async def test_list_files_unions_membership_and_project_id(
     # newest-first: the redlined file was created after the upload.
     assert body["files"][0]["id"] == str(redlined.id)
     # metadata only — no bytes / storage_path / hash leak in the contract.
+    # (`summary`/`summary_author`/`summary_stale` + `duplicate_of` are ADR-F082 workspace
+    # awareness; `duplicate_of` is a computed {id, filename} ref, never the raw hash.)
     assert set(body["files"][0]) == {
         "id",
         "filename",
@@ -200,7 +207,98 @@ async def test_list_files_unions_membership_and_project_id(
         "created_at",
         "updated_at",
         "created_by_run_id",
+        "summary",
+        "summary_author",
+        "summary_stale",
+        "duplicate_of",
     }
+    # Distinct bytes + never-read files: the awareness fields stay null/false.
+    assert by_name["contract.docx"]["summary"] is None
+    assert by_name["contract.docx"]["summary_author"] is None
+    assert by_name["contract.docx"]["summary_stale"] is False
+    assert by_name["contract.docx"]["duplicate_of"] is None
+
+
+async def test_list_files_surfaces_summary_and_duplicate_of(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """ADR-F082 (WORKSPACE-3): a byte-identical later copy carries ``duplicate_of``
+    pointing at the earliest file (never the raw hash); the agent-recorded summary
+    passes through; canonical/unique files carry null."""
+    project = await _make_project(db_session, db_user)
+    shared = "e" * 64
+    original = await _make_file(
+        db_session,
+        db_user,
+        filename="msa.docx",
+        hash_sha256=shared,
+        summary="Two-year MSA with Cirrus; auto-renews.",
+        created_at=datetime(2026, 6, 1, 9, 0, tzinfo=UTC),
+    )
+    copy = await _make_file(
+        db_session,
+        db_user,
+        filename="msa (2).docx",
+        hash_sha256=shared,  # identical bytes → duplicate of the earlier upload
+        created_at=datetime(2026, 6, 2, 9, 0, tzinfo=UTC),
+    )
+    await _attach(db_session, project.id, original.id)
+    await _attach(db_session, project.id, copy.id)
+    await db_session.commit()
+
+    resp = await client.get(_url(project.id), headers=_h(db_user))
+    assert resp.status_code == 200, resp.text
+    by_name = {f["filename"]: f for f in resp.json()["files"]}
+    assert by_name["msa.docx"]["summary"] == "Two-year MSA with Cirrus; auto-renews."
+    assert by_name["msa.docx"]["duplicate_of"] is None  # canonical (earliest) is never flagged
+    assert by_name["msa (2).docx"]["duplicate_of"] == {
+        "id": str(original.id),
+        "filename": "msa.docx",
+    }
+    # The dup ref carries id + filename only — the content hash never leaves the API.
+    assert "hash" not in str(by_name["msa (2).docx"]["duplicate_of"]).lower()
+
+
+async def test_put_summary_human_write_clear_and_scoping(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """ADR-F082/F042 human-owns-after: the lawyer sets/clears a file's summary; the write is
+    author-stamped 'human'; boundary rules match the agent's (422 on newline/reserved marker);
+    a foreign/absent file is a 404 (no existence leak)."""
+    project = await _make_project(db_session, db_user)
+    f = await _make_file(db_session, db_user, filename="msa.docx")
+    await _attach(db_session, project.id, f.id)
+    await db_session.commit()
+    url = f"{_url(project.id)}/{f.id}/summary"
+
+    # Write: author-stamped human, stale False, run provenance NULL.
+    resp = await client.put(url, headers=_h(db_user), json={"summary": "The lawyer's words."})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["summary"] == "The lawyer's words."
+    assert body["summary_author"] == "human"
+    assert body["summary_stale"] is False
+
+    # Boundary parity with the agent write: newline / reserved marker → 422.
+    assert (
+        await client.put(url, headers=_h(db_user), json={"summary": "two\nlines"})
+    ).status_code == 422
+    assert (
+        await client.put(url, headers=_h(db_user), json={"summary": "x (duplicate of y.docx)"})
+    ).status_code == 422
+
+    # Clear: everything resets.
+    resp = await client.put(url, headers=_h(db_user), json={"summary": None})
+    assert resp.status_code == 200
+    assert resp.json()["summary"] is None and resp.json()["summary_author"] is None
+
+    # Absent file id under a real matter → 404, never 403.
+    resp = await client.put(
+        f"{_url(project.id)}/{uuid.uuid4()}/summary",
+        headers=_h(db_user),
+        json={"summary": "x"},
+    )
+    assert resp.status_code == 404
 
 
 async def test_list_files_excludes_soft_deleted_and_other_matters(

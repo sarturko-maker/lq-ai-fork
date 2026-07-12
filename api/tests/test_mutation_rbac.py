@@ -155,8 +155,11 @@ def test_mutating_route_entry_count_pinned() -> None:
     automatically, no allowlist entry): 141 → 142.
     B-7a (ADR-F067 D4) adds 1 mutating route (POST /profiles/{name}/apply,
     AdminUser-gated — passes the drift guard automatically, no allowlist entry):
-    142 → 143."""
-    assert len(_mutating_routes()) == 143
+    142 → 143.
+    WORKSPACE-3 (ADR-F082) adds 1 mutating route (PUT
+    /matters/{project_id}/files/{file_id}/summary, MutatingUser-gated — the human
+    half of auto-write-then-correct): 143 → 144."""
+    assert len(_mutating_routes()) == 144
 
 
 @pytest.mark.unit
@@ -175,13 +178,15 @@ def test_api_v1_path_count_pinned() -> None:
     PUBLISH (ADR-F067 fast-path) adds 1 path (POST
     /user-skills/{skill_id}/publish): 192 → 193.
     B-7a (ADR-F067 D4) adds 3 paths (GET /profiles, GET /profiles/{name},
-    POST /profiles/{name}/apply): 193 → 196."""
+    POST /profiles/{name}/apply): 193 → 196.
+    WORKSPACE-3 (ADR-F082) adds 1 path (PUT
+    /matters/{project_id}/files/{file_id}/summary): 196 → 197."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 196
+    assert len(paths) == 197
 
 
 @pytest.mark.unit
@@ -194,13 +199,15 @@ def test_swapped_routers_expose_no_ungated_write() -> None:
     is AdminUser-gated, so this get_mutating_user count is UNCHANGED at 70.
     B-4 (ADR-F067 D2/D3) adds POST /playbooks/{playbook_id}/propose — the
     author-side org-playbook propose (MutatingUser): 70 → 71 (approve/reject/
-    revoke are AdminUser, so they do not add to this count)."""
+    revoke are AdminUser, so they do not add to this count).
+    WORKSPACE-3 (ADR-F082) adds PUT /matters/{project_id}/files/{file_id}/summary —
+    the lawyer's summary correct/clear (MutatingUser): 71 → 72."""
     gated = sum(
         1
         for _m, _p, route in _mutating_routes()
         if "get_mutating_user" in _auth_callables(route.dependant)
     )
-    assert gated == 71
+    assert gated == 72
 
 
 # ---------------------------------------------------------------------------
