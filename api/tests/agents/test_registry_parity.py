@@ -50,6 +50,9 @@ REDLINING_NAMES = [
     "extract_counterparty_position",
     "respond_to_counterparty",
     "reconcile_positions",
+    # ADV-1 (ADR-F084): appended by _build_redlining's second builder — deliberate
+    # extension of the frozen 2026-07-04 literal, not drift.
+    "adversarial_review",
 ]
 TABULAR_NAMES = [
     "start_tabular_review",

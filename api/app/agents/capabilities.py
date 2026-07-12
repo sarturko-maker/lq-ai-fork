@@ -40,6 +40,7 @@ from typing import Any, Protocol, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agents.adversarial_review import build_adversarial_review_tools
 from app.agents.assessment_tools import ASSESSMENT_TOOL_NAMES, build_assessment_tools
 from app.agents.budget import BudgetEnvelope
 from app.agents.commercial_tools import COMMERCIAL_TOOL_NAMES, build_commercial_tools
@@ -202,12 +203,18 @@ def _build_redlining(
     # engine is built per-run from the injected provider (no startup singleton). The
     # deal-change ledger (created by the loop from ``ledger_factory``) drives the inline
     # verdict chips. The cast is safe: the loop always passes a ``DealChangeLedger`` here.
+    # ADV-1 (ADR-F084): the hostile-reader tool rides the same group — one purpose-specific
+    # gateway pass, its own narrow builder (the DI seam defaults to the real gateway client).
     return build_commercial_tools(
         ctx.session_factory,
         run_id=ctx.run_id,
         binding=ctx.binding,
         redline_service=ctx.redline_service_provider(),
         change_ledger=cast("DealChangeLedger | None", ledger),
+    ) + build_adversarial_review_tools(
+        ctx.session_factory,
+        run_id=ctx.run_id,
+        binding=ctx.binding,
     )
 
 
@@ -381,6 +388,8 @@ RECOMMENDED_LIBRARY_SETS: dict[str, dict[str, tuple[str, ...]]] = {
             "negotiation-review",
             "deal-review",
             "tabular-review",
+            # ADV-1 (ADR-F084): when to OFFER the hostile-reader pass + how to weigh it.
+            "adversarial-review",
         ),
     },
     "privacy": {

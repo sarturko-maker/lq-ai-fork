@@ -686,6 +686,8 @@ _EXPECTED_GROUP_TOOL_NAMES: dict[str, frozenset[str]] = {
             "extract_counterparty_position",
             "respond_to_counterparty",
             "reconcile_positions",
+            # ADV-1 (ADR-F084): the agent-offered hostile-reader pass.
+            "adversarial_review",
         }
     ),
     "tabular": frozenset(

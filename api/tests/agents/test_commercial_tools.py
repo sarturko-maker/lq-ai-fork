@@ -232,6 +232,10 @@ def test_build_commercial_tools_grants_redline_tools() -> None:
         "reconcile_positions",
     ]
     assert sorted(COMMERCIAL_TOOL_NAMES) == [
+        # adversarial_review rides this grant set (ADR-F084) but is built by its own
+        # builder (build_adversarial_review_tools) — build_commercial_tools' closures
+        # above stay the five redline/negotiation tools.
+        "adversarial_review",
         "apply_redline",
         "extract_counterparty_position",
         "preview_redline",

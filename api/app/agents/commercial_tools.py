@@ -92,6 +92,10 @@ COMMERCIAL_TOOL_NAMES = frozenset(
         # C7b (ADR-F034) — post-fan-out reconciliation: collapse the drafters'/reviewer's
         # proposed positions into one position per head before a work product is emitted.
         "reconcile_positions",
+        # ADV-1 (ADR-F084) — the agent-OFFERED hostile-reader pass over a near-final work
+        # product. Rides this grant set so it is hitl-eligible (the offer card) wherever
+        # redlining binds; built by its own builder (app/agents/adversarial_review.py).
+        "adversarial_review",
     }
 )
 
