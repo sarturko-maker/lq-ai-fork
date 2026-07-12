@@ -54,6 +54,28 @@ model call, a byproduct of the agent's own gatewayed read. A document nobody has
 unsummarised but remains fully exact-dup-detectable by hash. No eager/at-ingest summariser (the
 ingest workers carry no gateway LLM).
 
+## Review hardening (adversarial review of PR #271, 2026-07-12 — 18 confirmed findings, all
+addressed)
+
+- **Resolver parity:** `resolve_matter_file_by_name` now uses the READ path's exact rule
+  (case-insensitive, readable-copy-first, `coalesce(attached_at, created_at)` recency) so a summary
+  can never bind to a same-named file the agent didn't read.
+- **Forgery rejection at the boundary:** a summary may not contain newlines/control characters
+  (line/fence forging) or the literal `"(duplicate of"` (spoofing the code-derived byte-identity
+  marker) — rejected with fix-and-retry, applied to BOTH the agent tool and the human endpoint.
+  Residual (accepted, pre-existing class): file NAMES are user-supplied and can carry misleading
+  words — the fence now says so explicitly and scopes the marker claim to its rendered position.
+- **The human half now exists:** `summary_author` (`'agent'`/`'human'`, CHECK) + `PUT
+  /matters/{project_id}/files/{file_id}/summary` (MutatingUser — viewer excluded, owner-scoped 404,
+  null clears). A human-set summary is a pin: the agent tool refuses to overwrite it. The Documents-
+  panel *edit affordance* is backlogged (the API control exists; MILESTONES § Backlog).
+- **Honesty:** stale summaries (bytes mutated after the summary — editor save/redline convergence)
+  carry an explicit "may be stale" suffix everywhere (`summary_stale` on the API); the injected tier
+  renders F066 provenance for work products/snapshots instead of "not yet read"; the fence states
+  the check is byte-identity ONLY (absence of a marker proves nothing about near-identical
+  revisions); every rendered line is clamped (unbounded filenames).
+- **One query per surface:** dup grouping is a pure function over rows the surface already holds.
+
 ## Consequences
 
 - Exact-duplicate awareness is deterministic and cheap; **near-duplicate** ("same contract, lightly

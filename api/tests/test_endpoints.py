@@ -148,6 +148,7 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/matters/{project_id}/roster/{entry_id}/retire"),
     # C7a (fork) — matter-files read surface (redline-download, ADR-F046).
     ("GET", "/api/v1/matters/{project_id}/files"),
+    ("PUT", "/api/v1/matters/{project_id}/files/{file_id}/summary"),
     # B5 + C3 — backend chats + messages with persistence; SSE streaming.
     ("POST", "/api/v1/chats"),
     ("GET", "/api/v1/chats"),

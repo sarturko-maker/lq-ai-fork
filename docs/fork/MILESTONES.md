@@ -889,6 +889,12 @@ synthetic pack behind a CLI; ADR-F001 forecloses "under the LegalQuants banner")
   bump never triggers — the source is always the exact-named counterparty doc); WOPI's first-save
   snapshots likewise all reuse "(agent draft).docx". Route both through the matter-unique naming
   helper `_unique_matter_filename` when next touching those paths.
+- **SUMMARY-EDIT affordance (ADR-F082 review, 2026-07-12):** the human summary control exists as
+  `PUT /matters/{id}/files/{file_id}/summary` (correct/clear, author-stamped, pins win) but the
+  Documents panel has no edit affordance yet — add an inline edit/clear on the summary subtitle.
+- **NEAR-DUP detection (ADR-F082 non-goal, 2026-07-12):** exact-bytes dedup shipped; "same contract,
+  lightly edited" clustering over the existing embedding substrate is the natural next slice — any
+  agent near-dup hint stays untrusted prose, fenced, never a code assertion.
 
 ### Upstream awareness review (2026-07-10) — see `docs/fork/plans/UPSTREAM-REVIEW-2026-07.md`
 

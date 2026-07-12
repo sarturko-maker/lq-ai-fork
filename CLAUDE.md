@@ -123,9 +123,11 @@ across the practice group"*).
 | **Matter Corrections** | Matter | lawyer-pinned authoritative facts; human-only writes; pins win. | `matter_memory_entries` (ADR-F042) |
 | **Matter Facts** | Matter | structured, time-stamped record of what's true and when; agent-maintained. | `matter_memory_entries` (ADR-F042/F043) |
 | **Matter Roster** | Matter | who's who + sides; agent infers, lawyer confirms. | `matter_participants` (ADR-F048) |
+| **Matter Documents** | Matter | what's in the workspace: each file with the agent's recorded summary and a code-computed exact-duplicate marker; agent describes, lawyer corrects, the hash never lies. | `files.summary*` + `hash_sha256` (ADR-F082) |
 | **Conversation Memory** | Conversation | what's been said in this chat + a running summary so long chats keep the thread. | checkpointer + Store `/conversation_history/` |
 
-The four read-only DATA tiers (House Brief, Matter File, Matter Corrections, Matter Roster) are injected
+The read-only DATA tiers (House Brief, Practice Playbook, Matter File, Matter Corrections, Matter
+Roster, Matter Documents) are injected
 into the system prompt by `TierMemoryMiddleware` (F2 N1, ADR-F049), not baked into the static prompt;
 SQL stays their source of truth. The Store/`MatterMemoryEntry` split is deliberate (N1 did NOT converge
 the Matter File onto the Store — that is its own future ADR'd slice).

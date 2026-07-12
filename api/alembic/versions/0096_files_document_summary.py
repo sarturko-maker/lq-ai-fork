@@ -11,6 +11,10 @@ and the lawyer, in the Documents panel — recognise a document by content, not 
 * ``summary_updated_at`` — TIMESTAMPTZ, when the summary was last written.
 * ``summary_run_id`` — the agent run that last wrote the summary; ``SET NULL`` on run delete keeps
   the summary (it outlives the run record, exactly like ``created_by_run_id``).
+* ``summary_author`` — ``'agent'`` or ``'human'`` (CHECK-pinned), NULL when no summary. The
+  auto-write-then-correct control (ADR-F042): the supervising lawyer's PUT sets ``'human'`` and the
+  agent tool REFUSES to overwrite a human-authored summary (pins win) — a run-delete SET NULL on
+  ``summary_run_id`` can therefore never disguise an agent summary as a human one.
 
 Exact-duplicate detection needs NO new column — it is computed at read time from the existing
 ``files.hash_sha256`` (grouped within a matter, owner-scoped), so a stored dup edge can never go
@@ -35,18 +39,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # WORKSPACE-1 (ADR-F082): per-document agent summary + when/which-run wrote it.
+    # WORKSPACE-1 (ADR-F082): per-document agent summary + who/when/which-run wrote it.
     op.execute("ALTER TABLE files ADD COLUMN summary TEXT")
     op.execute("ALTER TABLE files ADD COLUMN summary_updated_at TIMESTAMPTZ")
     op.execute("ALTER TABLE files ADD COLUMN summary_run_id UUID")
+    op.execute("ALTER TABLE files ADD COLUMN summary_author TEXT")
     op.execute(
         "ALTER TABLE files ADD CONSTRAINT fk_files_summary_run_id "
         "FOREIGN KEY (summary_run_id) REFERENCES agent_runs (id) ON DELETE SET NULL"
     )
+    op.execute(
+        "ALTER TABLE files ADD CONSTRAINT chk_files_summary_author "
+        "CHECK (summary_author IN ('agent', 'human'))"
+    )
 
 
 def downgrade() -> None:
+    op.execute("ALTER TABLE files DROP CONSTRAINT IF EXISTS chk_files_summary_author")
     op.execute("ALTER TABLE files DROP CONSTRAINT IF EXISTS fk_files_summary_run_id")
+    op.execute("ALTER TABLE files DROP COLUMN IF EXISTS summary_author")
     op.execute("ALTER TABLE files DROP COLUMN IF EXISTS summary_run_id")
     op.execute("ALTER TABLE files DROP COLUMN IF EXISTS summary_updated_at")
     op.execute("ALTER TABLE files DROP COLUMN IF EXISTS summary")

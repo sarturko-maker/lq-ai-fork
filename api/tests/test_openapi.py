@@ -88,6 +88,7 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/matters/{project_id}/roster/{entry_id}/retire",
         # C7a (fork) — matter-files read surface (redline-download, ADR-F046).
         "/api/v1/matters/{project_id}/files",
+        "/api/v1/matters/{project_id}/files/{file_id}/summary",
         # ADR-F054 (fork) — per-matter capability panel (toggles).
         "/api/v1/matters/{project_id}/capabilities",
         # saved prompts
@@ -448,7 +449,9 @@ async def test_openapi_paths_match_sketch() -> None:
     # +1: PUBLISH (ADR-F067 fast-path) — POST /user-skills/{skill_id}/publish (192 -> 193).
     # +3: B-7a (ADR-F067 D4) — profile manifests: GET /profiles, GET /profiles/{name},
     #   POST /profiles/{name}/apply (193 -> 196).
-    assert len(actual) == 196  # +3: ADR-F054 capability panel (GET/PUT
+    # +1: WORKSPACE-3 (ADR-F082) — PUT /matters/{project_id}/files/{file_id}/summary,
+    #   the human half of auto-write-then-correct (196 -> 197).
+    assert len(actual) == 197  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

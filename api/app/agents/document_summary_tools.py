@@ -33,10 +33,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.tools import (
     MatterBinding,
+    _DupRow,
     _matter_files_query,
-    duplicate_of_map,
+    _provenance,
+    duplicate_groups_from_rows,
     resolve_matter_file_by_name,
+    summary_with_staleness,
 )
+from app.models.document import Document
 from app.models.file import File
 from app.schemas.document_summary import RecordDocumentSummaryInput
 
@@ -74,15 +78,17 @@ def build_document_summary_tools(
     )
 
     async def record_document_summary(document_name: str, summary: str) -> str:
-        """Record a short summary of a document you have READ, against its name.
+        """Record a one-line summary of a document AFTER reading it for the first time.
 
-        Call this once you have read a document and understood what it is: a one or two sentence
-        description of the document (what kind of document it is, the parties, its purpose, anything
-        notable), stored against the filename. It helps you and the supervising lawyer recognise the
-        document by content later, and lets a future run start from what is already known without
-        re-reading. Keep it short and factual, well under the length limit; recording it again
-        overwrites the previous summary. This is a description of the document — obligations,
-        dates and decisions belong in the matter memory, not here.
+        A single plain sentence or two: what kind of document it is, the parties, its purpose,
+        anything notable — stored against the filename so you and the supervising lawyer
+        recognise the document by content later, and a future run starts from what is already
+        known without re-reading. SKIP this when the document listing already shows an accurate
+        summary for the file — do not re-record what has not changed. Re-record only when your
+        understanding materially changed (you read it more deeply, or the document itself
+        changed). If the supervising lawyer has set a file's summary themselves, it is theirs —
+        your write will be refused. This is a description of the document — obligations, dates
+        and decisions belong in the matter memory, not here.
 
         ``document_name`` is the filename exactly as shown by search_documents.
         """
@@ -138,9 +144,18 @@ async def _record_document_summary(
     if file is None:
         return "That document is no longer available; nothing was recorded."
 
+    # ADR-F042 pins win: a summary the supervising lawyer set themselves is theirs — the
+    # agent's auto-write may never overwrite it (structural, not prompt-enforced).
+    if file.summary_author == "human":
+        return (
+            f'The supervising lawyer has set the summary for "{file.filename}" themselves; '
+            "it was not changed. Work with their description."
+        )
+
     file.summary = proposal.summary
     file.summary_updated_at = datetime.now(tz=UTC)
     file.summary_run_id = run_id
+    file.summary_author = "agent"
     await db.flush()
 
     return (
@@ -161,36 +176,79 @@ def _rejection_text(exc: ValidationError) -> str:
     )
 
 
+# Per-line clamp: filenames have no length cap at any boundary, so a single pathological
+# name could otherwise ship an uncapped first line into every run's prompt (review finding,
+# PR #271). Summary (≤600) + a real filename fit comfortably; the ellipsis is honest.
+_MATTER_DOCUMENTS_LINE_MAX_CHARS = 900
+
+
 async def load_matter_documents_block(db: AsyncSession, binding: MatterBinding) -> str | None:
     """Render the bounded "Documents in this matter" tier body (WORKSPACE-2), or ``None``.
 
-    One line per live matter file — filename, the agent-recorded summary (or an honest
-    ``not yet read``), and the code-computed exact-duplicate marker — most recently touched
-    first (``coalesce(updated_at, created_at)``, the F066 recency convention). Bounded by
-    :data:`MATTER_DOCUMENTS_INJECT_LIMIT` / :data:`MATTER_DOCUMENTS_INJECT_MAX_CHARS`;
-    truncation is VISIBLE (a ``+K more`` tail pointing at search_documents), never silent —
-    a capped list that reads as complete would mislead the agent about the workspace.
-    ``None`` for a matter with no files (the tier degrades to nothing; the composed prompt
-    is byte-identical to the pre-slice text).
+    One line per live matter file — ``filename — (duplicate of X) — description`` (the same
+    field order the inventory renders, pinned by test) — most recently touched first
+    (``coalesce(updated_at, created_at)``, the F066 recency convention). The description is the
+    agent-recorded summary (with an honest staleness suffix when the bytes changed after it was
+    written); for a file with NO summary it is the F066 provenance for non-readable rows (an
+    agent work product / editor snapshot / failed ingest is NOT "not yet read" — telling the
+    model its own output is an unread source misleads it), and ``not yet read`` only for a
+    genuinely readable-but-unread document. Bounded by :data:`MATTER_DOCUMENTS_INJECT_LIMIT` /
+    :data:`MATTER_DOCUMENTS_INJECT_MAX_CHARS` with a per-line clamp; truncation is VISIBLE
+    (a ``+K more`` tail pointing at search_documents), never silent. ``None`` for a matter with
+    no files (the tier degrades to nothing; the composed prompt is byte-identical).
     """
     rows = (
         await db.execute(
             _matter_files_query(
-                binding, File.id, File.filename, File.summary, File.created_at, File.updated_at
+                binding,
+                File.id.label("file_id"),
+                File.filename,
+                File.summary,
+                File.summary_updated_at,
+                File.created_at,
+                File.updated_at,
+                File.hash_sha256,
+                File.ingestion_status,
+                File.parent_file_id,
+                File.is_snapshot,
+                File.created_by_run_id,
+                Document.id,
             ).order_by(func.coalesce(File.updated_at, File.created_at).desc(), File.id.desc())
         )
     ).all()
     if not rows:
         return None
-    dup = await duplicate_of_map(db, binding)
+    dup = duplicate_groups_from_rows(
+        [_DupRow(r.file_id, r.filename, r.hash_sha256, r.created_at) for r in rows]
+    )
+    # Provenance labels for non-ingested rows (F066 posture, mirrors _inventory): resolve
+    # parent filenames in ONE batched matter-scoped query; a vanished parent degrades cleanly.
+    parent_ids = {r.parent_file_id for r in rows if r.id is None and r.parent_file_id is not None}
+    parent_names: dict[uuid.UUID, str] = {}
+    if parent_ids:
+        parent_rows = (
+            await db.execute(
+                _matter_files_query(binding, File.id, File.filename).where(File.id.in_(parent_ids))
+            )
+        ).all()
+        parent_names = {r.id: r.filename for r in parent_rows}
+
     lines: list[str] = []
     total = 0
     for row in rows:
         if len(lines) >= MATTER_DOCUMENTS_INJECT_LIMIT:
             break
-        summary = (row.summary or "").strip() or "not yet read"
-        marker = f" — (duplicate of {dup[row.id][1]})" if row.id in dup else ""
-        line = f"- {row.filename} — {summary}{marker}"
+        if row.summary:
+            description = summary_with_staleness(row)
+        elif row.id is None:
+            # No summary and not readable: honest provenance, never "not yet read".
+            description = _provenance(row, parent_names)
+        else:
+            description = "not yet read"
+        marker = f" — (duplicate of {dup[row.file_id][1]})" if row.file_id in dup else ""
+        line = f"- {row.filename}{marker} — {description}"
+        if len(line) > _MATTER_DOCUMENTS_LINE_MAX_CHARS:
+            line = line[: _MATTER_DOCUMENTS_LINE_MAX_CHARS - 1] + "…"
         if lines and total + len(line) + 1 > MATTER_DOCUMENTS_INJECT_MAX_CHARS:
             break
         lines.append(line)

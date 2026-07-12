@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -562,25 +562,19 @@ def _matter_files_query(binding: MatterBinding, *columns: Any) -> Select[Any]:
     )
 
 
-async def duplicate_of_map(
-    db: AsyncSession, binding: MatterBinding
-) -> dict[uuid.UUID, tuple[uuid.UUID, str]]:
-    """Map each exact-duplicate matter file → (canonical file id, canonical filename).
+def duplicate_groups_from_rows(rows: Sequence[Any]) -> dict[uuid.UUID, tuple[uuid.UUID, str]]:
+    """Pure grouping: rows carrying ``id``/``filename``/``hash_sha256``/``created_at`` →
+    map of each exact-duplicate file → (canonical file id, canonical filename).
 
     Duplicates are IDENTICAL bytes, detected deterministically from ``files.hash_sha256``
     (WORKSPACE-1, ADR-F082) — never agent-asserted, so a hostile document cannot forge a
-    "this is a duplicate" claim. Scope is this matter, owner-re-asserted and soft-delete-safe
-    (``_matter_files_query``), so an identical hash held in another matter or tenant is never
-    revealed (no existence leak — the 404 discipline). The canonical file of a duplicate set is
-    the earliest-created one (id string as a stable tiebreaker); every other file in the set maps
-    to it. Files with a unique hash are absent from the map.
+    "this is a duplicate" claim. The canonical file of a duplicate set is the earliest-created
+    one (id string as a stable tiebreaker); every other file in the set maps to it. Files with a
+    unique hash are absent from the map. Pure so every surface that already holds the matter's
+    row set (inventory, tier block, files endpoint) groups WITHOUT a second query; scoping is the
+    CALLER's query (matter+owner, soft-delete-safe — the no-existence-leak boundary).
     """
-    rows = (
-        await db.execute(
-            _matter_files_query(binding, File.id, File.filename, File.hash_sha256, File.created_at)
-        )
-    ).all()
-    by_hash: dict[str, list[Row[Any]]] = {}
+    by_hash: dict[str, list[Any]] = {}
     for row in rows:
         by_hash.setdefault(row.hash_sha256, []).append(row)
     dup: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
@@ -594,20 +588,42 @@ async def duplicate_of_map(
     return dup
 
 
+async def duplicate_of_map(
+    db: AsyncSession, binding: MatterBinding
+) -> dict[uuid.UUID, tuple[uuid.UUID, str]]:
+    """Query-then-group convenience over :func:`duplicate_groups_from_rows` for callers that do
+    NOT already hold the matter's file rows. Scope is this matter, owner-re-asserted and
+    soft-delete-safe (``_matter_files_query``), so an identical hash held in another matter or
+    tenant is never revealed (no existence leak — the 404 discipline)."""
+    rows = (
+        await db.execute(
+            _matter_files_query(binding, File.id, File.filename, File.hash_sha256, File.created_at)
+        )
+    ).all()
+    return duplicate_groups_from_rows(rows)
+
+
 async def resolve_matter_file_by_name(
     db: AsyncSession, binding: MatterBinding, name: str
 ) -> Row[Any] | None:
-    """Resolve a matter file by exact filename (owner+matter scoped, soft-delete-safe).
+    """Resolve a matter file by filename with the SAME rule the read path uses.
 
-    Returns the ``(id, filename)`` row (most-recent first on a name collision), or ``None`` if no
-    live matter file has that name. Parameterised equality — the name never builds SQL. Used by the
-    ``record_document_summary`` write tool (WORKSPACE-1) to bind a summary to the named file.
+    Mirrors ``_read`` exactly (review finding, PR #271): case-INSENSITIVE match, prefer a
+    READABLE copy (ingested ``Document``) over an unreadable one on a name collision, then the
+    most recently added — attach time when a join row exists, else upload time. Anything looser
+    binds a summary to a file the agent never read (the resolver picking a newer un-ingested
+    re-upload while ``read_document`` served the older ingested copy). Owner+matter scoped,
+    soft-delete-safe; parameterised — the name never builds SQL. ``None`` when no live matter
+    file has that name. Used by ``record_document_summary`` (WORKSPACE-1).
     """
     rows = (
         await db.execute(
             _matter_files_query(binding, File.id, File.filename)
-            .where(File.filename == name)
-            .order_by(File.created_at.desc(), File.id.desc())
+            .where(func.lower(File.filename) == name.strip().lower())
+            .order_by(
+                Document.id.is_(None),
+                func.coalesce(ProjectFile.attached_at, File.created_at).desc(),
+            )
         )
     ).all()
     return rows[0] if rows else None
@@ -804,6 +820,10 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
         File.is_snapshot,
         File.created_by_run_id,
         File.summary,
+        File.summary_updated_at,
+        File.updated_at,
+        File.hash_sha256,
+        File.created_at,
         Document.id,
         Document.page_count,
         Document.character_count,
@@ -813,9 +833,12 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
         return f"{header}\n(no documents attached — answer from the prompt alone, honestly)"
 
     # WORKSPACE-1 (ADR-F082): exact-duplicate awareness, computed from the content hash
-    # (never agent-asserted). One matter-scoped query; the marker below tells the agent when
-    # two files are the same bytes so it doesn't treat a re-upload as a second document.
-    dup_map = await duplicate_of_map(db, binding)
+    # (never agent-asserted). Grouped from the rows already fetched — no second query. The
+    # marker tells the agent when two files are the same bytes so it doesn't treat a
+    # re-upload as a second document.
+    dup_map = duplicate_groups_from_rows(
+        [_DupRow(r.file_id, r.filename, r.hash_sha256, r.created_at) for r in rows]
+    )
 
     # Provenance labels for non-ingested work products (ADR-F066): resolve the
     # parent filenames in ONE batched matter-scoped query (never per row). A
@@ -835,8 +858,15 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
     for row in rows:
         dup = dup_map.get(row.file_id)
         dup_marker = f" — (duplicate of {dup[1]})" if dup is not None else ""
+        # WORKSPACE-1 (ADR-F082): the agent-recorded summary — shown for EVERY row that has
+        # one (a summarised work product is still a described document), with an honest
+        # staleness marker when the bytes were mutated after the summary was written
+        # (editor save-back / redline convergence, ADR-F047/F081).
+        summary_marker = f" — {summary_with_staleness(row)}" if row.summary else ""
         if row.id is None:
-            lines.append(f"- {row.filename} {_provenance(row, parent_names)}{dup_marker}")
+            lines.append(
+                f"- {row.filename} {_provenance(row, parent_names)}{dup_marker}{summary_marker}"
+            )
             continue
         bits: list[str] = []
         if row.page_count:
@@ -844,11 +874,42 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
         if row.character_count:
             bits.append(f"~{_read_tokens(row.character_count):,} tokens to read")
         suffix = f" ({'; '.join(bits)})" if bits else ""
-        # WORKSPACE-1 (ADR-F082): show the agent-recorded summary so the agent recognises a
-        # document by content, not just its filename. Absent until the agent reads + summarises.
-        summary_marker = f" — {row.summary.strip()}" if row.summary else ""
         lines.append(f"- {row.filename}{suffix}{dup_marker}{summary_marker}")
     return f"{header}\n" + "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class _DupRow:
+    """The minimal row shape :func:`duplicate_groups_from_rows` groups on."""
+
+    id: uuid.UUID
+    filename: str
+    hash_sha256: str
+    created_at: Any
+
+
+def summary_with_staleness(row: Any) -> str:
+    """The recorded summary, suffixed honestly when the FILE changed after it was written.
+
+    ``updated_at`` is set only by the in-place byte mutators (editor save-back, ADR-F047;
+    redline convergence, ADR-F081) — when it postdates ``summary_updated_at`` the description
+    no longer describes the current bytes, and presenting it bare would mislead both the agent
+    and the lawyer (review finding, PR #271). Shared by the inventory, the WS-2 tier block and
+    the files endpoint so the staleness rule lives in one place.
+    """
+    summary = (row.summary or "").strip()
+    if is_summary_stale(row):
+        return f"{summary} (summary may be stale — the document changed after it was written)"
+    return summary
+
+
+def is_summary_stale(row: Any) -> bool:
+    """True when the file's bytes were mutated after the summary was recorded."""
+    return bool(
+        row.summary
+        and row.updated_at is not None
+        and (row.summary_updated_at is None or row.updated_at > row.summary_updated_at)
+    )
 
 
 def _provenance(row: Row[Any], parent_names: dict[uuid.UUID, str]) -> str:

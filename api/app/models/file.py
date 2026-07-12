@@ -115,6 +115,12 @@ class File(Base):
         ForeignKey("agent_runs.id", ondelete="SET NULL", name="fk_files_summary_run_id"),
         nullable=True,
     )
+    # Who wrote the summary — 'agent' | 'human' (CHECK, mig 0096), NULL when no summary.
+    # The auto-write-then-correct control (ADR-F042): the lawyer's PUT sets 'human' and the
+    # agent tool refuses to overwrite a human-authored summary (pins win). A dedicated column
+    # (not summary_run_id IS NULL) so a run-delete SET NULL can never disguise an agent
+    # summary as a human one.
+    summary_author: Mapped[str | None] = mapped_column(String, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
