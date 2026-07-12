@@ -892,6 +892,11 @@ synthetic pack behind a CLI; ADR-F001 forecloses "under the LegalQuants banner")
 - **SUMMARY-EDIT affordance (ADR-F082 review, 2026-07-12):** the human summary control exists as
   `PUT /matters/{id}/files/{file_id}/summary` (correct/clear, author-stamped, pins win) but the
   Documents panel has no edit affordance yet — add an inline edit/clear on the summary subtitle.
+- **GATEWAY-JSON helper (ADR-F084 review deferral, 2026-07-12):** `_response_text` /
+  `_was_truncated` / `_parse_*_result` are now duplicated between `matter_consolidation.py` and
+  `adversarial_review.py` (both case-sensitive on the ``` fence strip). Extract a shared
+  `app/agents/gateway_json.py` when the NEXT purpose-specific pass lands (WHY-1/EXPO-1) — fix the
+  fence-strip case-sensitivity there once.
 - **NEAR-DUP detection (ADR-F082 non-goal, 2026-07-12):** exact-bytes dedup shipped; "same contract,
   lightly edited" clustering over the existing embedding substrate is the natural next slice — any
   agent near-dup hint stays untrusted prose, fenced, never a code assertion.

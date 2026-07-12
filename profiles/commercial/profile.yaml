@@ -17,6 +17,7 @@ bindings:
   - negotiation-review
   - deal-review
   - tabular-review
+  - adversarial-review
   tool_groups:
   - redlining
   - tabular
