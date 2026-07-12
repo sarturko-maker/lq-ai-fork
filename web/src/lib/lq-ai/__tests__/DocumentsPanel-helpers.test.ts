@@ -9,7 +9,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	duplicateBadge,
 	fileOriginBadge,
+	fileSummary,
 	formatBytes,
 	isUpdatingLive
 } from '../components/matter/DocumentsPanel.svelte';
@@ -46,6 +48,31 @@ describe('fileOriginBadge', () => {
 
 	it('returns null for a plain human upload (no run provenance)', () => {
 		expect(fileOriginBadge({ filename: 'Cirrus MSA.docx', created_by_run_id: null })).toBeNull();
+	});
+});
+
+describe('duplicateBadge (ADR-F082)', () => {
+	it('labels a byte-identical copy with the earlier filename', () => {
+		expect(duplicateBadge({ duplicate_of: { id: 'f1', filename: 'Cirrus MSA.docx' } })).toBe(
+			'duplicate of Cirrus MSA.docx'
+		);
+	});
+
+	it('returns null for a canonical/unique file', () => {
+		expect(duplicateBadge({ duplicate_of: null })).toBeNull();
+	});
+});
+
+describe('fileSummary (ADR-F082)', () => {
+	it('passes the agent-recorded summary through', () => {
+		expect(fileSummary({ summary: 'A two-year MSA with Cirrus; auto-renews.' })).toBe(
+			'A two-year MSA with Cirrus; auto-renews.'
+		);
+	});
+
+	it('collapses null and blank summaries to null (no empty subtitle line)', () => {
+		expect(fileSummary({ summary: null })).toBeNull();
+		expect(fileSummary({ summary: '   ' })).toBeNull();
 	});
 });
 

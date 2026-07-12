@@ -30,6 +30,24 @@
 		return null;
 	}
 
+	/**
+	 * Warning-chip label when the file is a byte-identical copy of an earlier
+	 * file in this matter (ADR-F082 workspace awareness), or null when unique.
+	 * The filename is untrusted — rendered as plain text, never `{@html}`.
+	 */
+	export function duplicateBadge(file: Pick<MatterFile, 'duplicate_of'>): string | null {
+		return file.duplicate_of ? `duplicate of ${file.duplicate_of.filename}` : null;
+	}
+
+	/**
+	 * The agent-recorded description shown as the row's muted subtitle (ADR-F082),
+	 * or null when the agent hasn't read the file yet. Blank/whitespace summaries
+	 * collapse to null so an empty line never renders.
+	 */
+	export function fileSummary(file: Pick<MatterFile, 'summary'>): string | null {
+		return file.summary?.trim() || null;
+	}
+
 	/** True while a run is mid-flight — the live "Updating…" indicator + poll driver. */
 	export function isUpdatingLive(runActive: boolean): boolean {
 		return runActive;
@@ -237,6 +255,8 @@
 				<ul class="space-y-2" data-testid="lq-documents-list">
 					{#each files as f (f.id)}
 						{@const badge = fileOriginBadge(f)}
+						{@const dupBadge = duplicateBadge(f)}
+						{@const summary = fileSummary(f)}
 						<li
 							class="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3"
 							data-testid="lq-documents-row"
@@ -253,7 +273,29 @@
 												class="shrink-0">{badge}</Badge
 											>
 										{/if}
+										{#if dupBadge}
+											<!-- byte-identical copy (ADR-F082) — amber warning idiom (Alert / ProvenancePill);
+											     the duplicated filename is plain text, never {@html} -->
+											<Badge
+												variant="outline"
+												class="max-w-48 shrink-0 border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+												title={dupBadge}
+												data-testid="lq-documents-duplicate"
+											>
+												<span class="truncate">{dupBadge}</span>
+											</Badge>
+										{/if}
 									</div>
+									{#if summary}
+										<!-- agent-recorded description (ADR-F082) — plain text, never {@html} -->
+										<p
+											class="mt-0.5 truncate text-xs text-muted-foreground"
+											title={summary}
+											data-testid="lq-documents-summary"
+										>
+											{summary}
+										</p>
+									{/if}
 									<p class="mt-0.5 text-xs text-muted-foreground tabular-nums">
 										<!-- updated_at set = bytes mutated in place (ADR-F081) — show the freshest instant -->
 										{formatBytes(f.size_bytes)} · {timeAgo(f.updated_at ?? f.created_at, nowMs)}

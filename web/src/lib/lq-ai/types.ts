@@ -1474,6 +1474,7 @@ export interface MatterEntryRetired {
  * Mirrors the backend `MatterFileRead`. `created_by_run_id` is the work-product
  * provenance: non-null for an agent output (e.g. a redline), null for a human upload;
  * the run timeline filters on it to surface the download inline under the run.
+ * `summary` and `duplicate_of` are the workspace-awareness fields (ADR-F082).
  */
 export interface MatterFile {
 	id: string;
@@ -1485,6 +1486,10 @@ export interface MatterFile {
 	/** Non-null once the bytes were mutated in place (ADR-F081 living redline). */
 	updated_at: string | null;
 	created_by_run_id: string | null;
+	/** Agent-recorded one/two-sentence description; null until the agent has read it (ADR-F082). */
+	summary: string | null;
+	/** The earlier byte-identical file this one copies (server-computed), or null (ADR-F082). */
+	duplicate_of: { id: string; filename: string } | null;
 }
 
 /** The matter's files, newest-first (backend `MatterFilesRead`). */

@@ -44,6 +44,7 @@ from app.agents.assessment_tools import ASSESSMENT_TOOL_NAMES, build_assessment_
 from app.agents.budget import BudgetEnvelope
 from app.agents.commercial_tools import COMMERCIAL_TOOL_NAMES, build_commercial_tools
 from app.agents.deal_changes import DealChangeLedger
+from app.agents.document_summary_tools import DOCUMENT_SUMMARY_TOOL_NAMES
 from app.agents.knowledge_tools import KNOWLEDGE_TOOL_NAMES, build_knowledge_tools
 from app.agents.live_changes import ChangeLedger
 from app.agents.matter_consolidation import MATTER_CONSOLIDATION_TOOL_NAMES
@@ -301,6 +302,7 @@ GROUP_TOOL_NAMES: dict[str, frozenset[str]] = {
 _MATTER_SCOPE_TOOL_NAMES: frozenset[str] = frozenset().union(
     MATTER_TOOL_NAMES,
     MATTER_MEMORY_TOOL_NAMES,
+    DOCUMENT_SUMMARY_TOOL_NAMES,
     MATTER_FACT_TOOL_NAMES,
     MATTER_CONSOLIDATION_TOOL_NAMES,
     MATTER_READ_TOOL_NAMES,

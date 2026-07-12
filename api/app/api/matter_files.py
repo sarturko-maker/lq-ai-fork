@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.tools import MatterBinding, duplicate_of_map
 from app.api.dependencies import ActiveUser
 from app.api.projects import _load_visible_project
 from app.db.session import get_db
@@ -34,6 +35,13 @@ from app.models.file import File
 from app.models.project import ProjectFile
 
 router = APIRouter(prefix="/matters", tags=["matter-files"])
+
+
+class DuplicateRef(BaseModel):
+    """The canonical file an exact duplicate points at (WORKSPACE-3, ADR-F082)."""
+
+    id: uuid.UUID
+    filename: str
 
 
 class MatterFileRead(BaseModel):
@@ -46,7 +54,12 @@ class MatterFileRead(BaseModel):
     inline under the run. ``updated_at`` is non-NULL once the bytes have been mutated
     in place (an editor save-back, ADR-F047, or a redline convergence, ADR-F081); the
     web keys its "new redline ready" announce on ``(id, updated_at)`` so an in-place
-    update re-fires it.
+    update re-fires it. ``summary`` is the agent-recorded description (ADR-F082,
+    NULL until the agent has read the file); ``duplicate_of`` is non-NULL when this
+    file is a byte-identical copy of an earlier matter file — computed server-side
+    from the stored content hash (``duplicate_of_map``, never persisted and never
+    model-asserted) and scoped to this matter/owner, so no raw hash and no cross-
+    matter existence signal ever leaves the API.
     """
 
     id: uuid.UUID
@@ -57,6 +70,8 @@ class MatterFileRead(BaseModel):
     created_at: datetime
     updated_at: datetime | None
     created_by_run_id: uuid.UUID | None
+    summary: str | None
+    duplicate_of: DuplicateRef | None
 
 
 class MatterFilesRead(BaseModel):
@@ -96,6 +111,21 @@ async def list_matter_files(
     )
     rows = (await db.execute(stmt)).scalars().all()
 
+    # WORKSPACE-3 (ADR-F082): exact-duplicate markers, computed by the SAME rule the
+    # agent sees (duplicate_of_map — matter+owner scoped, hash-grouped, earliest-created
+    # canonical) so the panel and the agent never disagree about what is a copy.
+    dup = await duplicate_of_map(
+        db,
+        MatterBinding(
+            project_id=project.id,
+            user_id=user.id,
+            name=project.name,
+            privileged=project.privileged,
+            minimum_inference_tier=project.minimum_inference_tier,
+            practice_area_id=project.practice_area_id,
+        ),
+    )
+
     return MatterFilesRead(
         project_id=project.id,
         files=[
@@ -108,6 +138,10 @@ async def list_matter_files(
                 created_at=f.created_at,
                 updated_at=f.updated_at,
                 created_by_run_id=f.created_by_run_id,
+                summary=f.summary,
+                duplicate_of=(
+                    DuplicateRef(id=dup[f.id][0], filename=dup[f.id][1]) if f.id in dup else None
+                ),
             )
             for f in rows
         ],

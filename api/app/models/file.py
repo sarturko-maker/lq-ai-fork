@@ -23,7 +23,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -95,6 +95,25 @@ class File(Base):
         Boolean,
         nullable=False,
         server_default=text("false"),
+    )
+    # WORKSPACE-1 (ADR-F082): a short agent-written summary of what this document IS,
+    # recorded after the agent reads it (auto-write-then-correct, ADR-F042) so future
+    # runs — and the lawyer, in the Documents panel — recognise a document by content,
+    # not just its filename. NULL until read+summarised; bounded at the write boundary
+    # (``schemas.document_summary.DOCUMENT_SUMMARY_MAX_CHARS``), not by a DB CHECK.
+    # Exact-duplicate detection needs no column — it is computed from ``hash_sha256`` at
+    # read time (``agents.tools.duplicate_of_map``) so a dup edge can never go stale.
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    # The agent run that LAST wrote the summary; ``SET NULL`` on run delete keeps the
+    # summary (it outlives the run record, exactly like ``created_by_run_id``).
+    summary_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="SET NULL", name="fk_files_summary_run_id"),
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(

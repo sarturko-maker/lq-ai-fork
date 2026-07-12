@@ -562,6 +562,57 @@ def _matter_files_query(binding: MatterBinding, *columns: Any) -> Select[Any]:
     )
 
 
+async def duplicate_of_map(
+    db: AsyncSession, binding: MatterBinding
+) -> dict[uuid.UUID, tuple[uuid.UUID, str]]:
+    """Map each exact-duplicate matter file → (canonical file id, canonical filename).
+
+    Duplicates are IDENTICAL bytes, detected deterministically from ``files.hash_sha256``
+    (WORKSPACE-1, ADR-F082) — never agent-asserted, so a hostile document cannot forge a
+    "this is a duplicate" claim. Scope is this matter, owner-re-asserted and soft-delete-safe
+    (``_matter_files_query``), so an identical hash held in another matter or tenant is never
+    revealed (no existence leak — the 404 discipline). The canonical file of a duplicate set is
+    the earliest-created one (id string as a stable tiebreaker); every other file in the set maps
+    to it. Files with a unique hash are absent from the map.
+    """
+    rows = (
+        await db.execute(
+            _matter_files_query(binding, File.id, File.filename, File.hash_sha256, File.created_at)
+        )
+    ).all()
+    by_hash: dict[str, list[Row[Any]]] = {}
+    for row in rows:
+        by_hash.setdefault(row.hash_sha256, []).append(row)
+    dup: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
+    for group in by_hash.values():
+        if len(group) < 2:
+            continue
+        canonical = min(group, key=lambda r: (r.created_at, str(r.id)))
+        for row in group:
+            if row.id != canonical.id:
+                dup[row.id] = (canonical.id, canonical.filename)
+    return dup
+
+
+async def resolve_matter_file_by_name(
+    db: AsyncSession, binding: MatterBinding, name: str
+) -> Row[Any] | None:
+    """Resolve a matter file by exact filename (owner+matter scoped, soft-delete-safe).
+
+    Returns the ``(id, filename)`` row (most-recent first on a name collision), or ``None`` if no
+    live matter file has that name. Parameterised equality — the name never builds SQL. Used by the
+    ``record_document_summary`` write tool (WORKSPACE-1) to bind a summary to the named file.
+    """
+    rows = (
+        await db.execute(
+            _matter_files_query(binding, File.id, File.filename)
+            .where(File.filename == name)
+            .order_by(File.created_at.desc(), File.id.desc())
+        )
+    ).all()
+    return rows[0] if rows else None
+
+
 # Defense cap on a .docx we'll buffer into memory (parse / redline). The upload
 # cap is larger; a deal contract or policy is well under this.
 _MAX_DOCX_BYTES = 25 * 1024 * 1024
@@ -746,11 +797,13 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
     """
     stmt = _matter_files_query(
         binding,
+        File.id.label("file_id"),
         File.filename,
         File.ingestion_status,
         File.parent_file_id,
         File.is_snapshot,
         File.created_by_run_id,
+        File.summary,
         Document.id,
         Document.page_count,
         Document.character_count,
@@ -758,6 +811,11 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
     rows = (await db.execute(stmt)).all()
     if not rows:
         return f"{header}\n(no documents attached — answer from the prompt alone, honestly)"
+
+    # WORKSPACE-1 (ADR-F082): exact-duplicate awareness, computed from the content hash
+    # (never agent-asserted). One matter-scoped query; the marker below tells the agent when
+    # two files are the same bytes so it doesn't treat a re-upload as a second document.
+    dup_map = await duplicate_of_map(db, binding)
 
     # Provenance labels for non-ingested work products (ADR-F066): resolve the
     # parent filenames in ONE batched matter-scoped query (never per row). A
@@ -775,8 +833,10 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
 
     lines: list[str] = []
     for row in rows:
+        dup = dup_map.get(row.file_id)
+        dup_marker = f" — (duplicate of {dup[1]})" if dup is not None else ""
         if row.id is None:
-            lines.append(f"- {row.filename} {_provenance(row, parent_names)}")
+            lines.append(f"- {row.filename} {_provenance(row, parent_names)}{dup_marker}")
             continue
         bits: list[str] = []
         if row.page_count:
@@ -784,7 +844,10 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
         if row.character_count:
             bits.append(f"~{_read_tokens(row.character_count):,} tokens to read")
         suffix = f" ({'; '.join(bits)})" if bits else ""
-        lines.append(f"- {row.filename}{suffix}")
+        # WORKSPACE-1 (ADR-F082): show the agent-recorded summary so the agent recognises a
+        # document by content, not just its filename. Absent until the agent reads + summarises.
+        summary_marker = f" — {row.summary.strip()}" if row.summary else ""
+        lines.append(f"- {row.filename}{suffix}{dup_marker}{summary_marker}")
     return f"{header}\n" + "\n".join(lines)
 
 
