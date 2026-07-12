@@ -1488,6 +1488,13 @@ export interface MatterFile {
 	created_by_run_id: string | null;
 	/** Agent-recorded one/two-sentence description; null until the agent has read it (ADR-F082). */
 	summary: string | null;
+	/** Who wrote the summary — human edits pin over agent rewrites; null when no summary (ADR-F082). */
+	summary_author: 'agent' | 'human' | null;
+	/**
+	 * True when the file's bytes were mutated AFTER the summary was written — the
+	 * description may no longer match the content (ADR-F082).
+	 */
+	summary_stale: boolean;
 	/** The earlier byte-identical file this one copies (server-computed), or null (ADR-F082). */
 	duplicate_of: { id: string; filename: string } | null;
 }

@@ -10,10 +10,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	duplicateBadge,
+	duplicateTooltip,
 	fileOriginBadge,
-	fileSummary,
 	formatBytes,
-	isUpdatingLive
+	isUpdatingLive,
+	summarySubtitle
 } from '../components/matter/DocumentsPanel.svelte';
 
 describe('formatBytes', () => {
@@ -52,9 +53,9 @@ describe('fileOriginBadge', () => {
 });
 
 describe('duplicateBadge (ADR-F082)', () => {
-	it('labels a byte-identical copy with the earlier filename', () => {
+	it('labels a byte-identical copy "identical to <filename>" (never "duplicate")', () => {
 		expect(duplicateBadge({ duplicate_of: { id: 'f1', filename: 'Cirrus MSA.docx' } })).toBe(
-			'duplicate of Cirrus MSA.docx'
+			'identical to Cirrus MSA.docx'
 		);
 	});
 
@@ -63,16 +64,35 @@ describe('duplicateBadge (ADR-F082)', () => {
 	});
 });
 
-describe('fileSummary (ADR-F082)', () => {
-	it('passes the agent-recorded summary through', () => {
-		expect(fileSummary({ summary: 'A two-year MSA with Cirrus; auto-renews.' })).toBe(
-			'A two-year MSA with Cirrus; auto-renews.'
+describe('duplicateTooltip (ADR-F082)', () => {
+	it('spells out byte-identity AND that edited/revised versions are not flagged', () => {
+		expect(duplicateTooltip({ duplicate_of: { id: 'f1', filename: 'Cirrus MSA.docx' } })).toBe(
+			'Byte-for-byte identical to Cirrus MSA.docx. Edited or revised versions are not flagged.'
 		);
 	});
 
-	it('collapses null and blank summaries to null (no empty subtitle line)', () => {
-		expect(fileSummary({ summary: null })).toBeNull();
-		expect(fileSummary({ summary: '   ' })).toBeNull();
+	it('returns null for a canonical/unique file', () => {
+		expect(duplicateTooltip({ duplicate_of: null })).toBeNull();
+	});
+});
+
+describe('summarySubtitle (ADR-F082)', () => {
+	it('passes a fresh agent-recorded summary through unchanged', () => {
+		expect(
+			summarySubtitle({ summary: 'A two-year MSA with Cirrus; auto-renews.', summary_stale: false })
+		).toBe('A two-year MSA with Cirrus; auto-renews.');
+	});
+
+	it('appends "(may be stale)" when the bytes changed after the summary was written', () => {
+		expect(
+			summarySubtitle({ summary: 'A two-year MSA with Cirrus; auto-renews.', summary_stale: true })
+		).toBe('A two-year MSA with Cirrus; auto-renews. (may be stale)');
+	});
+
+	it('collapses null and blank summaries to null (no empty subtitle line, even stale)', () => {
+		expect(summarySubtitle({ summary: null, summary_stale: false })).toBeNull();
+		expect(summarySubtitle({ summary: '   ', summary_stale: false })).toBeNull();
+		expect(summarySubtitle({ summary: null, summary_stale: true })).toBeNull();
 	});
 });
 
