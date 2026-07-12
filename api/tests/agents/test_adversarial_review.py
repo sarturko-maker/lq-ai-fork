@@ -420,6 +420,70 @@ async def test_overlong_focus_is_rejected_before_any_load(
     assert gateway.requests == []
 
 
+async def test_textless_document_is_rejected_before_any_spend(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review fix (PR #272): an OOXML-valid docx with no extractable text (scanned/
+    image-only) rejects BEFORE the gateway call — no spend, no false clearance."""
+    user_id, project_id = matter
+    await _seed_docx(
+        commit_factory,
+        owner_id=user_id,
+        project_id=project_id,
+        filename="scan.docx",
+        paragraphs=[],  # no text runs
+        monkeypatch=monkeypatch,
+    )
+    gateway = _StubGateway(content=_findings_json())
+    async with commit_factory() as db:
+        out = await adv._adversarial_review(
+            db,
+            _binding(user_id, project_id),
+            run_id=uuid.uuid4(),
+            gateway=gateway,
+            model_alias="smart",
+            document_name="scan.docx",
+            focus="",
+        )
+    assert "no extractable text" in out and "Nothing was reviewed" in out
+    assert gateway.requests == []
+
+
+async def test_focus_is_fenced_and_echoed_in_the_render(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review fix (PR #272): the system prompt fences focus as a topic steer that never
+    suppresses findings, and a steered pass is VISIBLY steered in the render."""
+    user_id, project_id = matter
+    await _seed_docx(
+        commit_factory,
+        owner_id=user_id,
+        project_id=project_id,
+        filename="d.docx",
+        paragraphs=["Body."],
+        monkeypatch=monkeypatch,
+    )
+    gateway = _StubGateway(content=_findings_json(1))
+    async with commit_factory() as db:
+        out = await adv._adversarial_review(
+            db,
+            _binding(user_id, project_id),
+            run_id=uuid.uuid4(),
+            gateway=gateway,
+            model_alias="smart",
+            document_name="d.docx",
+            focus="liability and indemnity",
+        )
+        await db.commit()
+    system = gateway.requests[0].messages[0].content
+    assert "never suppresses findings" in system
+    assert "FOCUS APPLIED" in out and "liability and indemnity" in out
+
+
 async def test_oversize_document_is_truncated_with_honest_notice(
     commit_factory: async_sessionmaker[AsyncSession],
     matter: tuple[uuid.UUID, uuid.UUID],

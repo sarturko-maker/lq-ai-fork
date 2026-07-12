@@ -1342,7 +1342,15 @@ def _correlation_ids(
 # separable in the routing log — the audit surface for an agent tool
 # whose in-tool token cost is otherwise R4-no-op until F1's per-run budget.
 _KNOWN_PURPOSES = frozenset(
-    {"chat", "judge_paraphrase", "embedding", "agent_loop", "consolidate_matter_memory"}
+    {
+        "chat",
+        "judge_paraphrase",
+        "embedding",
+        "agent_loop",
+        "consolidate_matter_memory",
+        # ADV-1 (ADR-F084): the hostile-reader pass — same separable-spend rationale.
+        "adversarial_review",
+    }
 )
 
 
