@@ -91,6 +91,7 @@ async def _seed_file(
     page_start: int | None = 1,
     page_end: int | None = 1,
     column_project_id: uuid.UUID | None = None,
+    hash_sha256: str | None = None,
 ) -> File:
     """File (+ Document + one chunk when ``body`` is given; None = pending).
 
@@ -104,7 +105,13 @@ async def _seed_file(
         filename=filename,
         mime_type="application/pdf",
         size_bytes=1024,
-        hash_sha256="a" * 64,
+        # Unique-by-default so the WORKSPACE (ADR-F082) exact-duplicate detector
+        # does NOT treat unrelated fixture files as byte-duplicates of each other
+        # (a shared hash made every file a mutual dup, and the "(duplicate of X)"
+        # markers then leaked into inventory assertions non-deterministically —
+        # canonicality falls to the id tiebreaker for same-transaction seeds).
+        # Pass an explicit hash to force a genuine collision when a test wants one.
+        hash_sha256=hash_sha256 or (uuid.uuid4().hex + uuid.uuid4().hex),
         storage_path=f"agent-tools-fixture/{uuid.uuid4()}",
         ingestion_status="processing" if body is None else "ready",
     )
@@ -325,7 +332,11 @@ async def test_search_empty_query_lists_the_inventory(matter_env: MatterEnv) -> 
     # F2 Slice E: each ingested doc carries a read-cost estimate (~k tokens to read);
     # the not-ingested file has no Document, so no estimate (just the status notice).
     assert "tokens to read" in result
-    pending_line = next(line for line in result.splitlines() if "pending.pdf" in line)
+    # Match pending.pdf's OWN inventory bullet ("- pending.pdf …"), not any line
+    # that merely references it (e.g. another file's "(duplicate of pending.pdf)").
+    pending_line = next(
+        line for line in result.splitlines() if line.lstrip().startswith("- pending.pdf")
+    )
     assert "tokens to read" not in pending_line
 
 
