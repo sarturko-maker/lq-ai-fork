@@ -108,6 +108,20 @@ default → bare `docker run` / Caddy overlay). Helm web probe is a kubelet→po
 localhost — unaffected, left alone. No app behaviour changed. Live-verified: rebuilt web → `healthy`
 + `127.0.0.1:3000/health`→200 `ok`. This was the FIRST piece of maintainer VM feedback.
 
+**Phase-1 VM UAT fix #2 (task #523, branch `fix/cors-allow-put`, PR #276):** saving House Brief
+(`PUT /organization-profile`) and Branding (`PUT /branding`) failed cross-origin with browser
+"Failed to fetch" while chats (POST) worked. Root cause: `api/app/main.py` CORS `allow_methods`
+listed GET/POST/PATCH/DELETE/OPTIONS but **not PUT** → the PUT preflight (OPTIONS) 400s and the
+browser never issues the request (no HTTP status reaches the app → fetch-level error, not a 4xx).
+Only bites cross-origin (`LQ_AI_CORS_ORIGINS` set: Compose `web:3000` vs `api:8000`, or split-origin
+deploy). **All FOUR PUT endpoints were dead** — also the WORKSPACE matter-file summary correction
+(`PUT /matters/{id}/files/{file_id}/summary`) and the practice-area HITL-policy save
+(`PUT /practice-areas/{key}/hitl-policy`, the adversarial-review toggle). Fix = add PUT (hoisted to a
+`CORS_ALLOW_METHODS` constant) + regression test (PUT preflight allowed + a drift guard: every verb
+the router serves must be allowlisted). CORS is browser-only, not authz — each PUT still enforces
+AdminUser server-side; `allow_origins` stays a strict allowlist. Live: all four preflights 400→200.
+ruff+mypy clean, new test 2 passed.
+
 ## Next slice
 
 **Phase 1 ACTIVE — VM UAT bug-fixing** (direction set 2026-07-12; product-first sequence in the
