@@ -44,14 +44,25 @@ then CLAUDE.md, then the ADRs/plans named below.
 > Per-subagent models = gateway-bound INSTANCE injected in composition only (config path is a dead
 > end); verify deepagents 0.6.8 honours a per-spec instance before building.
 >
-> ◀ **PICK UP HERE: HOLD (again).** Everything remaining is maintainer-gated. **DECISIONS AWAITING
-> (do not pre-empt):** (1) enterprise-vs-product call (CUSTODIAN #510/#512–#514 gated); (2) shipped-
-> profile HITL defaults — now covers `apply_redline` AND `adversarial_review`; (3) fate of the 5
-> untracked strays (4× scenario `test_*_live.py` + `sample-documents/` — one carries a RUF002 `×`
-> that trips broad ruff sweeps); (4) router: adopt the taxonomy / pick the seam / when to build.
-> GATED/deferred: CLEAN-3b #505; AZ-4 parked; AZ-6 keyless-MI branch unpushed; B-2c live scenario;
-> ADV seeded-defect eval + live walk; SUMMARY-EDIT panel affordance + NEAR-DUP + GATEWAY-JSON helper
-> (MILESTONES backlog).
+> ◀ **PICK UP HERE: DIRECTION SET 2026-07-12 — product-first, enterprise-last** (resolves the
+> enterprise-vs-product call). Maintainer's 4-phase roadmap:
+> **(1) VM UAT bug-fixing — ACTIVE.** Maintainer tests the shipped stack on the Azure VM and sends
+>     feedback (ad-hoc/random, *may branch into side-quests*); we FIX broken bugs/features FIRST,
+>     before any new build. No proactive slice — next work = whatever the feedback surfaces.
+> **(2) CUSTODIAN** — per-matter obligation/exposure/why/outcome capture (#510/#512–#514; ADV-1 done).
+> **(3) Matter-wisdom escalation = Practice Knowledge** (ADR-F050 / `PRACTICE-KNOWLEDGE-prize.md`): the
+>     de-identify→guard→curator-approve harness. DESIGNED, NOT built; CUSTODIAN WHY-1/OUTCOME-1 bank
+>     its raw material. NB the authoring pipeline (propose→approve→Library→bind) + knowledge-collection
+>     tool group already exist — they escalate HUMAN-authored content; this escalates AGENT-noticed
+>     matter wisdom, which is why it needs the confidentiality+poison harness. Slice-1 = light up the
+>     write-only Lawyer Preferences shelf (cheapest on-ramp).
+> **(4) Enterprise-grade deployment** — K8S/AKS ladder (F073–F080; the 5 confirmed scale bugs). Real
+>     customer runs on the demo-grade VM/compose path meanwhile; scale-hardening waits for this phase.
+> **Still-open QUICK CALLS (fold into phase 1, not blockers):** shipped-profile HITL defaults
+> (`apply_redline` + `adversarial_review`); the 5 untracked strays (one carries a RUF002 `×`); router —
+> adopt taxonomy / when to build (research, ~phase 4).
+> GATED/deferred: CLEAN-3b #505; #504 claim-grace; AZ-4 parked; AZ-6 keyless-MI branch unpushed;
+> ADV seeded-defect eval + live walk; SUMMARY-EDIT / NEAR-DUP / GATEWAY-JSON helper (MILESTONES backlog).
 >
 > **MAINTAINER'S AZURE-VM LIVE-TEST SCRIPT (pull main `482c6078`+, rebuild SERIAL with cache —
 > never `--no-cache ×4`; stale web bundle hides features; the gateway needs a RESTART for the
@@ -87,11 +98,23 @@ WORKSPACE WS-1/2/3 merged (#271, 18-finding review fixed, live-verified) · ADV-
 5-finding review fixed/deferred) · router research delivered (doc final) · model-per-subagent
 question answered · HANDOFF/memory current.
 
+**Phase-1 VM UAT fix #1 (task #521, branch `fix/web-healthcheck-ipv4`):** web container falsely
+`(unhealthy)` on the Azure image — nginx `listen 8080;` binds IPv4-only `0.0.0.0:8080`, but that
+image's `/etc/hosts` resolves `localhost`→`::1` first, so the `wget http://localhost:8080/health`
+probe gets connection-refused while it serves fine on IPv4. Fixed `localhost`→`127.0.0.1` in ALL
+THREE tracked sites (the maintainer's grep found them; the suggested fix covered only compose):
+`docker-compose.yml:488`, `docker-compose.prod.yml:410`, `web/Dockerfile:34` HEALTHCHECK (image
+default → bare `docker run` / Caddy overlay). Helm web probe is a kubelet→pod-IP httpGet, NOT
+localhost — unaffected, left alone. No app behaviour changed. Live-verified: rebuilt web → `healthy`
++ `127.0.0.1:3000/health`→200 `ok`. This was the FIRST piece of maintainer VM feedback.
+
 ## Next slice
 
-None startable — all queue items maintainer-gated (decisions list in the banner). On return:
-run the VM live-test script, make the four decisions, then the queue unblocks (CUSTODIAN or the
-K8S ladder per decision 1; ADV eval + live walk; router build per decision 4).
+**Phase 1 ACTIVE — VM UAT bug-fixing** (direction set 2026-07-12; product-first sequence in the
+banner: 1 VM-bugs → 2 CUSTODIAN → 3 Practice Knowledge → 4 enterprise K8S). No proactive slice: the
+next work is whatever the maintainer's VM feedback surfaces — triage → fix under the full ADR-F005
+gate; side-quests expected; create a concrete task per bug as it lands. CUSTODIAN (#510/#512–#514,
+OBLIG-1 first) is the phase-2 queue, unchanged.
 
 ## Gotchas (this session — history in memory topics)
 

@@ -31,4 +31,8 @@ COPY --from=build /app/build /usr/share/nginx/html
 
 EXPOSE 8080
 
-HEALTHCHECK CMD wget -q -O /dev/null http://localhost:8080/health || exit 1
+# Use 127.0.0.1 (not localhost): nginx `listen 8080;` binds IPv4-only, but in
+# some container images localhost resolves to IPv6 ::1 first → the probe gets
+# "connection refused" and the container is falsely marked unhealthy while it
+# serves fine on IPv4. 127.0.0.1 is unambiguously the IPv4 loopback nginx binds.
+HEALTHCHECK CMD wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1

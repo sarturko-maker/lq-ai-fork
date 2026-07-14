@@ -484,8 +484,10 @@ services:
     ports:
       - "${WEB_BIND_ADDR:-127.0.0.1}:${WEB_HOST_PORT:-3000}:8080"
     healthcheck:
-      # nginx:alpine ships busybox wget, not curl.
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health || exit 1"]
+      # nginx:alpine ships busybox wget, not curl. 127.0.0.1 (not localhost):
+      # nginx listens IPv4-only, but localhost can resolve to IPv6 ::1 first →
+      # false "unhealthy" (see web/Dockerfile HEALTHCHECK for the full note).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

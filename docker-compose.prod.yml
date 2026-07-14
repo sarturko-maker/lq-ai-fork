@@ -407,7 +407,9 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health || exit 1"]
+      # 127.0.0.1 (not localhost): nginx listens IPv4-only, but localhost can
+      # resolve to IPv6 ::1 first → false "unhealthy" (see web/Dockerfile note).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
