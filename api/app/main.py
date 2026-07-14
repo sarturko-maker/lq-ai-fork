@@ -211,6 +211,14 @@ app = FastAPI(
 # a reverse proxy and leave LQ_AI_CORS_ORIGINS unset (no CORS needed).
 # Local Compose dev needs CORS because web (:3000) and api (:8000) live
 # at different origins; the operator's .env sets the value.
+#
+# PUT is load-bearing: the admin write paths (House Brief PUT
+# /organization-profile, Branding PUT /branding, matter-file summary
+# correction, practice-area HITL policy) are all PUTs. Omitting a verb here
+# makes its cross-origin preflight fail with a 400, which the browser surfaces
+# as "Failed to fetch" (no HTTP status reaches the app). Keep this in sync with
+# the HTTP verbs actually served — a missing verb silently breaks a write path.
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 _settings = get_settings()
 _cors_origins = [o.strip() for o in (_settings.lq_ai_cors_origins or "").split(",") if o.strip()]
 if _cors_origins:
@@ -218,7 +226,7 @@ if _cors_origins:
         CORSMiddleware,
         allow_origins=_cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_methods=CORS_ALLOW_METHODS,
         allow_headers=["Authorization", "Content-Type", "Accept"],
         # Date: the agents UI derives "server now" from it so staleness
         # cutoffs survive client clock skew (F0-S7; same-origin deploys
