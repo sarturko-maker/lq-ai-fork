@@ -1151,8 +1151,13 @@ synthetic pack behind a CLI; ADR-F001 forecloses "under the LegalQuants banner")
   on migrate) + security review. Would also let the cap's accepted same-user revoke race be removed.
 - Configurable ethics gates per practice area (upstream's ethics_review is a stub).
 - Email-grade entry points: forward an email into a Matter; Word add-in revival.
-- Revisit third-party memory (Zep/Graphiti temporal graph) only if native consolidation proves
-  insufficient (ADR-F003 option 3).
+- Revisit third-party memory (Zep/**Graphiti** temporal graph) only if native consolidation proves
+  insufficient (ADR-F003 option 3). **Research task #534 (2026-07-15)** — maintainer is weighing
+  Graphiti as a RAG-graph memory substrate; brief must weigh build-vs-adopt against our existing
+  Matter-Facts bi-temporal ledger (ADR-F043) + native Store hybrid retriever, and the hard constraints
+  (Graphiti's LLM extraction MUST route through the Inference Gateway; it wants a graph DB — Neo4j/
+  FalkorDB — vs our Postgres+pgvector; a cross-matter graph is exactly the Practice-Knowledge poison
+  surface). Research only, after the VM UAT batch; likely a Practice-Knowledge (ADR-F050) enabler.
 - ~~Run artifact surface~~ — PROMOTED into F1 (audit 2026-06-11).
 - Thread management: rename (delete SHIPPED in F1-S1 with `adelete_thread` + daily GC cron),
   pagination past the 20-thread list cap (a cockpit grouping client-side from it under-reports

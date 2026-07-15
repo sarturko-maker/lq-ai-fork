@@ -44,9 +44,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.tools import MatterBinding
 from app.models.project import MatterMemoryEntry, Project
-from app.schemas.matter_memory import UpdateMatterMemoryInput
+from app.schemas.matter_memory import MATTER_WIKI_MAX_CHARS, UpdateMatterMemoryInput
 
 MATTER_MEMORY_TOOL_NAMES = frozenset({"update_matter_memory"})
+
+# VM2-B (#526): proactive-tightness high-water mark. CLAUDE.md discipline is to prune the
+# working memory BEFORE it rots, not to wait for the hard reject at MATTER_WIKI_MAX_CHARS.
+# Once a saved wiki reaches this fraction of the cap, the success receipt nudges the agent to
+# consolidate — deterministic, no schema change, no gate. Below the mark the receipt is
+# unchanged.
+_WIKI_HIGH_WATER_FRACTION = 0.75
+_WIKI_HIGH_WATER_CHARS = int(MATTER_WIKI_MAX_CHARS * _WIKI_HIGH_WATER_FRACTION)
 
 # How much of the live pinned-corrections history to inject each run (C3a bound —
 # C3b's consolidation/Lint pass supersedes this). Newest-first selection by count
@@ -147,11 +155,21 @@ async def _update_matter_memory(
         db, project, run_id=run_id, user_id=binding.user_id, new_content=proposal.content_md
     )
 
-    return (
-        f"Updated this matter's memory ({len(proposal.content_md)} characters). It is "
+    saved_chars = len(proposal.content_md)
+    receipt = (
+        f"Updated this matter's memory ({saved_chars} characters). It is "
         "saved and will be available in future runs on this matter; the prior version "
         "was snapshotted so the change can be undone."
     )
+    # VM2-B (#526): proactive-tightness nudge once the wiki crosses the high-water mark —
+    # prune before it rots, not at the hard reject. Deterministic on the saved length.
+    if saved_chars >= _WIKI_HIGH_WATER_CHARS:
+        receipt += (
+            f" This memory is now {saved_chars}/{MATTER_WIKI_MAX_CHARS} characters — "
+            "consolidate it into a briefer one-pager soon if it keeps growing, before it "
+            "reaches the limit."
+        )
+    return receipt
 
 
 async def snapshot_and_rewrite_wiki(

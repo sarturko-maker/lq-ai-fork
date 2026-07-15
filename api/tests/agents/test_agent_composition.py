@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.composition import (
     MATTER_CONVERSATION_DOCTRINE,
+    MATTER_MEMORY_DOCTRINE,
     MATTER_PROMPT,
     MATTER_REVIEW_DOCTRINE,
     MATTER_ROSTER_DOCTRINE,
@@ -258,19 +259,27 @@ def test_system_prompt_assembly() -> None:
     prompt = system_prompt_for(binding)
     assert prompt.startswith(SYSTEM_PROMPT)
     assert 'the matter "Acme MSA"' in prompt
-    # Editor Slice 5 (ADR-F047) + roster (ADR-F048) + conversation recall (ADR-F049 N3) +
-    # retrieval-strategy (ADR-F049 Slice E): the hand-back, roster, conversation-recall,
-    # then retrieval-strategy doctrines are appended after the matter addendum for every
-    # matter-bound run, in that order.
+    # Editor Slice 5 (ADR-F047) + roster (ADR-F048) + matter-memory (VM2-B #526) +
+    # conversation recall (ADR-F049 N3) + retrieval-strategy (ADR-F049 Slice E): the
+    # hand-back, roster, matter-memory, conversation-recall, then retrieval-strategy
+    # doctrines are appended after the matter addendum for every matter-bound run, in
+    # that order. This endswith is the one drift-guard that silently mis-pins if a new
+    # binding-block doctrine is added without extending it — VM2-B added MATTER_MEMORY_DOCTRINE.
     assert prompt.endswith(
         MATTER_PROMPT.format(name="Acme MSA")
         + MATTER_REVIEW_DOCTRINE
         + MATTER_ROSTER_DOCTRINE
+        + MATTER_MEMORY_DOCTRINE
         + MATTER_CONVERSATION_DOCTRINE
         + RETRIEVAL_STRATEGY_DOCTRINE
     )
     assert "review_edited_document" in prompt
     assert "record_matter_participant" in prompt  # roster doctrine present
+    # VM2-B (#526): the matter-memory upkeep doctrine is present for EVERY matter-bound
+    # run — no wiki, no area passed here (both default None), so it is proven area-agnostic
+    # and empty-wiki-included. This assertion is RED before the constant is appended.
+    assert "update_matter_memory" in prompt  # matter-memory doctrine present
+    assert "record_matter_fact" in prompt  # names both write tools
     assert "search_matter_conversations" in prompt  # conversation-recall doctrine present
     assert "estimate_read_cost" in prompt  # retrieval-strategy doctrine present
 
@@ -2069,6 +2078,61 @@ async def test_tabular_doctrine_present_for_new_area_with_tabular_row(
     finally:
         async with comp_env.factory() as db:
             # Unfile the matter first, then drop the area (tool-group row CASCADEs).
+            await db.execute(
+                Project.__table__.update()
+                .where(Project.id == comp_env.project_id)
+                .values(practice_area_id=None)
+            )
+            await db.execute(delete(PracticeArea).where(PracticeArea.id == area_id))
+            await db.commit()
+
+
+async def test_matter_memory_is_baseline_skill_for_a_bare_custom_area(
+    comp_env: CompositionEnv,
+) -> None:
+    """VM2-B (#526): the matter-memory craft skill is wired for EVERY area even with
+    zero ``practice_area_skills`` rows — the composition-seam baseline union
+    (``BASELINE_SKILL_NAMES``) mirrors the area-agnostic matter-memory TOOL grant. A
+    brand-new custom area (POST /practice-areas binds no skills; profiles/blank binds
+    none) would otherwise ship the terse doctrine without the full fold/supersede/
+    consolidate craft. The discriminating control: a NON-baseline skill (nda-review),
+    equally unbound on this area, stays absent — the union is the baseline, not all-skills."""
+    from app.models.practice_area import PracticeArea
+
+    async with comp_env.factory() as db:
+        area = PracticeArea(
+            key=f"baseline-{uuid.uuid4().hex[:6]}",
+            name="Bare Custom Area",
+            unit_label="Matter",
+            position=951,
+        )
+        db.add(area)
+        await db.commit()
+        area_id = area.id
+
+    mm_desc = "MATTERMEMUNIQUEDESC-baseline-signal."
+    nda_desc = "NDAUNIQUEDESC-control-signal."
+    registry = _FakeSkillRegistry(
+        {
+            "matter-memory": _SkillRec(f"name: matter-memory\ndescription: {mm_desc}", "# MM"),
+            "nda-review": _SkillRec(f"name: nda-review\ndescription: {nda_desc}", "# NDA"),
+        }
+    )
+    try:
+        await _file_matter_under(comp_env, area_id)
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        model = ScriptedToolCallingModel(responses=[final_message("done")])
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(model=model),
+            session_factory_provider=lambda: comp_env.factory,
+            skill_registry_provider=lambda: registry,
+        )
+        text = _seen_system_text(model)
+        assert mm_desc in text  # matter-memory wired despite zero bindings (the baseline union)
+        assert nda_desc not in text  # a non-baseline unbound skill is NOT wired (discriminator)
+    finally:
+        async with comp_env.factory() as db:
             await db.execute(
                 Project.__table__.update()
                 .where(Project.id == comp_env.project_id)

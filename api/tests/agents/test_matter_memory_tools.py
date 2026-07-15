@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.agents.assessment_tools import ASSESSMENT_TOOL_NAMES
 from app.agents.commercial_tools import COMMERCIAL_TOOL_NAMES
 from app.agents.matter_memory_tools import (
+    _WIKI_HIGH_WATER_CHARS,
     MATTER_MEMORY_TOOL_NAMES,
     _update_matter_memory,
     build_matter_memory_tools,
@@ -195,6 +196,44 @@ async def test_auto_write_rewrites_wiki_and_snapshots_prior(
         assert snaps[0].body_md == "We act for the buyer. Counterparty: Acme."
         assert snaps[0].trust == "normal"
         assert snaps[0].run_id == run2
+
+
+async def test_high_water_mark_nudge_only_past_threshold(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """VM2-B (#526): the success receipt adds a "consolidate soon" nudge ONLY once the
+    saved wiki crosses _WIKI_HIGH_WATER_CHARS (75% of the cap) — prune before the hard
+    reject, not at it. A small write stays quiet; a large-but-valid write nudges. Both
+    still save (the nudge is advisory, never a reject)."""
+    user_id, project_id = matter
+    binding = _binding(user_id, project_id)
+
+    # Below the mark: plain receipt, no nudge.
+    async with commit_factory() as db:
+        small = await _update_matter_memory(
+            db, binding, run_id=uuid.uuid4(), content_md="x" * (_WIKI_HIGH_WATER_CHARS - 1)
+        )
+        await db.commit()
+    assert "Updated this matter's memory" in small
+    assert "consolidate" not in small.lower()
+
+    # At/over the mark but under the cap: still saved, plus the consolidate nudge.
+    big_len = _WIKI_HIGH_WATER_CHARS + 100
+    assert big_len < MATTER_WIKI_MAX_CHARS  # a valid write, not a reject
+    async with commit_factory() as db:
+        big = await _update_matter_memory(
+            db, binding, run_id=uuid.uuid4(), content_md="y" * big_len
+        )
+        await db.commit()
+    assert "Updated this matter's memory" in big
+    assert "consolidate" in big.lower()
+    assert f"{big_len}/{MATTER_WIKI_MAX_CHARS}" in big
+
+    # The over-mark write actually persisted (nudge did not block it).
+    async with commit_factory() as db:
+        proj = await db.get(Project, project_id)
+        assert proj is not None and len(proj.context_md) == big_len
 
 
 async def test_oversize_rejected_not_truncated(
