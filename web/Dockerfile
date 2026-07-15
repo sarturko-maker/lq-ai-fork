@@ -25,7 +25,7 @@ RUN printf 'PUBLIC_LQ_AI_API_BASE_URL=%s\n' "${PUBLIC_LQ_AI_API_BASE_URL}" > .en
 
 # 1.28 is the maintained stable line (1.27 mainline stopped receiving
 # nginx/alpine patches when 1.28 shipped) — keep this on a supported tag.
-FROM nginx:1.28-alpine
+FROM nginx:1.31-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/build /usr/share/nginx/html
 
