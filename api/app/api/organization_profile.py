@@ -37,6 +37,17 @@ from app.models.organization_profile import OrganizationProfile
 
 router = APIRouter(prefix="/organization-profile", tags=["organization-profile"])
 
+# The House Brief (company tier) is injected VERBATIM into EVERY prompt
+# (``composition.CLIENT_CONTEXT_PROMPT`` — read-only company context, and the
+# gateway prepends it to attached skills too). It must stay a tight one-pager: an
+# over-long brief spends the context budget on every single run and crowds out the
+# matter's own documents. Capped well under the old 200k ceiling (~50k tokens) and
+# in the same family as the Practice Playbook doctrine (20k, ``PracticeAreaCreate``)
+# and the Matter File wiki (16k, ``MATTER_WIKI_MAX_CHARS``). Reject-at-write — the
+# admin curates a too-long brief down; we NEVER silently trim what gets injected, so
+# what is saved is exactly what the agent sees. (VM2-G, task #532.)
+HOUSE_BRIEF_MAX_CHARS = 32_000
+
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -60,7 +71,7 @@ class OrganizationProfileUpdateRequest(BaseModel):
     audit history correlates).
     """
 
-    content_md: str = Field(min_length=0, max_length=200_000)
+    content_md: str = Field(min_length=0, max_length=HOUSE_BRIEF_MAX_CHARS)
 
 
 # ---------------------------------------------------------------------------

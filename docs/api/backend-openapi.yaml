@@ -2234,7 +2234,7 @@ paths:
               type: object
               required: [content_md]
               properties:
-                content_md: {type: string, maxLength: 200000}
+                content_md: {type: string, maxLength: 32000}
       responses:
         '200':
           description: Updated

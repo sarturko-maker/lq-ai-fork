@@ -125,10 +125,48 @@ ruff+mypy clean, new test 2 passed.
 ## Next slice
 
 **Phase 1 ACTIVE — VM UAT bug-fixing** (direction set 2026-07-12; product-first sequence in the
-banner: 1 VM-bugs → 2 CUSTODIAN → 3 Practice Knowledge → 4 enterprise K8S). No proactive slice: the
-next work is whatever the maintainer's VM feedback surfaces — triage → fix under the full ADR-F005
-gate; side-quests expected; create a concrete task per bug as it lands. CUSTODIAN (#510/#512–#514,
-OBLIG-1 first) is the phase-2 queue, unchanged.
+banner: 1 VM-bugs → 2 CUSTODIAN → 3 Practice Knowledge → 4 enterprise K8S). VM fixes SHIPPED
+(healthcheck #274, CORS-PUT #276, **House-Brief cap #532 — this branch**). Adeu anchor bump QUEUED (#524).
+
+**VM2-G #532 SHIPPED (this branch `fix/vm2-g-house-brief-cap`) — House Brief write cap 200k→32k.**
+Came out of the VM2-B matter-memory tightness discussion (matter memory = "CLAUDE.md for the matter";
+must stay tight). Audit finding: the injected read-only tiers were individually capped EXCEPT House
+Brief — `organization_profile.content_md` allowed **200,000 chars (~50k tokens)** and is injected WHOLE
+into every prompt (`composition.py:603`, no trim), 12.5× the Matter File wiki (16k) and 10× the Practice
+Playbook doctrine (20k). Fix = lower the PUT cap to a one-pager 32k (`organization_profile.py`
+`HOUSE_BRIEF_MAX_CHARS`), mirrored in web (`page-helpers.ts` + `organizationProfile.ts`) + OpenAPI doc;
+reject-at-write (admin curates), NEVER silent inject-trim. Decision recorded: **no single dynamic
+cross-tier budget** — per-tier deterministic caps already bound the total; the bug was one cap set wrong.
+Gate: API 13 pass · web 9 pass · ruff/format clean on touched files · mypy-clean.
+
+**NEXT after this merges = VM2-B #526** (plan: `docs/fork/plans/VM2-B-matter-memory-coaching-plan.md`):
+unconditional `MATTER_MEMORY_DOCTRINE` (with a "brief one-pager, fold don't append" tightness cue) beside
+the roster doctrine @ `composition.py:~568` + bundle the baseline `matter-memory` skill for custom areas
++ a proactive high-water-mark receipt in `update_matter_memory`. Decisions 1–4 confirmed by maintainer;
+write path untouched. Also logged: **#533** (research — in-app bug reporting → triage agent → plain-language
+fix proposal to operator; research only, after VM batch).
+
+**VM UAT ROUND 2 triaged (2026-07-14) — plan: `docs/fork/plans/VM-UAT-round2-triage.md`.** A 12-way
+adversarially-verified workflow triaged the external tester's 10 QA notes + maintainer's 3 observations
+(TaskHarbour, IT Procurement area). Confirmed-code slices queued (all S/M, ADR-F005 gate):
+- **VM2-A #525** — redline comment author configurable (retire hardcoded `redline_service.py:69`
+  "LQ.AI Commercial counsel") + target-resolution error branching (`schemas/commercial.py:356`).
+- **VM2-B #526** ⭐ — matter-memory coaching area-agnostic (why "no memory recorded": tools are
+  area-agnostic but the `matter-memory` skill binds to 5 seeded areas only + `MATTER_MEMORY_PROMPT` is
+  empty-wiki-gated; add unconditional `MATTER_MEMORY_DOCTRINE` @ `composition.py:568` + bind in profiles).
+- **VM2-C #527** — PDF type in agent inventory (`tools.py:814` omits mime) + machine-actionable reject.
+- **VM2-D #528** — trust-aware edit attribution (inferred participant ≠ authoritative) + `source_kind` label.
+- **VM2-F #529** — dedup "human judgment" section (doctrine+skill both mandate it) + widen preview ±1 para.
+- **VM2-E** folded into **#524** (adeu bump): repro #1 headings-as-`<ins>` on the PINNED adeu w/ a
+  numbered-heading fixture; fix the `redline_service.py:298` offset-index bypass if confirmed.
+
+**Maintainer DECISIONS needed before building (in the plan):** (#11) branding accent is working-as-designed
+scarce-accent (ADR-F068/F013) — add a preview swatch or broaden to primary chrome (ADR reversal + WCAG)?;
+(#7) grid rows=documents is baked in — guidance-only [S] vs arbitrary row entities [L, ADR]?; (#4B)
+PDF→DOCX convert-then-ask = new converter (SBOM/AGPL) + HITL card, own ADR'd L slice.
+**Dismissed (grain of salt paid off):** #2 preview≠apply (same bytes), #8 grid truncation (LLM re-typing).
+
+CUSTODIAN (#510/#512–#514, OBLIG-1 first) is the phase-2 queue, unchanged.
 
 ## Gotchas (this session — history in memory topics)
 
