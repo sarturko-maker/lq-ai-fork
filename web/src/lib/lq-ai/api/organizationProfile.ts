@@ -21,7 +21,7 @@ export interface OrganizationProfileResponse {
 }
 
 export interface OrganizationProfileUpdateBody {
-	/** Full Markdown body. Server enforces 0..200,000 chars — over the cap
+	/** Full Markdown body. Server enforces 0..32,000 chars — over the cap
 	 *  is a 422, matched client-side by {@link HOUSE_BRIEF_MAX_CHARS}. */
 	content_md: string;
 }

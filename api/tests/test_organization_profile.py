@@ -25,6 +25,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.organization_profile import HOUSE_BRIEF_MAX_CHARS
 from app.db.session import get_db
 from app.main import app
 from app.models import AuditLog, OrganizationProfile, User
@@ -176,6 +177,47 @@ async def test_put_replaces_existing_profile(
     rows = (await db_session.execute(select(OrganizationProfile))).scalars().all()
     assert len(rows) == 1, "PUT must not create a second singleton row"
     assert rows[0].content_md == "# New voice"
+
+
+@pytest.mark.integration
+async def test_put_accepts_content_at_the_cap(client: AsyncClient, admin_user: User) -> None:
+    """A brief exactly at the cap saves — the boundary is inclusive."""
+
+    resp = await client.put(
+        "/api/v1/organization-profile",
+        headers=_bearer(admin_user),
+        json={"content_md": "x" * HOUSE_BRIEF_MAX_CHARS},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.integration
+async def test_put_rejects_content_over_the_cap(
+    client: AsyncClient, db_session: AsyncSession, admin_user: User
+) -> None:
+    """One char over the cap is a 422 (reject-at-write) and persists nothing —
+    the House Brief is injected verbatim into every prompt, so it must stay a
+    tight one-pager; the admin consolidates rather than the store truncating."""
+
+    resp = await client.put(
+        "/api/v1/organization-profile",
+        headers=_bearer(admin_user),
+        json={"content_md": "x" * (HOUSE_BRIEF_MAX_CHARS + 1)},
+    )
+    assert resp.status_code == 422, resp.text
+    rows = (await db_session.execute(select(OrganizationProfile))).scalars().all()
+    assert rows == [], "an over-cap PUT must not create or mutate a row"
+
+
+@pytest.mark.integration
+async def test_house_brief_cap_stays_a_tight_one_pager() -> None:
+    """Drift-guard: the House Brief cap is a one-pager, not the old 50k-token
+    ceiling. It must stay in the injected-tier family (≤ the 20k Practice Playbook
+    doctrine's order of magnitude, well under 200k). If this fails, someone widened
+    the brief that lands on every prompt — reconsider (VM2-G, task #532)."""
+
+    assert HOUSE_BRIEF_MAX_CHARS == 32_000
+    assert HOUSE_BRIEF_MAX_CHARS < 64_000
 
 
 @pytest.mark.integration

@@ -900,6 +900,23 @@ synthetic pack behind a CLI; ADR-F001 forecloses "under the LegalQuants banner")
 - **NEAR-DUP detection (ADR-F082 non-goal, 2026-07-12):** exact-bytes dedup shipped; "same contract,
   lightly edited" clustering over the existing embedding substrate is the natural next slice — any
   agent near-dup hint stays untrusted prose, fenced, never a code assertion.
+- **ADEU BUMP — recurring dependency track (VM UAT, 2026-07-14; task #524):** Adeu is a KEY tool (sole
+  redline path, ADR-F031/F045) and moves fast — we pin `1.12.1`, upstream is already `1.19.1`. VM UAT
+  surfaced an anchor-resolution failure (couldn't locate `target_text` on one docx, worked on another);
+  upstream fixed exactly this across 1.17.2/1.18.0/1.18.2 "docx handling in custom cases" + 1.19.0 "more
+  surgical redlines" + 1.18.4 comment-anchor survival. Bump procedure (do periodically, not just once):
+  installed `--no-deps`, so reconcile Adeu's SDK deps by hand (diff-match-patch, structlog, lxml,
+  python-docx, rapidfuzz, pydantic) and bump the pin in **3 sites** (`api/Dockerfile`,
+  `api/Dockerfile.dev`, `.github/workflows/ci.yml`); rerun the SDK-only import-guard test (no
+  `adeu.server`/`adeu.mcp_components`) + the Claude-judged surgical-redline eval as the gate. Failing docs
+  are usually not shareable → the eval suite carries the verification; note residual uncertainty per bump.
+- **INJECTED-TIER SIZE DISCIPLINE (VM2-G, task #532; House-Brief cap shipped 2026-07-15):** matter memory
+  is a "CLAUDE.md for the matter" and every read-only tier that injects into the prompt must stay a tight
+  one-pager. Standing rule: each tier carries its OWN deterministic reject-at-write cap (Matter File wiki
+  16k, Practice Playbook doctrine 20k, House Brief 32k) — NO single dynamic cross-tier budget (per-tier
+  caps already bound the total; a shared budget adds non-determinism). Never silently trim at injection —
+  what is saved is what the agent sees; a too-long tier is rejected so the human curates. When adding a new
+  injected tier, give it a cap in this family and a drift-guard test.
 
 ### Upstream awareness review (2026-07-10) — see `docs/fork/plans/UPSTREAM-REVIEW-2026-07.md`
 

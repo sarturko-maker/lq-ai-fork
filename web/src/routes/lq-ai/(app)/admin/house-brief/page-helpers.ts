@@ -6,9 +6,11 @@
  */
 
 /** Server cap on `content_md` (`OrganizationProfileUpdateRequest.content_md`,
- *  `api/app/api/organization_profile.py`) — mirrored client-side so a save
- *  is refused before the round trip, not just after a 422. */
-export const HOUSE_BRIEF_MAX_CHARS = 200_000;
+ *  `api/app/api/organization_profile.py` — `HOUSE_BRIEF_MAX_CHARS`) — mirrored
+ *  client-side so a save is refused before the round trip, not just after a 422.
+ *  The brief is injected verbatim into every prompt, so it stays a tight
+ *  one-pager (VM2-G, task #532). Keep in sync with the backend constant. */
+export const HOUSE_BRIEF_MAX_CHARS = 32_000;
 
 /** `null` when the draft is within the server's cap, else a clear message
  *  naming both the limit and the current length. */
