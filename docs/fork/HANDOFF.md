@@ -82,9 +82,10 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 ## State
 
-- `main` = `482c6078` — WORKSPACE (#271) + ADV-1 (#272) merged on top of the wrapped B-stack;
-  deployable for the VM pull. Branches deleted. Dev stack rebuilt on main (migs 0096+0097 applied,
-  keep-alive 130s, healthy at wrap time).
+- `main` = `36160fee` — VM2-G House Brief cap (#277) merged on top of WORKSPACE (#271) + ADV-1 (#272)
+  and the wrapped B-stack; deployable for the VM pull. Branches deleted.
+- **THIS branch `vm2b-matter-memory-coaching` = VM2-B #526 (matter-memory coaching), READY TO MERGE.**
+  Code-only, no migration; deploy = rebuild `api` only (prompt is code). Gate evidence below.
 - Docs: ADR-F082 + ADR-F084 (proposed — maintainer accepts); plans WORKSPACE-awareness /
   ADV-hostile-reader / ROUTER-model-selection; CLAUDE.md tier table gains **Matter Documents**;
   MILESTONES § Backlog gains SUMMARY-EDIT, NEAR-DUP, GATEWAY-JSON lines.
@@ -126,34 +127,46 @@ ruff+mypy clean, new test 2 passed.
 
 **Phase 1 ACTIVE — VM UAT bug-fixing** (direction set 2026-07-12; product-first sequence in the
 banner: 1 VM-bugs → 2 CUSTODIAN → 3 Practice Knowledge → 4 enterprise K8S). VM fixes SHIPPED
-(healthcheck #274, CORS-PUT #276, **House-Brief cap #532 — this branch**). Adeu anchor bump QUEUED (#524).
+(healthcheck #274, CORS-PUT #276, House-Brief cap #277/#532). **VM2-B #526 = THIS branch, ready to merge.**
+Adeu anchor bump QUEUED (#524).
 
-**VM2-G #532 SHIPPED (this branch `fix/vm2-g-house-brief-cap`) — House Brief write cap 200k→32k.**
-Came out of the VM2-B matter-memory tightness discussion (matter memory = "CLAUDE.md for the matter";
-must stay tight). Audit finding: the injected read-only tiers were individually capped EXCEPT House
-Brief — `organization_profile.content_md` allowed **200,000 chars (~50k tokens)** and is injected WHOLE
-into every prompt (`composition.py:603`, no trim), 12.5× the Matter File wiki (16k) and 10× the Practice
-Playbook doctrine (20k). Fix = lower the PUT cap to a one-pager 32k (`organization_profile.py`
-`HOUSE_BRIEF_MAX_CHARS`), mirrored in web (`page-helpers.ts` + `organizationProfile.ts`) + OpenAPI doc;
-reject-at-write (admin curates), NEVER silent inject-trim. Decision recorded: **no single dynamic
-cross-tier budget** — per-tier deterministic caps already bound the total; the bug was one cap set wrong.
-Gate: API 13 pass · web 9 pass · ruff/format clean on touched files · mypy-clean.
+**VM2-G #532 MERGED (PR #277, `36160fee`) — House Brief write cap 200k→32k.** Injected read-only tiers
+were all individually capped EXCEPT House Brief (200k ≈ 50k tokens, injected WHOLE every prompt, no trim).
+Fix = `HOUSE_BRIEF_MAX_CHARS = 32_000` reject-at-write, mirrored web + OpenAPI. Decision recorded: **no
+single dynamic cross-tier budget** — per-tier deterministic caps already bound the total.
 
-**NEXT after this merges = VM2-B #526** (plan: `docs/fork/plans/VM2-B-matter-memory-coaching-plan.md`):
-unconditional `MATTER_MEMORY_DOCTRINE` (with a "brief one-pager, fold don't append" tightness cue) beside
-the roster doctrine @ `composition.py:~568` + bundle the baseline `matter-memory` skill for custom areas
-+ a proactive high-water-mark receipt in `update_matter_memory`. Decisions 1–4 confirmed by maintainer;
-write path untouched. Also logged: **#533** (research — in-app bug reporting → triage agent → plain-language
-fix proposal to operator; research only, after VM batch).
+**VM2-B #526 SHIPPED (this branch `vm2b-matter-memory-coaching`) — matter-memory coaching, area-agnostic.**
+Diagnosis (adversarial 6-way investigation, plan `docs/fork/plans/VM2-B-matter-memory-coaching-plan.md`):
+"no memory recorded" was NOT area-specific — the write tools (`update_matter_memory`/`record_matter_fact`)
+are already granted to every matter-bound run, but the ONLY prose naming them lived inside the
+`MATTER_MEMORY_PROMPT` data fence, which renders only when the wiki is ALREADY non-empty → a fresh matter
+(empty wiki) in ANY area got the tool with zero coaching (chicken-and-egg). Fix, three parts:
+1. **`MATTER_MEMORY_DOCTRINE`** constant (`composition.py:~289`), appended UNCONDITIONALLY in
+   `system_prompt_for`'s `if binding is not None:` block beside `MATTER_ROSTER_DOCTRINE` (`:607`), carrying
+   the "brief living one-pager, fold not append" tightness cue (reinforces `skills/matter-memory/SKILL.md`,
+   never plain-append). Reaches production faithfully (same static base; DATA tiers ride middleware).
+2. **`BASELINE_SKILL_NAMES = frozenset({"matter-memory"})`** unioned into the area's skills in
+   `compose_and_execute_run` (`:~825`) so custom/blank areas (which bind zero skills) still get the FULL
+   craft skill; filtered through the live registry → degrades to silence if absent; dedup vs manual binds.
+3. **High-water-mark receipt** in `_update_matter_memory` (`matter_memory_tools.py`): once a saved wiki
+   reaches 75% of `MATTER_WIKI_MAX_CHARS` (12k/16k) the success receipt appends a "consolidate soon" nudge
+   — prune before the hard reject, char-COUNT only (audit-clean, no body text). No migration; write path
+   untouched. Gate: 3 targeted + 53 touched-file + **868 tests/agents/** pass · ruff/format + mypy clean ·
+   fresh-context adversarial review = 0 blockers/0 should-fixes, 3 nits applied (comment accuracy + a
+   double-`list()` simplification). Deploy = rebuild `api` only.
+
+Also logged: **#533** (research — in-app bug reporting → triage agent → plain-language fix to operator) +
+**#534** (research — Graphiti/Zep temporal knowledge-graph as a memory substrate; build-vs-adopt vs our
+Matter-Facts ledger + Store, gateway-egress + graph-DB-infra constraints). Both research-only, after VM batch.
 
 **VM UAT ROUND 2 triaged (2026-07-14) — plan: `docs/fork/plans/VM-UAT-round2-triage.md`.** A 12-way
 adversarially-verified workflow triaged the external tester's 10 QA notes + maintainer's 3 observations
 (TaskHarbour, IT Procurement area). Confirmed-code slices queued (all S/M, ADR-F005 gate):
 - **VM2-A #525** — redline comment author configurable (retire hardcoded `redline_service.py:69`
   "LQ.AI Commercial counsel") + target-resolution error branching (`schemas/commercial.py:356`).
-- **VM2-B #526** ⭐ — matter-memory coaching area-agnostic (why "no memory recorded": tools are
-  area-agnostic but the `matter-memory` skill binds to 5 seeded areas only + `MATTER_MEMORY_PROMPT` is
-  empty-wiki-gated; add unconditional `MATTER_MEMORY_DOCTRINE` @ `composition.py:568` + bind in profiles).
+- **VM2-B #526** ✅ SHIPPED (this branch) — matter-memory coaching area-agnostic. Real trigger was
+  empty-wiki-gated coaching, not area; fixed via unconditional `MATTER_MEMORY_DOCTRINE` + baseline
+  `matter-memory` skill union + high-water receipt. See the SHIPPED block above.
 - **VM2-C #527** — PDF type in agent inventory (`tools.py:814` omits mime) + machine-actionable reject.
 - **VM2-D #528** — trust-aware edit attribution (inferred participant ≠ authoritative) + `source_kind` label.
 - **VM2-F #529** — dedup "human judgment" section (doctrine+skill both mandate it) + widen preview ±1 para.

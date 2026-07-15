@@ -285,6 +285,37 @@ MATTER_ROSTER_DOCTRINE = (
     "authoritative; never override them."
 )
 
+# Matter-memory doctrine (VM2-B, #526): the keep-your-working-memory-current behaviour.
+# Generic (any area), appended UNCONDITIONALLY for every matter-bound run — mirroring
+# MATTER_ROSTER_DOCTRINE above. The write tools (update_matter_memory / record_matter_fact)
+# are already granted to every matter-bound run, but the ONLY prose naming them lived inside
+# the MATTER_MEMORY_PROMPT data fence, which render_memory_tiers emits only once the wiki is
+# already non-empty — so a fresh matter (empty wiki) in ANY area got the tool with zero
+# coaching to use it (a chicken-and-egg: nothing said "write memory" until memory existed).
+# This unconditional nudge closes that for every area at once. The "brief living one-pager,
+# fold facts in rather than append" clause is load-bearing: a custom area that gets only this
+# doctrine (not the full matter-memory SKILL) must still be told to keep memory TIGHT, or we
+# trade "no memory" for "bloated memory" (the wiki is injected verbatim every run, hard-capped
+# at MATTER_WIKI_MAX_CHARS). Wording deliberately reinforces skills/matter-memory/SKILL.md
+# (fold, never plain append) and names only the two write tools — consolidate + the deeper
+# fold/supersede craft stay in the SKILL.
+MATTER_MEMORY_DOCTRINE = (
+    "\n\nKeep this matter's working memory current as you go. As you learn durable facts "
+    "about the matter, fold them into its memory with update_matter_memory — a brief living "
+    "one-pager you revise in place, not a log you append to; when it grows, consolidate "
+    "rather than pile on. Record dated, supersede-able facts (what became true and when) "
+    "with record_matter_fact. Do this without being asked, from the first thing you learn; "
+    "the lawyer's confirmed corrections are authoritative and you never overwrite them."
+)
+
+# VM2-B (#526): skills every practice area gets regardless of its practice_area_skills
+# bindings — the composition-seam mirror of the area-agnostic matter-memory TOOL grant
+# (the matter-memory tools are built for every matter-bound run in the `if binding is not
+# None:` block below, independent of area). Kept to the ONE genuinely universal craft
+# skill; unioned into bound_skill_names and still filtered through the live registry, so a
+# deployment without this skill degrades to silence (never crashes).
+BASELINE_SKILL_NAMES = frozenset({"matter-memory"})
+
 # F2 N3 conversation-recall doctrine (ADR-F049): the cross-thread recall behaviour.
 # Generic (any area), appended for every matter-bound run. A matter may span several
 # separate conversations; the agent should reach for search_matter_conversations when it
@@ -549,6 +580,14 @@ def system_prompt_for(
     matter; the roster says who is who. Every layer degrades cleanly to silence — an
     absent/empty area, client, wiki, corrections or roster adds nothing.
 
+    For every matter-bound run the run-invariant static base also carries the standing
+    behaviour doctrines — review hand-back (ADR-F047), authorship roster (ADR-F048),
+    matter-memory upkeep (VM2-B, #526: keep the wiki current from the first fact, any
+    area, empty wiki included), cross-thread conversation recall (ADR-F049 N3) and
+    retrieval strategy (ADR-F049 Slice E) — appended in that order before the optional
+    tabular doctrine. These are prose "when to reach for it" nudges beside the tools that
+    are already granted; they are NOT the DATA tiers.
+
     F2 N1 (ADR-F049): in production the four DATA tiers no longer ride this string —
     ``compose_and_execute_run`` passes only the run-invariant base (identity + matter
     doctrine + area suffix) here and injects the tiers via ``TierMemoryMiddleware``
@@ -566,6 +605,7 @@ def system_prompt_for(
         prompt += MATTER_PROMPT.format(name=binding.name)
         prompt += MATTER_REVIEW_DOCTRINE
         prompt += MATTER_ROSTER_DOCTRINE
+        prompt += MATTER_MEMORY_DOCTRINE  # VM2-B (#526): area-agnostic, empty-wiki included
         prompt += MATTER_CONVERSATION_DOCTRINE
         prompt += RETRIEVAL_STRATEGY_DOCTRINE
         if tabular_enabled:
@@ -774,7 +814,7 @@ async def compose_and_execute_run(
                             # closes); compiled against the final grant set below.
                             hitl_policy = area.hitl_policy or {}
                             registry = skill_registry_provider()
-                            bound_skill_names = (
+                            area_bound_skills = (
                                 (
                                     await db.execute(
                                         select(PracticeAreaSkill.skill_name).where(
@@ -784,6 +824,19 @@ async def compose_and_execute_run(
                                 )
                                 .scalars()
                                 .all()
+                            )
+                            # VM2-B (#526): the matter-memory craft skill is a BASELINE for
+                            # every area — matter memory is granted area-agnostically (the
+                            # tools are built for every matter-bound run below), so a
+                            # custom/blank area that bound zero skills (POST /practice-areas
+                            # and profiles/blank bind none) would otherwise get the terse
+                            # MATTER_MEMORY_DOCTRINE but not the full fold/supersede/consolidate
+                            # craft. Union it in here. render_area_agent filters through
+                            # known_skill_names, so a registry missing the skill degrades to
+                            # silence; dedup means a manual admin binding of the same skill
+                            # never duplicates.
+                            bound_skill_names = list(
+                                dict.fromkeys([*area_bound_skills, *BASELINE_SKILL_NAMES])
                             )
                             area_spec = render_area_agent(
                                 profile_md=area.profile_md,
