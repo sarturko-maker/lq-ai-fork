@@ -1,6 +1,6 @@
 # ADR-F045 — Surgical redlines are produced by the tool (Adeu native word-diff), not the model
 
-- Status: proposed
+- Status: superseded-by-F085
 - Date: 2026-06-24
 - Deciders: Arturs (maintainer)
 - Relates: extends ADR-F041 (surgical-redline craft = prompt lever + eval — and **corrects a factual

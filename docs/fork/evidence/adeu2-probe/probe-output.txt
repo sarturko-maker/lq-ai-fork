@@ -1,0 +1,72 @@
+Empirical probe of adeu==2.4.0 against SecureScan-MSA.docx (2026-08-15, throwaway
+python:3.12-slim container, adeu installed --no-deps + SDK deps). Script: probe.py.
+Key lines only; structlog debug noise elided. "Regions" = w:ins / w:del elements
+counted in word/document.xml of the saved output.
+
+target (28w): |It shall automatically renew for successive three (3) year terms unless the Cust...|
+(edit changes word 3 -> ALPHAWORD and word -3 -> OMEGAWORD; middle unchanged)
+
+=== A: native, commented ===
+  applied=1 skipped=0
+  [A] regions=2 comments=1 ['probe A rationale']
+     0 del |automatically renew for successive three (3) year terms unless the ...|
+     1 ins |ALPHAWORD renew for successive three (3) year terms unless the Cust...|
+  -> ONE atomic del+ins block; unchanged middle mutualised. NOT surgical.
+
+=== B: native, uncommented ===
+  applied=1 skipped=0
+  [B] regions=4 comments=0 []
+     0 del |automatically|  1 ins |ALPHAWORD|  2 del |the|  3 ins |OMEGAWORD|
+  -> native word-diff fan-out. Fully surgical.
+
+=== C: shim (pinned raw offsets), pristine ===
+  shim subs=2 applied=2 skipped=0
+  [C] regions=4 comments=1 ['probe C rationale']   (identical regions to B)
+  -> current shim still works on v2 for PRISTINE docs.
+
+=== D: round 2, native insert (target spans round-1 insertion, commented) ===
+  comments before: 1
+  [warning] Comment anchor context missing; skipping comment attachment text='probe D comment'
+  applied=1 skipped=0  comments after: 1
+  -> edit resolved and applied correctly, but the COMMENT WAS SILENTLY DROPPED
+     (counts show clean success; warning-level log only).
+
+=== D2: round 2, target = round-1 DELETED text ===
+  applied=0 skipped=1 detail=["- Failed to apply edit targeting: 'automatically renew for successive three...'"]
+  -> correct refusal, actionable message.
+
+=== D3: shim on round-2 doc ===
+  uniqueness held for this target (contains ALPHAWORD, which disambiguates);
+  raw-view duplication kills uniqueness only for targets not spanning the changed word.
+
+=== E: shim pinned raw offsets on round-2 doc (AP-05) ===
+  T3=|[Com:1] LQ.AI probe @ 2026-08-15T22:58:10Z: probe ...| raw_off=1456 clean_off=-1 delta=1457
+  applied=1 skipped=0; PINPROBE precedes | Vendor upon creation. Th|; intended |[Com:1] LQ.AI probe @ 202|
+  MIS-ANCHORED: True
+  -> raw-computed offset reinterpreted as clean-view offset: the edit LANDED IN A
+     DIFFERENT CLAUSE with applied=1 skipped=0. Silent wrong-clause corruption.
+     (Also demonstrates raw view embeds comment bodies as [Com:N] text.)
+
+=== H1: comment-only edit (target==new), pristine ===
+  applied=1 skipped=0 regions=0 comments=['probe H1 comment-only']
+  -> comment-only ModifyText is first-class: comment anchored, zero tracked changes.
+
+=== H2: TWO-PASS RECIPE, pristine (uncommented apply, then comment-only over updated clause) ===
+  pass1 applied=1 skipped=0; pass2 applied=1 skipped=0
+  [H2] regions=4 comments=1 ['probe H2 rationale']
+     0 del |automatically|  1 ins |ALPHAWORD|  2 del |the|  3 ins |OMEGAWORD|
+  -> SURGICAL regions + ONE comment spanning the whole logical edit. The recipe.
+
+=== H4: RECIPE on round-2 doc at the exact spot where D dropped its comment ===
+  pass1 applied=1 skipped=0; pass2 applied=1 skipped=0
+  comments: 1 -> 2 ['probe A rationale', 'probe H4 rationale']
+  -> the recipe ALSO fixes the round-2 comment drop.
+
+=== F: validate_edits ===
+  returned list len=1: ['- Edit 2 Failed: Target text not found in document:\n  "ZZZ NOT PRESENT QQQ"']
+  _mutated_since_load=False
+  -> public, per-edit-indexed, actionable messages; confirmed non-mutating.
+
+=== G: settings.xml ===
+  w:trackChanges present after native apply: False
+  -> ensure_track_changes_recording() post-processing must stay.

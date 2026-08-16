@@ -1,0 +1,49 @@
+{
+  "model": "deepseek",
+  "id": "commercial_redline_msa",
+  "title": "Surgical redline of a vendor-favoured SaaS MSA",
+  "note": "Does the agent read the MSA, then apply_redline with surgical, balanced edits?",
+  "prompt": "You are our in-house commercial counsel and we are the CUSTOMER. Review the attached vendor SaaS agreement \"SecureScan-MSA.docx\" and redline it to protect us \u2014 apply your changes as tracked changes using apply_redline. Make surgical, balanced edits (carve-outs, deemed-direct, super-caps where appropriate); do not rip-and-replace whole clauses. Work through EVERY one-sided clause: the liability cap, the one-sided indemnity, the IP assignment, the Customer Data licence, the warranty disclaimer, the unilateral fee increase and the auto-renewal/no-termination term. Read the whole agreement first, then apply ALL your edits in a SINGLE apply_redline call (it takes a batch of many edits and re-redlines the original on each call, so one call must cover everything).",
+  "status": "completed",
+  "latency_s": 215.9,
+  "step_count": 39,
+  "model_turns": 11,
+  "tools_called": [
+    "search_matter_memory",
+    "estimate_read_cost",
+    "read_document",
+    "glob",
+    "ls",
+    "get_document_metadata",
+    "record_matter_participant",
+    "preview_redline",
+    "preview_redline",
+    "preview_redline",
+    "preview_redline",
+    "apply_redline",
+    "record_document_summary",
+    "update_matter_memory"
+  ],
+  "task_calls": 0,
+  "delegated": false,
+  "ancestry": [],
+  "expect_tools": [
+    "apply_redline"
+  ],
+  "forbid_tools": [],
+  "shape_matched": true,
+  "checks": {
+    "expected_tools_present": true,
+    "forbidden_tools_absent": true,
+    "must_include_ok": true,
+    "should_not_ok": true,
+    "within_step_bound": true,
+    "clarify_ok": null,
+    "refusal_ok": null
+  },
+  "error": null,
+  "final_answer_excerpt": "Redline complete \u2014 11 tracked edits applied to **SecureScan-MSA.docx**, saved as **SecureScan-MSA (redlined).docx** for your review. I read the full agreement first and covered every one-sided clause you listed (plus one more in \u00a72). Each substantive change carries a rationale comment in the document.\n\n## What I changed (all from SecureScan-MSA.docx)\n\n**\u00a72 Services** \u2014 Feature discontinuation: Vendor could modify/discontinue any feature at will, with no notice and no exit. Added 30-day notice for material changes and a Customer termination right if a material feature is discontinued.\n\n**\u00a73 Fees** \u2014 Unilateral increase: fee raises at any time on 30 days' notice. Now: no increases during the initial term, max once per 12 months on 60 days' notice, and Customer may exit without penalty if it \u2026",
+  "redlined_file": "SecureScan-MSA (redlined).docx",
+  "judge_rating": "STRONG",
+  "judge_surgical": true
+}

@@ -23,6 +23,7 @@ counts/types/IDs only — never ``target_text``/``new_text``/clause content.
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import re
 import uuid
@@ -46,6 +47,7 @@ from app.agents.redline_service import (
     DEFAULT_AUTHOR,
     ProposedEdit,
     RedlineApplyResult,
+    RedlineRenderError,
     RedlineService,
 )
 from app.agents.tools import (
@@ -113,6 +115,22 @@ _EDITOR_ERROR_MSG = (
     'claim." → new "…the claim, save that …unlimited." Then re-quote a slightly '
     "longer, unique anchor and call again."
 )
+
+# Per-edit problem lists can quote clause text (fine in a tool RESULT; logs stay
+# counts-only). Bounded so a pathological batch cannot flood the agent's context.
+_MAX_PROBLEMS_CHARS = 2400
+
+
+def _problems_rejection(problems: tuple[str, ...]) -> str:
+    """Format the editor's per-edit findings as a fix-and-retry for the model."""
+    body = "\n".join(problems)
+    if len(body) > _MAX_PROBLEMS_CHARS:
+        body = body[:_MAX_PROBLEMS_CHARS] + "\n… (further findings truncated)"
+    return (
+        "The editor rejected the batch — nothing was written. Fix the specific "
+        "edit(s) below and call again (edits are numbered in the order you sent "
+        "them):\n" + body
+    )
 
 
 def build_commercial_tools(
@@ -435,11 +453,11 @@ async def _render_redline(
         )
         return f'"{row.filename}" failed .docx safety checks and was not redlined.'
 
-    document_text = (row.normalized_content or "").strip() or _extract_docx_text(data)
+    document_text = _redline_gate_text(data).strip()
     if not document_text:
         return (
-            f'"{row.filename}" has no extractable text yet (ingestion pending or '
-            "failed); cannot place edits. Try again shortly."
+            f'"{row.filename}" has no extractable text; cannot place edits. '
+            "Check the document is a real Word document with body text."
         )
 
     # 3. Document-relative gate (D1/D4/D5).
@@ -454,11 +472,12 @@ async def _render_redline(
         ProposedEdit(e.target_text, e.new_text, e.rationale.strip() or None) for e in proposal.edits
     ]
 
-    # 5. D6: mandatory dry-run self-review. Any edit Adeu can't place (anchor not
-    #    found in the document's runs) blocks the write — never a partial redline.
-    #    Adeu operates on untrusted (model-proposed) edits + an untrusted document,
-    #    so a pathological edit (e.g. a pure zero-width insertion the editor can't
-    #    place) must come back as a fix-and-retry, never a 500 (reject, don't crash).
+    # 5. D6: mandatory dry-run self-review. Any edit Adeu can't place blocks the
+    #    write — never a partial redline. The preview's per-edit problems (Adeu's
+    #    validate/apply messages — ambiguity with competing contexts, not-found,
+    #    structural violations) go back to the MODEL verbatim so it can fix the
+    #    exact edit; logs carry counts/events only, never clause text. Unexpected
+    #    editor faults still come back as a fix-and-retry, never a 500.
     try:
         preview = service.dry_run(data, logical)
     except Exception:
@@ -467,18 +486,33 @@ async def _render_redline(
             extra={"event": "redline_dry_run_error"},
         )
         return _EDITOR_ERROR_MSG
+    if preview.problems:
+        return _problems_rejection(preview.problems)
     if preview.edits_applied == 0:
         return "No changes could be placed — re-quote the exact existing text in target_text."
     if preview.edits_skipped > 0:
         return (
-            f"{preview.edits_skipped} edit region(s) could not be located in the "
-            "document (anchors not found in the underlying text) — re-quote the "
-            "exact existing text in target_text."
+            f"{preview.edits_skipped} edit(s) could not be located in the "
+            "document — re-quote the exact existing text in target_text."
+        )
+    if preview.comments_skipped > 0:
+        return (
+            f"{preview.comments_skipped} rationale comment(s) could not be anchored "
+            "on target_text — re-quote the exact existing clause text in "
+            "target_text, then retry."
         )
 
-    # 6. Render for real → redlined .docx bytes (in memory).
+    # 6. Render for real → redlined .docx bytes (in memory). apply() returns bytes
+    #    ONLY from a fully clean render and raises RedlineRenderError otherwise
+    #    (a half-applied engine is discarded inside the service, never serialised).
     try:
         result = service.apply(data, logical)
+    except RedlineRenderError as exc:
+        logger.warning(
+            "redline apply rejected by the editor",
+            extra={"event": "redline_apply_error", "problems": len(exc.problems)},
+        )
+        return _problems_rejection(exc.problems)
     except Exception:
         logger.warning(
             "redline apply failed inside the editor",
@@ -526,8 +560,8 @@ async def _preview_redline(
     note = f"{rendered.continuity_note}\n\n" if rendered.continuity_note else ""
     return (
         f"{note}Preview of {len(rendered.proposal.edits)} edit(s) on "
-        f'"{rendered.row.filename}" ({rendered.result.edits_applied} tracked change '
-        "region(s)). NOTHING has been saved — this is a dry run.\n\n"
+        f'"{rendered.row.filename}" ({rendered.result.edits_applied} edit(s) rendered '
+        "as tracked changes). NOTHING has been saved — this is a dry run.\n\n"
         "Rendered tracked changes ([-struck-] / [+inserted+]):\n"
         f"{view}\n\n"
         "Check each clause: are only the words that needed changing struck (the "
@@ -641,15 +675,15 @@ async def _apply_redline(
             "source_file_id": str(row.file_id),
             "updated_in_place": False,
             "proposed_edits": len(proposal.edits),
-            "applied_regions": result.edits_applied,
+            "edits_applied": result.edits_applied,  # per LOGICAL edit on adeu >=2.x (F085), not OOXML regions
             "redlined_sha256": file_row.hash_sha256,
         },
     )
 
     note = f"{rendered.continuity_note} " if rendered.continuity_note else ""
     return (
-        f"{note}Applied {len(proposal.edits)} edit(s) ({result.edits_applied} tracked "
-        f'change region(s)) to "{row.filename}". Saved the redlined document as '
+        f"{note}Applied {result.edits_applied} edit(s) as tracked changes to "
+        f'"{row.filename}". Saved the redlined document as '
         f'"{redlined_name}" in this matter — download it to review and accept or '
         f"reject each change. Every change is tracked; substantive ones carry a "
         f"comment explaining the rationale."
@@ -823,7 +857,7 @@ async def _update_working_head(
             "updated_in_place": True,
             "snapshot_file_id": str(snapshot_id) if snapshot_id else None,
             "proposed_edits": len(proposal.edits),
-            "applied_regions": result.edits_applied,
+            "edits_applied": result.edits_applied,  # per LOGICAL edit on adeu >=2.x (F085), not OOXML regions
             "redlined_sha256": head.hash_sha256,
         },
     )
@@ -836,8 +870,8 @@ async def _update_working_head(
         else ""
     )
     return (
-        f"{note}Applied {len(proposal.edits)} edit(s) ({result.edits_applied} tracked "
-        f'change region(s)) and updated "{head_filename}" in place — the living '
+        f"{note}Applied {result.edits_applied} edit(s) as tracked changes and "
+        f'updated "{head_filename}" in place — the living '
         f"redline now carries the earlier tracked changes plus these new ones."
         f"{snapshot_note} The supervising lawyer reviews and accepts or rejects each "
         f"change; substantive ones carry a comment explaining the rationale."
@@ -1161,6 +1195,7 @@ async def _respond_to_counterparty(
             "changes": len(state.changes),
             "comments": len(state.open_comment_refs),
             "review_applied": recon.review_applied,
+            "review_already_resolved": recon.review_already_resolved,
             "counters_applied": recon.counters_applied,
             **counts,
         },
@@ -1371,14 +1406,42 @@ def _response_filename(original: str) -> str:
 
 
 def _extract_docx_text(data: bytes) -> str:
-    """Fallback full-text extraction (when the doc carries no normalized_content),
-    via the C1 DocxReader so the gate sees the same text the agent would."""
+    """Last-resort full-text extraction via the C1 DocxReader. NOTE: python-docx
+    ``paragraph.text`` cannot see inside ``w:ins``/``w:del`` (tracked changes) or
+    tables — fine for a pristine upload, blind on a living redline; that is why
+    :func:`_redline_gate_text` prefers Adeu's clean view."""
     try:
         from app.pipeline.readers.docx import DocxReader
 
         return DocxReader().read(data).canonical_text
     except Exception:
         return ""
+
+
+def _redline_gate_text(data: bytes) -> str:
+    """The document text the D4 uniqueness gate counts against: Adeu's CLEAN view
+    (the document as it currently stands, all pending tracked changes accepted) —
+    the same space the engine resolves targets in and the agent reasons about.
+
+    The previous ``normalized_content``/DocxReader source is tracked-change-blind
+    (python-docx skips ``w:ins``/``w:del`` runs), so on a living-redline round 2
+    it counted 0 occurrences for any target inside round-1 insertions and D4
+    falsely rejected the edit. ``include_appendix=False`` keeps the gate text to
+    the body Adeu's own mapper projects (the appendix is a read-only summary that
+    must never count as an anchor). DocxReader remains the last-resort fallback
+    so a doc Adeu cannot open still gets a gate rather than a crash."""
+    try:
+        from adeu import extract_text_from_stream
+
+        return extract_text_from_stream(
+            io.BytesIO(data), filename="gate.docx", clean_view=True, include_appendix=False
+        )
+    except Exception:
+        logger.warning(
+            "adeu clean-view gate text failed; falling back to DocxReader",
+            extra={"event": "redline_gate_text_fallback"},
+        )
+        return _extract_docx_text(data)
 
 
 def _redlined_filename(original: str) -> str:

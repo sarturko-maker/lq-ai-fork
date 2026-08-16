@@ -105,7 +105,7 @@ jobs:
         # Adeu's hard fastmcp[apps] dep would pull starlette 0.48 / mcp / pydantic
         # 2.13 and break our pinned FastAPI stack; we never use its FastMCP server,
         # and its real SDK deps (diff-match-patch, structlog, …) are in pyproject.
-        run: pip install --no-deps "adeu==1.12.1"
+        run: pip install --no-deps "adeu==2.4.0"
 
       - name: ruff check (api + scripts via root config)
         # The repo-root ruff.toml excludes web/ and applies to api+gateway+scripts.

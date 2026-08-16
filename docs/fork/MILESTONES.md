@@ -910,6 +910,15 @@ synthetic pack behind a CLI; ADR-F001 forecloses "under the LegalQuants banner")
   `api/Dockerfile.dev`, `.github/workflows/ci.yml`); rerun the SDK-only import-guard test (no
   `adeu.server`/`adeu.mcp_components`) + the Claude-judged surgical-redline eval as the gate. Failing docs
   are usually not shareable → the eval suite carries the verification; note residual uncertainty per bump.
+  **2026-08-16: bumped to 2.4.0 (ADR-F085 — shim deleted, annotate-first two-pass recipe).** Next bump
+  follows the same procedure; the fast-rig adapter suite + C9 eval remain the gate.
+- **ADEU-2 follow-ups (2026-08-16, from ADR-F085 + its review):** `process_batch` consolidation
+  (transactional all-or-nothing + failed indices — viable now that logical edits are D4-unique);
+  `reject_all_revisions` "reject the entire counterparty round" tool (new in 2.x); scenario-harness
+  improvement — persist preview/tool REJECTION TEXTS into the evidence dir on `cap_exceeded` (the
+  run-2 thrash forensics were blind); upstream reports to the Adeu maintainer (maintainer will
+  contact personally): round-2 commented-insert silent comment drop; `BatchValidationError` failed
+  indices mis-attributing to 0.
 - **INJECTED-TIER SIZE DISCIPLINE (VM2-G, task #532; House-Brief cap shipped 2026-07-15):** matter memory
   is a "CLAUDE.md for the matter" and every read-only tier that injects into the prompt must stay a tight
   one-pager. Standing rule: each tier carries its OWN deterministic reject-at-write cap (Matter File wiki

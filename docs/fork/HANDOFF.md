@@ -3,190 +3,72 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ═══════════════════════════════════════════════════════════════════════════════════════════════════════
-> **OVERNIGHT RUN COMPLETE (2026-07-11 → 07-12, maintainer travelling, "run until the morning").**
-> The maintainer's four-thread directive is fully discharged; BOTH feature threads are MERGED to main:
->
-> **① WORKSPACE ✅ MERGED PR #271 (`bbedd04d`, ADR-F082, mig 0096).** Duplicate detection (code-computed
-> from `hash_sha256`, matter+owner scoped, never agent-asserted) + per-document summaries
-> (`record_document_summary`, auto-write-then-correct) surfaced three ways: agent inventory markers, a
-> 6th read-only prompt tier (data-only fence, 30 lines/8k chars, visible "+K more" tail), and
-> `MatterFileRead.summary/duplicate_of` → amber "identical to X" badge + summary subtitle in the
-> Documents panel. Full gate: CI ×3; **18-finding adversarial review ALL fixed** — highlights: the
-> summary resolver now mirrors `read_document`'s exact rule (case-insensitive, readable-first);
-> newline/"(duplicate of" forgery REJECTED at the write boundary; the human half exists (`PUT
-> /matters/{id}/files/{file_id}/summary`, `summary_author` 'agent'|'human', **pins win** — the agent
-> refuses to overwrite a human summary); stale summaries carry an explicit suffix (`summary_stale`);
-> work products render F066 provenance, never "not yet read". Live-verified on the rebuilt trio
-> (evidence in the PR comment).
->
-> **② ADV-1 ✅ MERGED PR #272 (`482c6078`, ADR-F084, mig 0097).** The agent-OFFERED hostile reader:
-> `adversarial_review` = a TOP-LEVEL lead tool riding the redlining grant set (subagents are
-> HITL-un-gateable — that's WHY it's a lead tool), one purpose-specific gateway pass
-> (`lq_ai_purpose="adversarial_review"` — now in the gateway `_KNOWN_PURPOSES`; **gateway RESTART
-> needed on deploy**), full accept-all text (60k cap, honest truncation; the negotiation
-> `clean_view` is 8k-bounded — extracted directly instead), strict-JSON findings (25 cap, severity ×
-> {over_reach, under_protection, inconsistency, gap}), reject-not-crash, counts-only audit.
-> `skills/adversarial-review` coaches WHEN to offer (stance-distinct from deal-review /
-> negotiation-review). Bound the post-B7a way (mig 0097 bind + users-gated Library adoption +
-> manifest + RECOMMENDED together — parity oracle green). **Default OFF**; the admin HITL toggle is
-> the confirm card. Review: 5 confirmed → 4 fixed (incl. focus fenced as steer-only + echoed
-> "FOCUS APPLIED" in the render; textless-docx reject before spend), 1 deferred on record
-> (shared gateway-JSON helper — MILESTONES backlog). **Deferred on record:** seeded-defect recall
-> eval (box OOMs ONNX; recipe in `docs/fork/plans/ADV-hostile-reader.md`) + the live offer walk
-> (maintainer VM session).
->
-> **③ MODEL QUESTION answered + ④ ROUTER research delivered** — `docs/fork/plans/ROUTER-model-selection.md`
-> (research ONLY, per the maintainer): smart/fast/budget is the wrong primary axis → three orthogonal
-> axes (capability-role `reasoning`/`balanced`/`bulk` × operator task-class aliases × the existing tier
-> floor); NDA→balanced, M&A fan-out = reasoning lead + bulk workers; smallest build = config-only
-> gateway.yaml; the REAL prerequisite is eval-gating (CUAD/masked-judge harness); F083 reserved.
-> Per-subagent models = gateway-bound INSTANCE injected in composition only (config path is a dead
-> end); verify deepagents 0.6.8 honours a per-spec instance before building.
->
-> ◀ **PICK UP HERE: DIRECTION SET 2026-07-12 — product-first, enterprise-last** (resolves the
-> enterprise-vs-product call). Maintainer's 4-phase roadmap:
-> **(1) VM UAT bug-fixing — ACTIVE.** Maintainer tests the shipped stack on the Azure VM and sends
->     feedback (ad-hoc/random, *may branch into side-quests*); we FIX broken bugs/features FIRST,
->     before any new build. No proactive slice — next work = whatever the feedback surfaces.
-> **(2) CUSTODIAN** — per-matter obligation/exposure/why/outcome capture (#510/#512–#514; ADV-1 done).
-> **(3) Matter-wisdom escalation = Practice Knowledge** (ADR-F050 / `PRACTICE-KNOWLEDGE-prize.md`): the
->     de-identify→guard→curator-approve harness. DESIGNED, NOT built; CUSTODIAN WHY-1/OUTCOME-1 bank
->     its raw material. NB the authoring pipeline (propose→approve→Library→bind) + knowledge-collection
->     tool group already exist — they escalate HUMAN-authored content; this escalates AGENT-noticed
->     matter wisdom, which is why it needs the confidentiality+poison harness. Slice-1 = light up the
->     write-only Lawyer Preferences shelf (cheapest on-ramp).
-> **(4) Enterprise-grade deployment** — K8S/AKS ladder (F073–F080; the 5 confirmed scale bugs). Real
->     customer runs on the demo-grade VM/compose path meanwhile; scale-hardening waits for this phase.
-> **Still-open QUICK CALLS (fold into phase 1, not blockers):** shipped-profile HITL defaults
-> (`apply_redline` + `adversarial_review`); the 5 untracked strays (one carries a RUF002 `×`); router —
-> adopt taxonomy / when to build (research, ~phase 4).
-> GATED/deferred: CLEAN-3b #505; #504 claim-grace; AZ-4 parked; AZ-6 keyless-MI branch unpushed;
-> ADV seeded-defect eval + live walk; SUMMARY-EDIT / NEAR-DUP / GATEWAY-JSON helper (MILESTONES backlog).
->
-> **MAINTAINER'S AZURE-VM LIVE-TEST SCRIPT (pull main `482c6078`+, rebuild SERIAL with cache —
-> never `--no-cache ×4`; stale web bundle hides features; the gateway needs a RESTART for the
-> adversarial_review purpose tag):**
-> ① Fresh-org wizard (B-7 sign-off) — empty Library → auto-launch → Commercial → agent redlines.
-> ② F081 living redline — "redline it" → "further redline" → SAME doc updates in place.
-> ③ WORKSPACE — upload the same contract twice → amber "identical to …" badge; ask the agent about
-> the documents → it names the duplicate and works from one; after it reads a doc, the summary
-> appears under the filename (stale suffix after you edit the doc; you can correct/clear it via the
-> PUT endpoint — panel affordance is backlogged).
-> ④ ADV — set Commercial `hitl_policy` = adversarial_review → ask for a redline of a high-stakes
-> doc → the agent OFFERS the hostile-reader pass → "Waiting for your go-ahead" card → Approve →
-> severity-ordered findings (try `focus`: the render shows "FOCUS APPLIED").
-> ⑤ HITL-3 UAT (apply_redline card) · ⑥ B-4/PUBLISH UATs · ⑦ decide profile-HITL defaults ·
-> ⑧ AZ-6 keyless-MI review+push+smoke.
-> ═══════════════════════════════════════════════════════════════════════════════════════════════════════
-
 ## State
 
-- `main` = `36160fee` — VM2-G House Brief cap (#277) merged on top of WORKSPACE (#271) + ADV-1 (#272)
-  and the wrapped B-stack; deployable for the VM pull. Branches deleted.
-- **THIS branch `vm2b-matter-memory-coaching` = VM2-B #526 (matter-memory coaching), READY TO MERGE.**
-  Code-only, no migration; deploy = rebuild `api` only (prompt is code). Gate evidence below.
-- Docs: ADR-F082 + ADR-F084 (proposed — maintainer accepts); plans WORKSPACE-awareness /
-  ADV-hostile-reader / ROUTER-model-selection; CLAUDE.md tier table gains **Matter Documents**;
-  MILESTONES § Backlog gains SUMMARY-EDIT, NEAR-DUP, GATEWAY-JSON lines.
-- Memory topic: `workspace-awareness-shipped.md` (traps: mounted-repo test races; suites run ALONE —
-  concurrent vitest OOM-kills pytest SILENTLY; gateway prod image has no dev deps — gateway checks
-  are CI-only; new-shipped-skill 4-piece checklist).
+- Branch: `adeu-2-bump` (PR pending — task #524). Base main `28499017`.
+- Dev stack: all containers healthy on **adeu 2.4.0** (api + arq-worker + ingest-worker rebuilt +
+  recreated; prod image is the stack tag; dangling layers pruned).
+- The `web/src/lib/lq-ai/sse/*` changes on this branch are the **SSE stall-watchdog fix** from the
+  demo incident (byte-level 45s watchdog → clean-EOF → reconcile+re-poll). Live in the rebuilt web
+  container but **uncommitted** — split into its own PR (do not entangle with ADEU-2).
 
-## Done (this session)
+## Done (ADEU-2 — bump adeu 1.12.1 → 2.4.0, native two-pass surgical recipe)
 
-WORKSPACE WS-1/2/3 merged (#271, 18-finding review fixed, live-verified) · ADV-1 merged (#272,
-5-finding review fixed/deferred) · router research delivered (doc final) · model-per-subagent
-question answered · HANDOFF/memory current.
-
-**Phase-1 VM UAT fix #1 (task #521, branch `fix/web-healthcheck-ipv4`):** web container falsely
-`(unhealthy)` on the Azure image — nginx `listen 8080;` binds IPv4-only `0.0.0.0:8080`, but that
-image's `/etc/hosts` resolves `localhost`→`::1` first, so the `wget http://localhost:8080/health`
-probe gets connection-refused while it serves fine on IPv4. Fixed `localhost`→`127.0.0.1` in ALL
-THREE tracked sites (the maintainer's grep found them; the suggested fix covered only compose):
-`docker-compose.yml:488`, `docker-compose.prod.yml:410`, `web/Dockerfile:34` HEALTHCHECK (image
-default → bare `docker run` / Caddy overlay). Helm web probe is a kubelet→pod-IP httpGet, NOT
-localhost — unaffected, left alone. No app behaviour changed. Live-verified: rebuilt web → `healthy`
-+ `127.0.0.1:3000/health`→200 `ok`. This was the FIRST piece of maintainer VM feedback.
-
-**Phase-1 VM UAT fix #2 (task #523, branch `fix/cors-allow-put`, PR #276):** saving House Brief
-(`PUT /organization-profile`) and Branding (`PUT /branding`) failed cross-origin with browser
-"Failed to fetch" while chats (POST) worked. Root cause: `api/app/main.py` CORS `allow_methods`
-listed GET/POST/PATCH/DELETE/OPTIONS but **not PUT** → the PUT preflight (OPTIONS) 400s and the
-browser never issues the request (no HTTP status reaches the app → fetch-level error, not a 4xx).
-Only bites cross-origin (`LQ_AI_CORS_ORIGINS` set: Compose `web:3000` vs `api:8000`, or split-origin
-deploy). **All FOUR PUT endpoints were dead** — also the WORKSPACE matter-file summary correction
-(`PUT /matters/{id}/files/{file_id}/summary`) and the practice-area HITL-policy save
-(`PUT /practice-areas/{key}/hitl-policy`, the adversarial-review toggle). Fix = add PUT (hoisted to a
-`CORS_ALLOW_METHODS` constant) + regression test (PUT preflight allowed + a drift guard: every verb
-the router serves must be allowlisted). CORS is browser-only, not authz — each PUT still enforces
-AdminUser server-side; `allow_origins` stays a strict allowlist. Live: all four preflights 400→200.
-ruff+mypy clean, new test 2 passed.
+- **ADR-F085** (supersedes F045): deleted the pinned word-diff shim entirely; `render_edits` =
+  **annotate-first two-pass, one fresh engine per pass** (pass A comment-only on the D4-unique
+  `target_text`; pass B uncommented apply on a fresh engine → native surgical fan-out inside the
+  comment ranges). Bytes meaningful only when `outcome.clean`; `apply()` raises
+  `RedlineRenderError` otherwise (Adeu 2.x `apply_edits` never rolls back). `validate_edits`
+  per-edit pre-pass feeds actionable problems to the MODEL (tool result only; logs = counts).
+- D4 gate text = Adeu clean view (`_redline_gate_text`) — fixes the pre-existing round-2 bug where
+  DocxReader (blind to `w:ins`/`w:del`) counted 0 spans for targets inside round-1 insertions.
+- Negotiation: `apply_review_actions` 3-tuple (+`review_already_resolved` in Reconciliation +
+  audit), `_PAIRS_SUFFIX` strip (2.x `"(pairs with Chg:N)"` author corruption — the 1.19.x parser
+  breaker), counters through `render_edits(validate=False)`, fresh-engine discipline documented.
+- Pins ×3 → 2.4.0; hand-pin `regex>=2024.11.6` (NO jinja2 — mcp_components only). Import-guard
+  unchanged.
+- **Verification**: adapter fast-rig 26/26 on 2.4.0 (incl. living-redline round-2, region-level
+  OOXML assertions); full api suite **3772 passed** (51 = 36 wizard container-layout + 15
+  flaky-under-load, all proven green on targeted reruns); ruff CI-exact All-checks-passed (0.16.3);
+  mypy clean (244 files); **C9 eval on the final build: STRONG / SURGICAL: yes** (matches the
+  1.12.1 baseline; evidence `docs/fork/evidence/adeu2-recipe/final1/`). Interim samples (apply-first
+  build): 2× STRONG with renderer verified surgical at reconstruction level (judge dinged model
+  SCOPE — ADR-F041 craft territory), 1× deepseek thrash to step-cap. Probe evidence:
+  `docs/fork/evidence/adeu2-probe/`.
+- **Two hard-won substrate facts (in ADR-F085, do not relearn):** (1) an Adeu engine's mappers go
+  STALE across sequential `apply_edits` calls (only `process_batch` refreshes) — a second call on
+  the same engine silently mis-places edits; always fresh engine per call. (2) commented edits
+  render ATOMIC natively; comment-only edits (`target == new_text`) are the public range-anchored
+  annotation idiom; anchor comments on `target_text` (unique by D4), never on `new_text`
+  (ambiguous in the updated doc).
 
 ## Next slice
 
-**Phase 1 ACTIVE — VM UAT bug-fixing** (direction set 2026-07-12; product-first sequence in the
-banner: 1 VM-bugs → 2 CUSTODIAN → 3 Practice Knowledge → 4 enterprise K8S). VM fixes SHIPPED
-(healthcheck #274, CORS-PUT #276, House-Brief cap #277/#532). **VM2-B #526 = THIS branch, ready to merge.**
-Adeu anchor bump QUEUED (#524).
+1. Land the ADEU-2 PR (adversarial review findings → fix/defer, then merge under F005).
+2. **SSE stall-watchdog PR** (small, web-only, tests already green 1376/1376 at fix time).
+3. Then the roadmap: VM2-A (#525 — mostly absorbed by this slice's error clarity; re-scope it),
+   PYMUPDF-SWAP (#530) research is drafted, or CUSTODIAN per the 2026-07-12 roadmap.
 
-**VM2-G #532 MERGED (PR #277, `36160fee`) — House Brief write cap 200k→32k.** Injected read-only tiers
-were all individually capped EXCEPT House Brief (200k ≈ 50k tokens, injected WHOLE every prompt, no trim).
-Fix = `HOUSE_BRIEF_MAX_CHARS = 32_000` reject-at-write, mirrored web + OpenAPI. Decision recorded: **no
-single dynamic cross-tier budget** — per-tier deterministic caps already bound the total.
+## Pick up exactly here
 
-**VM2-B #526 SHIPPED (this branch `vm2b-matter-memory-coaching`) — matter-memory coaching, area-agnostic.**
-Diagnosis (adversarial 6-way investigation, plan `docs/fork/plans/VM2-B-matter-memory-coaching-plan.md`):
-"no memory recorded" was NOT area-specific — the write tools (`update_matter_memory`/`record_matter_fact`)
-are already granted to every matter-bound run, but the ONLY prose naming them lived inside the
-`MATTER_MEMORY_PROMPT` data fence, which renders only when the wiki is ALREADY non-empty → a fresh matter
-(empty wiki) in ANY area got the tool with zero coaching (chicken-and-egg). Fix, three parts:
-1. **`MATTER_MEMORY_DOCTRINE`** constant (`composition.py:~289`), appended UNCONDITIONALLY in
-   `system_prompt_for`'s `if binding is not None:` block beside `MATTER_ROSTER_DOCTRINE` (`:607`), carrying
-   the "brief living one-pager, fold not append" tightness cue (reinforces `skills/matter-memory/SKILL.md`,
-   never plain-append). Reaches production faithfully (same static base; DATA tiers ride middleware).
-2. **`BASELINE_SKILL_NAMES = frozenset({"matter-memory"})`** unioned into the area's skills in
-   `compose_and_execute_run` (`:~825`) so custom/blank areas (which bind zero skills) still get the FULL
-   craft skill; filtered through the live registry → degrades to silence if absent; dedup vs manual binds.
-3. **High-water-mark receipt** in `_update_matter_memory` (`matter_memory_tools.py`): once a saved wiki
-   reaches 75% of `MATTER_WIKI_MAX_CHARS` (12k/16k) the success receipt appends a "consolidate soon" nudge
-   — prune before the hard reject, char-COUNT only (audit-clean, no body text). No migration; write path
-   untouched. Gate: 3 targeted + 53 touched-file + **868 tests/agents/** pass · ruff/format + mypy clean ·
-   fresh-context adversarial review = 0 blockers/0 should-fixes, 3 nits applied (comment accuracy + a
-   double-`list()` simplification). Deploy = rebuild `api` only.
+If the ADEU-2 PR is not yet merged: `git status` on `adeu-2-bump`, read the adversarial-review
+findings in the PR/conversation, fix blockers, quote suite counts (above) in the PR body, merge
+squash via `gh pr merge --repo sarturko-maker/lq-ai-fork`. If merged: split the SSE watchdog into
+its own branch from the web/ changes and run the web gate (`CI=true npx vitest run`, svelte-check).
 
-Also logged: **#533** (research — in-app bug reporting → triage agent → plain-language fix to operator) +
-**#534** (research — Graphiti/Zep temporal knowledge-graph as a memory substrate; build-vs-adopt vs our
-Matter-Facts ledger + Store, gateway-egress + graph-DB-infra constraints). Both research-only, after VM batch.
+## Gotchas
 
-**VM UAT ROUND 2 triaged (2026-07-14) — plan: `docs/fork/plans/VM-UAT-round2-triage.md`.** A 12-way
-adversarially-verified workflow triaged the external tester's 10 QA notes + maintainer's 3 observations
-(TaskHarbour, IT Procurement area). Confirmed-code slices queued (all S/M, ADR-F005 gate):
-- **VM2-A #525** — redline comment author configurable (retire hardcoded `redline_service.py:69`
-  "LQ.AI Commercial counsel") + target-resolution error branching (`schemas/commercial.py:356`).
-- **VM2-B #526** ✅ SHIPPED (this branch) — matter-memory coaching area-agnostic. Real trigger was
-  empty-wiki-gated coaching, not area; fixed via unconditional `MATTER_MEMORY_DOCTRINE` + baseline
-  `matter-memory` skill union + high-water receipt. See the SHIPPED block above.
-- **VM2-C #527** — PDF type in agent inventory (`tools.py:814` omits mime) + machine-actionable reject.
-- **VM2-D #528** — trust-aware edit attribution (inferred participant ≠ authoritative) + `source_kind` label.
-- **VM2-F #529** — dedup "human judgment" section (doctrine+skill both mandate it) + widen preview ±1 para.
-- **VM2-E** folded into **#524** (adeu bump): repro #1 headings-as-`<ins>` on the PINNED adeu w/ a
-  numbered-heading fixture; fix the `redline_service.py:298` offset-index bypass if confirmed.
-
-**Maintainer DECISIONS needed before building (in the plan):** (#11) branding accent is working-as-designed
-scarce-accent (ADR-F068/F013) — add a preview swatch or broaden to primary chrome (ADR reversal + WCAG)?;
-(#7) grid rows=documents is baked in — guidance-only [S] vs arbitrary row entities [L, ADR]?; (#4B)
-PDF→DOCX convert-then-ask = new converter (SBOM/AGPL) + HITL card, own ADR'd L slice.
-**Dismissed (grain of salt paid off):** #2 preview≠apply (same bytes), #8 grid truncation (LLM re-typing).
-
-CUSTODIAN (#510/#512–#514, OBLIG-1 first) is the phase-2 queue, unchanged.
-
-## Gotchas (this session — history in memory topics)
-
-- Containerized pytest reads the live repo mount at collection AND app-boot: never edit api/, add
-  migrations, or add skills/ mid-run; never run vitest concurrently (silent OOM kill, empty output,
-  exit 0). Clean re-run before diagnosing phantom errors.
-- Gateway checks CANNOT run locally (prod image, no dev deps) — the gateway CI job is the gate.
-- The `adversarial_review` purpose tag requires a gateway restart to register (C3b-2 trap class).
-- Same-transaction file seeds share `created_at` → dup canonicality falls to the id tiebreaker
-  (test artifact only; real uploads are separate transactions).
+- Backlogged from ADEU-2 (MILESTONES § Backlog candidates): `process_batch` consolidation (viable
+  post-recipe), `reject_all_revisions` round-reject tool, upstream reports to Mikko (maintainer
+  will contact — round-2 commented-insert comment drop; BatchValidationError index mis-attribution
+  to 0), scenario-harness improvement: persist preview/tool rejection texts into evidence on
+  `cap_exceeded` (run-2 forensics were blind).
+- v2 fragments uncommented edits word-level → `read_state_of_play` enumerates MORE region-refs per
+  logical counterparty edit (5 for the 3-edit fixture). Region-level enumeration is the contract;
+  the coverage gate forces a decision per fragment.
+- Containerized full-suite recipe: build `api/Dockerfile.dev` (context `api/`), tag `lq-ai-api`,
+  `docker compose run --rm -v $PWD/api:/app api pytest -q` — wizard tests additionally need the
+  whole repo (`-v $PWD:/repo -w /repo/api`) or they 127 on `/scripts` + `deploy/` templates.
+  Rebuild the PROD api tag afterwards (the stack must not run the dev image).
+- Host ruff: `pip install --user --break-system-packages ruff==0.16.3`, run with `--no-cache`
+  (`.ruff_cache` is root-owned from container runs).
