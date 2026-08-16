@@ -77,6 +77,12 @@ const STALL_CHECK_INTERVAL_MS = 5_000;
  * keep-alive pings are SSE comments (`: ping`), which
  * EventSourceParserStream swallows — a watchdog on parsed events would
  * falsely fire during a healthy connection's long quiet model turn.
+ *
+ * Known benign false-fire: a backgrounded/frozen tab can suspend JS long
+ * enough that `lastByteAt` goes stale while the transport stayed healthy;
+ * on resume the watchdog cuts a live stream. Self-healing — the clean-EOF
+ * recovery reconciles and re-opens — so a spurious cut costs one
+ * reconnect, never data.
  */
 export async function consumeUIMessageStream(
 	body: ReadableStream<Uint8Array>,

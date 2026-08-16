@@ -83,23 +83,35 @@ describe('consumeUIMessageStream', () => {
 		});
 		const parts: UIMessagePart[] = [];
 		let done = false;
-		await expect(
-			Promise.race([
-				consumeUIMessageStream(
-					body,
-					{
-						onPart: (p) => parts.push(p),
-						onDone: () => {
-							done = true;
-						}
-					},
-					1 // stall cutoff 1ms; the 5s check interval dominates the wait
-				),
-				new Promise((_, reject) =>
-					setTimeout(() => reject(new Error('watchdog never fired')), 15_000)
-				)
-			])
-		).resolves.toBeUndefined();
+		let failTimer: ReturnType<typeof setTimeout> | undefined;
+		const startedAt = Date.now();
+		try {
+			await expect(
+				Promise.race([
+					consumeUIMessageStream(
+						body,
+						{
+							onPart: (p) => parts.push(p),
+							onDone: () => {
+								done = true;
+							}
+						},
+						// 1ms cutoff — the Math.min(check, cutoff) clamp makes the
+						// watchdog CHECK every ~1ms too, so this resolves near-instantly
+						// (the timing assertion below pins the clamp itself).
+						1
+					),
+					new Promise((_, reject) => {
+						failTimer = setTimeout(() => reject(new Error('watchdog never fired')), 15_000);
+					})
+				])
+			).resolves.toBeUndefined();
+		} finally {
+			clearTimeout(failTimer);
+		}
+		// Well under the 5s production check interval: proves the clamp scales the
+		// check cadence down with a short cutoff (a flat 5s interval would take ~5s).
+		expect(Date.now() - startedAt).toBeLessThan(2_000);
 		expect(parts).toEqual([{ type: 'start', messageId: 'r1' }]);
 		expect(done).toBe(false); // EOF-style end, not [DONE]
 	}, 20_000);
