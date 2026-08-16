@@ -69,6 +69,41 @@ describe('consumeUIMessageStream', () => {
 		expect(parts).toEqual([{ type: 'start-step' }]);
 	});
 
+	it('resolves via the stall watchdog when the connection goes silent (blackholed TCP)', async () => {
+		// A stream that delivers one part and then never sends another byte and
+		// never closes — the silently-dropped-connection failure mode. Without
+		// the watchdog this hangs forever; with it, consume resolves like EOF
+		// so the caller reconciles and falls back to polling.
+		const encoder = new TextEncoder();
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(encoder.encode('data: {"type":"start","messageId":"r1"}\n\n'));
+				// never close, never error
+			}
+		});
+		const parts: UIMessagePart[] = [];
+		let done = false;
+		await expect(
+			Promise.race([
+				consumeUIMessageStream(
+					body,
+					{
+						onPart: (p) => parts.push(p),
+						onDone: () => {
+							done = true;
+						}
+					},
+					1 // stall cutoff 1ms; the 5s check interval dominates the wait
+				),
+				new Promise((_, reject) =>
+					setTimeout(() => reject(new Error('watchdog never fired')), 15_000)
+				)
+			])
+		).resolves.toBeUndefined();
+		expect(parts).toEqual([{ type: 'start', messageId: 'r1' }]);
+		expect(done).toBe(false); // EOF-style end, not [DONE]
+	}, 20_000);
+
 	it('REJECTS on a transport failure — the contract the polling fallback relies on', async () => {
 		const encoder = new TextEncoder();
 		const body = new ReadableStream<Uint8Array>({
