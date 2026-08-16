@@ -69,6 +69,53 @@ describe('consumeUIMessageStream', () => {
 		expect(parts).toEqual([{ type: 'start-step' }]);
 	});
 
+	it('resolves via the stall watchdog when the connection goes silent (blackholed TCP)', async () => {
+		// A stream that delivers one part and then never sends another byte and
+		// never closes — the silently-dropped-connection failure mode. Without
+		// the watchdog this hangs forever; with it, consume resolves like EOF
+		// so the caller reconciles and falls back to polling.
+		const encoder = new TextEncoder();
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(encoder.encode('data: {"type":"start","messageId":"r1"}\n\n'));
+				// never close, never error
+			}
+		});
+		const parts: UIMessagePart[] = [];
+		let done = false;
+		let failTimer: ReturnType<typeof setTimeout> | undefined;
+		const startedAt = Date.now();
+		try {
+			await expect(
+				Promise.race([
+					consumeUIMessageStream(
+						body,
+						{
+							onPart: (p) => parts.push(p),
+							onDone: () => {
+								done = true;
+							}
+						},
+						// 1ms cutoff — the Math.min(check, cutoff) clamp makes the
+						// watchdog CHECK every ~1ms too, so this resolves near-instantly
+						// (the timing assertion below pins the clamp itself).
+						1
+					),
+					new Promise((_, reject) => {
+						failTimer = setTimeout(() => reject(new Error('watchdog never fired')), 15_000);
+					})
+				])
+			).resolves.toBeUndefined();
+		} finally {
+			clearTimeout(failTimer);
+		}
+		// Well under the 5s production check interval: proves the clamp scales the
+		// check cadence down with a short cutoff (a flat 5s interval would take ~5s).
+		expect(Date.now() - startedAt).toBeLessThan(2_000);
+		expect(parts).toEqual([{ type: 'start', messageId: 'r1' }]);
+		expect(done).toBe(false); // EOF-style end, not [DONE]
+	}, 20_000);
+
 	it('REJECTS on a transport failure — the contract the polling fallback relies on', async () => {
 		const encoder = new TextEncoder();
 		const body = new ReadableStream<Uint8Array>({
