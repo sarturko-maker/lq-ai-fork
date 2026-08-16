@@ -865,7 +865,7 @@ outcome tool + Claude-judged 20-email eval) · 4 HITL edit/respond (ADR-F087) + 
 `docs/fork/evidence/b7-acceptance/`, formal sign-off = maintainer on return — ② the REDLINE-CONT
 living-redline fix (maintainer interjection 2026-07-11, ADR-F081) ③ B-2c eval ④ the maintainer's
 enterprise-vs-product direction call — starts only if the product branch is chosen — ⑤ the
-INTAKE milestone (maintainer 2026-08-16: "yes, inbox first").**
+INTAKE milestone (UNCONDITIONAL gate, added 2026-08-16; maintainer: "yes, inbox first").**
 From the 7-idea strategy review (grounded 8-agent evaluation, 2026-07-11). One story: the Commercial
 agent becomes the team's custodian of record for everything a contract **obliges** (deadlines),
 **threatens** (exposure), and **taught us** (whys/outcomes) — on top of redlining. All writes land in

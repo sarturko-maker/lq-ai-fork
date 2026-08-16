@@ -4,7 +4,7 @@ Status: ACCEPTED 2026-08-16 — maintainer phone review resolved all 6 decisions
 § Maintainer decisions; rulings 1 and 5 reshaped the design in place). No start blocker:
 INTAKE-0/1 need nothing external; the AgentMail key + dedicated inbox address are needed
 from INTAKE-2 (the only slice that touches AgentMail). Task #536.
-Research pack (read on demand): `docs/fork/plans/research/INTAKE-{agent-inbox-langgraph,agentmail,substrate-map,taxonomy-policy}.md` (4 Sonnet sub-agent reports, 2026-08-16).
+Research pack (read on demand): `docs/fork/plans/research/INTAKE-{agent-inbox-langgraph,agentmail,substrate-map,taxonomy-policy,inbox-ui-alternatives}.md` (5 Sonnet research reports, 2026-08-16 — the last one is the round-2 alternatives/de-investment/production-practice survey grounding Ruling 2).
 
 ## What we're building (one paragraph)
 
@@ -127,7 +127,7 @@ approve on draft_email_reply → api → mail-bridge /send → AgentMail reply l
 ```
 
 Unchanged and load-bearing: gateway as sole LLM egress; `guarded_tool_call` + R4/R5/R6 brakes
-on every stage-2 action; audit counts/types/IDs only (no email bodies in audit rows); citation
+on every agent action; audit counts/types/IDs only (no email bodies in audit rows); citation
 engine; ADR-F042 matter-memory semantics on the candidate matter.
 
 ## Data model (one migration, INTAKE-1)
@@ -192,8 +192,8 @@ orgs differ. Ruled replacement:
    headers force `spam_marketing`; v1 sends nothing without a human.
 4. **Credentials**: AgentMail key + webhook secret live ONLY in mail-bridge env (gateway-
    pattern); api holds only `LQ_AI_BRIDGE_TOKEN`-class shared secrets.
-5. **Misdirected/privileged mail**: category caps at classify-only; no memory writes, no
-   summaries.
+5. **Misdirected/privileged mail**: doctrine caps this class of mail at classify-only; no
+   memory writes, no summaries.
 6. **Authz**: internal intake router mounted without the user gate but behind
    `require_bridge_auth`; everything user-facing owner-scoped, cross-user 404.
 7. **Budget**: every intake run gets the binding's lean budget profile (default: cheapest
