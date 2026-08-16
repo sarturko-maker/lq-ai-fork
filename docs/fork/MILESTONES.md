@@ -843,12 +843,29 @@ residency (K8S-26…28), multi-region HA (K8S-29/30). Phase-1 infra ≈ **$1,000
 tokens**; Phase-2 networking is the cost cliff (Azure Firewall ~$913/mo + WAF) — parameterise firewall/
 ingress/Log-Analytics for customers with a landing-zone hub.
 
+## INTAKE — agent-monitored legal-intake inbox (ACCEPTED 2026-08-16; plan: `docs/fork/plans/INTAKE-INBOX-plan.md`)
+
+**Next milestone (maintainer 2026-08-16: "yes, inbox first" — CUSTODIAN queues behind it).**
+A practice-area Deep Agent monitors the company's legal front-door mailbox: every inbound email
+thread = ONE agent run that concludes dealt-with / paused-for-HITL / candidate matter via the
+structural `record_intake_outcome` tool (ADR-F086); nothing outbound without approval; intake
+behaviour is doctrine (a skill) + free-form labels — no fixed taxonomy, categories emerge
+post-v1 via propose→approve. Test rig AgentMail behind a new mail-bridge (sole mailbox-credential
+holder, slack-bridge pattern; dev ingress = websocket, no tunnel); production M365/Gmail swaps in
+at the same envelope seam. Slices (tasks #537–#543): INTAKE-0 ADR + re-sequence · 1 substrate
+(migration `projects.intake_state` + intake_mailboxes/threads/messages, `ingest_bytes()`
+extraction, bridge-auth'd internal endpoint) · 2 AgentMail probe + mail-bridge (the only
+AgentMail-touching slice; needs API key + dedicated inbox) · 3 the intake run (doctrine skill +
+outcome tool + Claude-judged 20-email eval) · 4 HITL edit/respond (ADR-F087) + approved send ·
+5 cockpit Intake view · 6 E2E acceptance. Research: `docs/fork/plans/research/INTAKE-*.md`.
+
 ## CUSTODIAN — contract custodian-of-record (PLANNED 2026-07-11; plan: `docs/fork/plans/CUSTODIAN-milestone.md`)
 
 **Queued behind ① B-7 milestone acceptance — delegated walk PASSED 2026-07-11, evidence
 `docs/fork/evidence/b7-acceptance/`, formal sign-off = maintainer on return — ② the REDLINE-CONT
 living-redline fix (maintainer interjection 2026-07-11, ADR-F081) ③ B-2c eval ④ the maintainer's
-enterprise-vs-product direction call — starts only if the product branch is chosen.**
+enterprise-vs-product direction call — starts only if the product branch is chosen — ⑤ the
+INTAKE milestone (maintainer 2026-08-16: "yes, inbox first").**
 From the 7-idea strategy review (grounded 8-agent evaluation, 2026-07-11). One story: the Commercial
 agent becomes the team's custodian of record for everything a contract **obliges** (deadlines),
 **threatens** (exposure), and **taught us** (whys/outcomes) — on top of redlining. All writes land in

@@ -5,70 +5,63 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 ## State
 
-- Branch: `adeu-2-bump` (PR pending — task #524). Base main `28499017`.
-- Dev stack: all containers healthy on **adeu 2.4.0** (api + arq-worker + ingest-worker rebuilt +
-  recreated; prod image is the stack tag; dangling layers pruned).
-- The `web/src/lib/lq-ai/sse/*` changes on this branch are the **SSE stall-watchdog fix** from the
-  demo incident (byte-level 45s watchdog → clean-EOF → reconcile+re-poll). Live in the rebuilt web
-  container but **uncommitted** — split into its own PR (do not entangle with ADEU-2).
+- Branch: `intake-0-adr` (INTAKE-0 PR — docs-only) off `main` `803364b0`. ADEU-2 (#288) and the
+  SSE stall-watchdog (#289) are MERGED; dev stack healthy on adeu 2.4.0; demo matter wiped for
+  re-recording (`sample-documents/commercial-redline-brief/`).
+- **Milestone: INTAKE** — agent-monitored legal-intake inbox. Plan ACCEPTED 2026-08-16 after
+  maintainer phone review (all 6 decisions resolved IN the plan: `docs/fork/plans/
+  INTAKE-INBOX-plan.md` — read § Ruling 1 + § Doctrine first: no deterministic classifier, no
+  fixed taxonomy; ONE deep-agent run per email thread → structural `record_intake_outcome`
+  [dealt-with / paused-for-HITL / candidate matter]; categories emerge post-v1). CUSTODIAN
+  queues behind INTAKE. Slice tasks #537–#543.
+- Untracked on purpose (ride their own future PRs): `sample-documents/`, 4 scenario live
+  tests, PYMUPDF research, `docs/fork/evidence/demo-rehearsal/`.
 
-## Done (ADEU-2 — bump adeu 1.12.1 → 2.4.0, native two-pass surgical recipe)
+## Done (INTAKE-0 — ADR + re-sequence; this PR)
 
-- **ADR-F085** (supersedes F045): deleted the pinned word-diff shim entirely; `render_edits` =
-  **annotate-first two-pass, one fresh engine per pass** (pass A comment-only on the D4-unique
-  `target_text`; pass B uncommented apply on a fresh engine → native surgical fan-out inside the
-  comment ranges). Bytes meaningful only when `outcome.clean`; `apply()` raises
-  `RedlineRenderError` otherwise (Adeu 2.x `apply_edits` never rolls back). `validate_edits`
-  per-edit pre-pass feeds actionable problems to the MODEL (tool result only; logs = counts).
-- D4 gate text = Adeu clean view (`_redline_gate_text`) — fixes the pre-existing round-2 bug where
-  DocxReader (blind to `w:ins`/`w:del`) counted 0 spans for targets inside round-1 insertions.
-- Negotiation: `apply_review_actions` 3-tuple (+`review_already_resolved` in Reconciliation +
-  audit), `_PAIRS_SUFFIX` strip (2.x `"(pairs with Chg:N)"` author corruption — the 1.19.x parser
-  breaker), counters through `render_edits(validate=False)`, fresh-engine discipline documented.
-- Pins ×3 → 2.4.0; hand-pin `regex>=2024.11.6` (NO jinja2 — mcp_components only). Import-guard
-  unchanged.
-- **Verification**: adapter fast-rig 26/26 on 2.4.0 (incl. living-redline round-2, region-level
-  OOXML assertions); full api suite **3772 passed** (51 = 36 wizard container-layout + 15
-  flaky-under-load, all proven green on targeted reruns); ruff CI-exact All-checks-passed (0.16.3);
-  mypy clean (244 files); **C9 eval on the final build: STRONG / SURGICAL: yes** (matches the
-  1.12.1 baseline; evidence `docs/fork/evidence/adeu2-recipe/final1/`). Interim samples (apply-first
-  build): 2× STRONG with renderer verified surgical at reconstruction level (judge dinged model
-  SCOPE — ADR-F041 craft territory), 1× deepseek thrash to step-cap. Probe evidence:
-  `docs/fork/evidence/adeu2-probe/`.
-- **Two hard-won substrate facts (in ADR-F085, do not relearn):** (1) an Adeu engine's mappers go
-  STALE across sequential `apply_edits` calls (only `process_batch` refreshes) — a second call on
-  the same engine silently mis-places edits; always fresh engine per call. (2) commented edits
-  render ATOMIC natively; comment-only edits (`target == new_text`) are the public range-anchored
-  annotation idiom; anchor comments on `target_text` (unique by D4), never on `new_text`
-  (ambiguous in the updated doc).
+- **ADR-F086** (proposed; substance maintainer-ruled — flip on maintainer read): one run per
+  thread on the bound area agent; eager project + `intake_state` lifecycle; doctrine-not-config
+  with emergent taxonomy; unconditional HITL gate on outbound tools; mail-bridge as sole
+  mailbox-credential holder with a provider-agnostic envelope; native Svelte inbox on F071.
+- MILESTONES.md: INTAKE milestone entry added; CUSTODIAN queue note gains "⑤ INTAKE first".
+- Committed the accepted plan + all 5 research reports (`docs/fork/plans/research/INTAKE-*`).
 
-## Next slice
+## Next slice — INTAKE-1 (substrate; key-free) — task #538
 
-1. Land the ADEU-2 PR (adversarial review findings → fix/defer, then merge under F005).
-2. **SSE stall-watchdog PR** (small, web-only, tests already green 1376/1376 at fix time).
-3. Then the roadmap: VM2-A (#525 — mostly absorbed by this slice's error clarity; re-scope it),
-   PYMUPDF-SWAP (#530) research is drafted, or CUSTODIAN per the 2026-07-12 roadmap.
+Migration: `projects.intake_state` (nullable enum candidate/promoted/dismissed) +
+`intake_mailboxes` (no policy JSONB) + `intake_threads` (free-text `label`, `outcome_note`,
+status enum) + `intake_messages` (idempotency uniques). Extract `ingest_bytes()` from
+`api/app/api/files.py:upload_file` (HTTP route reuses it; tests). `POST /internal/intake/emails`
+behind `require_bridge_auth`: idempotent envelope → thread upsert → eager project → attachment
+ingest → enqueue `intake_email_job` (`arq:m3a6`). Admin CRUD for `intake_mailboxes`.
+Curl-testable with synthetic envelopes — NO AgentMail, NO LLM. Migration rules: throwaway
+pgvector verify, rebuild api + arq-worker + ingest-worker together, `docker image prune -f`.
 
 ## Pick up exactly here
 
-If the ADEU-2 PR is not yet merged: `git status` on `adeu-2-bump`, read the adversarial-review
-findings in the PR/conversation, fix blockers, quote suite counts (above) in the PR body, merge
-squash via `gh pr merge --repo sarturko-maker/lq-ai-fork`. If merged: split the SSE watchdog into
-its own branch from the web/ changes and run the web gate (`CI=true npx vitest run`, svelte-check).
+If the INTAKE-0 PR is unmerged: finish its F005 gate (CI green + adversarial review findings
+fixed/deferred on record) and squash-merge via `gh pr merge --repo sarturko-maker/lq-ai-fork`.
+If merged: start INTAKE-1 from `main` per the block above; the plan file is the spec. Before
+INTAKE-2 (probe + bridge — the ONLY AgentMail-touching slice): confirm `AGENTMAIL_API_KEY` +
+dedicated inbox address are in the dev env; if missing, ask the maintainer THEN (account
+exists; inbox to be created) and read `docs/fork/plans/research/INTAKE-agentmail.md` for the
+probe surface.
 
 ## Gotchas
 
-- Backlogged from ADEU-2 (MILESTONES § Backlog candidates): `process_batch` consolidation (viable
-  post-recipe), `reject_all_revisions` round-reject tool, upstream reports to Mikko (maintainer
-  will contact — round-2 commented-insert comment drop; BatchValidationError index mis-attribution
-  to 0), scenario-harness improvement: persist preview/tool rejection texts into evidence on
-  `cap_exceeded` (run-2 forensics were blind).
-- v2 fragments uncommented edits word-level → `read_state_of_play` enumerates MORE region-refs per
-  logical counterparty edit (5 for the 3-edit fixture). Region-level enumeration is the contract;
-  the coverage gate forces a decision per fragment.
-- Containerized full-suite recipe: build `api/Dockerfile.dev` (context `api/`), tag `lq-ai-api`,
-  `docker compose run --rm -v $PWD/api:/app api pytest -q` — wizard tests additionally need the
-  whole repo (`-v $PWD:/repo -w /repo/api`) or they 127 on `/scripts` + `deploy/` templates.
-  Rebuild the PROD api tag afterwards (the stack must not run the dev image).
-- Host ruff: `pip install --user --break-system-packages ruff==0.16.3`, run with `--no-cache`
-  (`.ruff_cache` is root-owned from container runs).
+- INTAKE design tripwires: intake runs are normal `agent_loop` purpose (NO gateway purpose
+  edit); the project row is created EAGERLY at ingest and the agent's outcome dismisses or
+  keeps it; `draft_email_reply` is hitl_policy-gated UNCONDITIONALLY (no category mechanism
+  exists to unlock it); AgentMail creds live ONLY in the future mail-bridge, never `api`;
+  HITL edit/respond widening is INTAKE-4 (ADR-F087) — keep approve/reject the default compile
+  everywhere else.
+- Adeu 2.4.0 substrate facts live in ADR-F085 (mapper staleness → fresh engine per call;
+  comment-only edits = range annotation idiom; anchor comments on target_text never new_text).
+- Containerized full-suite recipe: build `api/Dockerfile.dev` (context `api/`), tag
+  `lq-ai-api`, `docker compose run --rm -v $PWD/api:/app api pytest -q`; wizard tests need the
+  whole repo (`-v $PWD:/repo -w /repo/api`). Rebuild the PROD api tag afterwards. Suites ALONE
+  (vitest OOMs pytest). Host ruff: `pip install --user --break-system-packages ruff==0.16.3`,
+  run with `--no-cache`.
+- Backlogged from ADEU-2 (MILESTONES § Backlog): `process_batch` consolidation,
+  `reject_all_revisions`, Mikko upstream reports (maintainer contacts personally), persist
+  tool-rejection texts on `cap_exceeded`.
