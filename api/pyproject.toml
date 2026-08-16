@@ -196,12 +196,17 @@ dependencies = [
     # `adeu.server` then becomes a hard ModuleNotFoundError — the second egress is
     # structurally absent, not just guarded). Smaller SBOM (~80 fewer pkgs), all
     # permissive (no copyleft, rule B). The Adeu pin lives in api/Dockerfile,
-    # api/Dockerfile.dev and .github/workflows/ci.yml as `--no-deps adeu==1.12.1`.
+    # api/Dockerfile.dev and .github/workflows/ci.yml as `--no-deps adeu==2.4.0`.
     # diff-match-patch: Apache-2.0, the word-diff engine Adeu uses internally.
     "diff-match-patch>=20230430",
     # structlog: MIT/Apache-2.0, Adeu's logger. (lxml, python-docx, rapidfuzz,
     # pydantic — Adeu's other SDK deps — are already declared above.)
     "structlog>=24.0.0",
+    # regex: Apache-2.0, Adeu ≥2.x's time-budgeted matcher (utils.safe_regex ←
+    # mapper/engine/markup — squarely on the SDK path). jinja2 is deliberately NOT
+    # added: Adeu only uses it inside mcp_components, the forbidden second-egress
+    # surface we structurally exclude (ADR-F031/F010).
+    "regex>=2024.11.6",
     # F2 Slice C1 (ADR-F049) — fastembed: in-process ONNX text embeddings for the
     # matter/agent retrieval path's LOCAL door (Door A, default). $0/token, no
     # provider key, no gateway round-trip; the dev stack gets semantic retrieval

@@ -978,7 +978,9 @@ _NEG_BASE = (
 
 
 def _counterparty_docx() -> bytes:
-    """A .docx with 3 counterparty tracked changes + 1 anchored comment (their markup)."""
+    """Three logical counterparty edits + 1 anchored comment — FIVE regions on
+    adeu ≥2.x (the uncommented edits fan out word-level; see counterparty_markup
+    in test_negotiation_service for the exact shape)."""
     from adeu import ModifyText, RedlineEngine
 
     doc = _docx_bytes(_NEG_BASE)
@@ -999,11 +1001,17 @@ def _counterparty_docx() -> bytes:
 
 
 def _full_coverage_decisions(source: bytes) -> list[dict[str, object]]:
-    """One decision per change/comment ref in ``source`` — accept/reject/counter/reply."""
+    """One decision per change/comment ref in ``source`` — accept/reject/counter/reply.
+
+    On adeu ≥2.x the uncommented counterparty edits fan out into word-level
+    regions ("five" + "5", "twenty-four" + "24"), so the verdicts key on the
+    fragments: the counter rides the word fragment, the sibling digit fragment is
+    accepted (the counter's own word-diff rewrites it), and BOTH term fragments
+    are rejected to revert cleanly."""
     state = read_state_of_play(source)
     decisions: list[dict[str, object]] = []
     for c in state.changes:
-        if c.kind == "modify" and c.inserted_text == "twenty-four (24)":
+        if c.kind == "modify" and c.inserted_text in ("twenty-four (24)", "twenty-four"):
             decisions.append(
                 {
                     "ref": c.ref,
@@ -1016,7 +1024,7 @@ def _full_coverage_decisions(source: bytes) -> list[dict[str, object]]:
                     ),
                 }
             )
-        elif c.kind == "modify" and c.inserted_text == "five (5)":
+        elif c.kind == "modify" and c.inserted_text in ("five (5)", "five", "5"):
             decisions.append(
                 {
                     "ref": c.ref,
@@ -1544,3 +1552,58 @@ async def test_reconcile_positions_malformed_input_rejected(
         )
         await db.commit()
     assert "Rejected" in out and "reconcile_positions" in out
+
+
+async def test_round2_apply_targets_round1_inserted_text_passes_d4(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """The D4 gate-text fix at the layer the bug lived (ADR-F085): a round-2 edit
+    whose target only exists because round 1 INSERTED it must clear the D4
+    uniqueness gate. The pre-F085 gate text (normalized_content / DocxReader)
+    cannot see inside ``w:ins``/``w:del``, so this exact call was rejected with
+    "matches 0 spans" — reverting ``_redline_gate_text`` to that source makes
+    this test fail."""
+    user_id, project_id = matter
+    round1 = (
+        RedlineService()
+        .apply(
+            _docx_bytes(CAP),
+            [ProposedEdit("three (3)", "twelve (12)", _RATIONALE)],
+        )
+        .docx_bytes
+    )
+    _patch_storage(monkeypatch, source=round1)
+    run_1 = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    run_2 = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    await _seed_redlined_child(
+        commit_factory,
+        user_id=user_id,
+        project_id=project_id,
+        hash_sha256=hashlib.sha256(round1).hexdigest(),
+        created_by_run_id=run_1,
+    )
+
+    async with commit_factory() as db:
+        out = await _apply_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[
+                {
+                    # "twelve (12)" exists ONLY as a round-1 pending insertion
+                    "target_text": "twelve (12) months preceding the claim.",
+                    "new_text": (
+                        "twelve (12) months preceding the claim, save that "
+                        "data-protection liability shall be unlimited."
+                    ),
+                    "rationale": _RATIONALE,
+                }
+            ],
+            service=RedlineService(),
+            run_id=run_2,
+        )
+
+    assert "matches 0 spans" not in out
+    assert 'updated "contract (redlined).docx" in place' in out

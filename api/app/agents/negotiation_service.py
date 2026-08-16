@@ -33,18 +33,24 @@ the backstop. ``leave_open`` / ``escalate`` make no document mutation.
 ``comments_manager``. NEVER ``adeu.server`` / ``adeu.mcp_components`` (enforced by
 ``tests/agents/test_redline_service.py``). Adeu makes zero network calls.
 
-**Adeu facts this adapter relies on** (verified live on the pin ``adeu==1.12.1``):
+**Adeu facts this adapter relies on** (verified live on the pin ``adeu==2.4.0``):
 ``extract_text_from_stream(stream, clean_view=False)`` renders CriticMarkup —
 ``{--del--}{++ins++}{>>[Chg:N delete] Author⏎[Chg:N insert] Author⏎[Com:N] …<<}`` — so a
 single logical *modify* is a ``del``+``ins`` pair with two ``Chg`` ids; accept/reject of
-that change acts on **both** ids. ``apply_review_actions`` accepts only
-``AcceptChange`` / ``RejectChange`` / ``ReplyComment`` and returns ``(applied, skipped)``
-with failures in ``engine.skipped_details``. Replies are applied **before** accepts/rejects
-(an accept/reject of a change deletes the comment thread anchored to it — including any
-reply on it). ``comments_manager.extract_comments_data()`` keys comments by RAW, unprefixed
-ids (``"1"``) for both the id and ``parent_id``; there is no public API to place a comment
-on a text range with no edit (so a reply cannot be re-homed off a wiped change — verified
-on the pin, ``add_comment(author, text, parent_id=None)`` has no range anchor).
+that change acts on **both** ids. Since 2.x a replacement pair's meta line carries a
+``" (pairs with Chg:M)"`` suffix after the author — :data:`_PAIRS_SUFFIX` strips it or it
+corrupts ``TrackedChange.author``. ``apply_review_actions`` accepts only
+``AcceptChange`` / ``RejectChange`` / ``ReplyComment`` and returns
+``(applied, skipped, already_resolved)`` — the second id of a same-verdict modify pair now
+counts ``already_resolved``, not ``applied`` — with failures in ``engine.skipped_details``.
+Replies are applied **before** accepts/rejects (an accept/reject of a change deletes the
+comment thread anchored to it — including any reply on it; 2.x refuses a silently
+mis-threaded reply with a specific skipped detail instead of mis-reporting it applied).
+``comments_manager.extract_comments_data()`` keys comments by RAW, unprefixed ids (``"1"``)
+for both the id and ``parent_id``. 2.x CAN place a range-anchored comment with no edit (a
+comment-only ``ModifyText``, used by the shared two-pass renderer) — but a REPLY still
+cannot be re-homed off a wiped change (threading is comment-id based), so the comment-wipe
+gate + the reply-survival check below remain load-bearing.
 """
 
 from __future__ import annotations
@@ -59,7 +65,7 @@ from app.agents.redline_service import (
     DEFAULT_AUTHOR,
     ProposedEdit,
     _engine_bytes,
-    word_diff_edits,
+    render_edits,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,6 +81,10 @@ _REGION = re.compile(
     re.DOTALL,
 )
 _CHG_LINE = re.compile(r"\[Chg:(\d+)\s+(delete|insert|format)\]\s*(.*)")
+# Adeu ≥2.x appends a pairing cross-reference to the author position of a replacement
+# pair's meta line — "Jane Smith (pairs with Chg:6)" / "(pairs Chg:2, Chg:3)". Strip it
+# or it corrupts TrackedChange.author (shown to the model and the lawyer).
+_PAIRS_SUFFIX = re.compile(r"\s*\(pairs(?:\s+with)?\s+[^)]*\)\s*$")
 # A comment anchored to a change shares the change's {>>…<<} meta block (verified live):
 # `[Chg:3 delete] … [Chg:4 insert] … [Com:1] …`. So a `[Com:N]` co-occurring with a
 # `[Chg:…]` line marks Com:N as anchored to that region's logical change.
@@ -156,6 +166,10 @@ class Reconciliation:
     counters_applied: int
     counters_skipped: int
     issues: tuple[str, ...] = field(default_factory=tuple)
+    # Adeu ≥2.x: the second id of a same-verdict modify pair counts here, not in
+    # review_applied (so review_applied ≈ halves for modify-heavy rounds vs 1.x).
+    # Carried for audit transparency; nothing gates on it.
+    review_already_resolved: int = 0
 
 
 def _strip_markup(text: str) -> str:
@@ -210,7 +224,14 @@ def read_state_of_play(docx_bytes: bytes, *, our_author: str = DEFAULT_AUTHOR) -
         for com_cid in _COM_LINE.findall(meta):
             comment_anchors[f"Com:{com_cid}"] = f"C{n}"
         types = {typ for _cid, typ, _auth in chg}
-        author = next((auth.strip() for _cid, _typ, auth in chg if auth.strip()), "unknown")
+        author = next(
+            (
+                stripped
+                for _cid, _typ, auth in chg
+                if (stripped := _PAIRS_SUFFIX.sub("", auth).strip())
+            ),
+            "unknown",
+        )
         deleted = (m.group("del") or "").strip()
         inserted = (m.group("ins") or "").strip()
         if "format" in types and not deleted and not inserted:
@@ -275,8 +296,11 @@ def apply_decisions(
     Order matters (verified live): apply **replies first**, then **rejects**, then
     **accepts** (an accept on a region unanchors a reply sitting on it; accepts/rejects
     are sorted by descending ``Chg`` id so an earlier accept doesn't renumber a
-    not-yet-processed id). Counters are surgical ``ModifyText`` edits via the shared
-    word-diff, applied last. Then re-read the output to confirm every action landed.
+    not-yet-processed id; Adeu 2.x's own internal sort only guarantees replies-first, so
+    our ordering stays load-bearing). Counters render last via the shared two-pass
+    recipe (:func:`app.agents.redline_service.render_edits` — surgical uncommented
+    apply, then a range-anchored rationale comment). Then re-read the output to confirm
+    every action landed.
 
     Returns ``(output_bytes, reconciliation)``. The caller persists ``output_bytes``
     **only if** ``reconciliation.ok``.
@@ -331,27 +355,47 @@ def apply_decisions(
     accepts.sort(key=lambda t: t[0], reverse=True)
     review_actions = replies + [a for _k, a in rejects] + [a for _k, a in accepts]
 
+    # Fresh engine per call, and on ANY failure the caller discards out_bytes and
+    # re-reads from storage — never reuse an engine (or its bytes) after a failure
+    # signal. This is exactly the discipline Adeu 2.x's ``rollback_verified`` flag
+    # exists to enforce on callers that DO reuse engines (upstream BUG 2026-08-12);
+    # under this one-shot pattern the flag never needs reading.
     engine = RedlineEngine(io.BytesIO(docx_bytes), author=our_author)
 
-    review_applied = review_skipped = 0
+    review_applied = review_skipped = review_already_resolved = 0
     if review_actions:
-        review_applied, review_skipped = engine.apply_review_actions(review_actions)
+        review_applied, review_skipped, review_already_resolved = engine.apply_review_actions(
+            review_actions
+        )
         if review_skipped:
             details = getattr(engine, "skipped_details", []) or []
             issues.append(f"{review_skipped} review action(s) skipped: {len(details)} detail(s)")
 
     counters_applied = counters_skipped = 0
-    if counters:
-        sub_edits = word_diff_edits(engine, counters)
-        counters_applied, counters_skipped = engine.apply_edits(sub_edits)
-        if counters_skipped:
-            issues.append(f"{counters_skipped} counter sub-edit(s) skipped")
-        if counters_applied < len(counters):
-            issues.append(
-                f"counter under-applied: {counters_applied} region(s) for {len(counters)} counter(s)"
-            )
-
     out_bytes = _engine_bytes(engine)
+    if counters:
+        # validate=False: a counter deliberately edits the counterparty's pending
+        # insertions (validate_edits would flag foreign-author overlap); the
+        # tool-layer counter gate (D4/D5 on clean_text_full) + this reconciliation
+        # are the guards on this path. render_edits re-opens fresh engines over
+        # the post-review bytes (mapper caches go stale across sequential
+        # apply_edits calls on one engine — see its docstring).
+        outcome, countered = render_edits(out_bytes, counters, author=our_author, validate=False)
+        counters_applied, counters_skipped = outcome.edits_applied, outcome.edits_skipped
+        if counters_applied != len(counters):
+            issues.append(
+                f"counter under-applied: {counters_applied} of {len(counters)} counter(s) landed"
+            )
+        # outcome.clean is the renderer's own contract (skips, comment skips, OR any
+        # problem) — gate on it directly so a future render_edits failure mode can
+        # never slip past count-only checks.
+        if not outcome.clean:
+            issues.append(
+                f"counter render not clean: {counters_skipped} skipped, "
+                f"{outcome.comments_skipped} rationale comment(s) unattached, "
+                f"{len(outcome.problems)} problem(s)"
+            )
+        out_bytes = countered
 
     # Post-write reconciliation, two proofs (C5b-1):
     #  1) the output must re-read cleanly (corruption guard);
@@ -391,4 +435,5 @@ def apply_decisions(
         counters_applied=counters_applied,
         counters_skipped=counters_skipped,
         issues=tuple(issues),
+        review_already_resolved=review_already_resolved,
     )

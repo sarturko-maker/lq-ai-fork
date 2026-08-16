@@ -43,8 +43,12 @@ def _base_docx() -> bytes:
 
 
 def counterparty_markup() -> bytes:
-    """A doc with 3 counterparty tracked changes + 1 anchored comment (author='Opposing
-    Counsel'). Shared shape with the tool-integration tests."""
+    """Three logical counterparty edits + 1 anchored comment (author='Opposing
+    Counsel'). On adeu ≥2.x the two UNcommented edits each fan out into two
+    word-level regions ("three"→"five" and "3"→"5"; the parens stay bare), so the
+    document carries FIVE CriticMarkup regions — the state-of-play enumerates per
+    REGION, exactly as it always has for real Word markup (which fragments
+    arbitrarily too). Shared shape with the tool-integration tests."""
     from adeu import ModifyText, RedlineEngine
 
     eng = RedlineEngine(io.BytesIO(_base_docx()), author="Opposing Counsel")
@@ -66,13 +70,16 @@ def counterparty_markup() -> bytes:
 def test_read_state_of_play_enumerates_changes_and_comments() -> None:
     state = read_state_of_play(counterparty_markup())
 
-    assert [c.ref for c in state.changes] == ["C1", "C2", "C3"]  # document order
+    # Document order, one ref per REGION (v2 surgical fan-out: 1 + 2 + 2).
+    assert [c.ref for c in state.changes] == ["C1", "C2", "C3", "C4", "C5"]
     c1 = state.changes[0]
     assert c1.kind == "modify"
-    assert c1.deleted_text == "all losses"
+    assert c1.deleted_text == "all losses"  # commented edit stays one atomic region
     assert c1.inserted_text == "direct losses only"
-    assert c1.author == "Opposing Counsel"
-    assert len(c1.adeu_ids) == 2  # a modify is a del + ins pair
+    assert len(c1.adeu_ids) == 2  # a modify region is a del + ins pair
+    assert [c.inserted_text for c in state.changes[1:]] == ["five", "5", "twenty-four", "24"]
+    # the 2.x "(pairs with Chg:N)" meta suffix must never leak into the author
+    assert all(c.author == "Opposing Counsel" for c in state.changes)
 
     # one OPEN counterparty comment (thread root, not ours)
     assert len(state.open_comment_refs) == 1
@@ -90,14 +97,21 @@ def test_apply_decisions_full_round_reconciles() -> None:
         # is left_open (the accept is itself the answer) rather than replied to — replying
         # here would be wiped (covered by test_reply_then_reject_anchored_change_*).
         Decision(ref="C1", verdict="accept", rationale="Direct losses is acceptable."),
+        # The term change is TWO regions on v2 ("three"→"five", "3"→"5") — reverting it
+        # means a decision on each fragment (the coverage gate forces exactly this).
         Decision(ref="C2", verdict="reject", rationale="Five years is too long; revert to three."),
+        Decision(ref="C3", verdict="reject", rationale="Five years is too long; revert to three."),
+        # The cap change is also two regions; the counter rides the word fragment and
+        # rewrites the whole phrase, the digit fragment is accepted (the counter's own
+        # word-diff then strikes the accepted "24" → "18").
         Decision(
-            ref="C3",
+            ref="C4",
             verdict="counter",
             target_text="twenty-four (24)",
             new_text="eighteen (18)",
             rationale="Eighteen months is the house fallback for the liability survival window here.",
         ),
+        Decision(ref="C5", verdict="accept", rationale="Digits follow the countered wording."),
         Decision(ref=com_ref, verdict="leave_open", rationale="Accepting their edit answers this."),
     ]
 
@@ -105,14 +119,20 @@ def test_apply_decisions_full_round_reconciles() -> None:
 
     assert recon.ok, recon.issues
     assert recon.review_skipped == 0
+    # Four modify pairs got a same-verdict decision (C1 accept, C2+C3 reject,
+    # C5 accept); each pair's second id counts already_resolved on adeu >=2.x —
+    # pins the 3-tuple unpack ORDER, not just its arity.
+    assert recon.review_already_resolved == 4
     assert recon.counters_skipped == 0
-    assert recon.counters_applied >= 1
+    assert recon.counters_applied == 1  # per LOGICAL counter on v2, not per region
 
     after = read_state_of_play(out_bytes)
-    # C1 accepted → incorporated as clean text; C2 rejected → reverted to "three (3)".
+    # C1 accepted → incorporated as clean text; C2+C3 rejected → back to "three (3)".
     assert "direct losses only" in after.clean_view
     assert "three (3)" in after.clean_view
-    assert "five (5)" not in after.clean_view
+    assert "five" not in after.clean_view
+    # the counter is a pending tracked change: accept-all view shows our number
+    assert "eighteen (18)" in after.clean_view
 
 
 def test_read_state_of_play_captures_comment_anchor() -> None:
@@ -187,3 +207,19 @@ def test_apply_decisions_bad_anchor_counter_is_skipped_not_silent() -> None:
     ]
     _out, recon = apply_decisions(cp, state, decisions)
     assert not recon.ok
+
+
+def test_pairs_suffix_regex_strips_both_forms_and_spares_real_parentheticals() -> None:
+    """Direct drift-guard for the 2.x meta-line author suffix (both documented
+    shapes), without over-stripping a genuine parenthetical in an author name."""
+    from app.agents.negotiation_service import _PAIRS_SUFFIX
+
+    cases = {
+        "Jane Smith (pairs with Chg:6)": "Jane Smith",
+        "Opposing Counsel (pairs Chg:2, Chg:3)": "Opposing Counsel",
+        "Ltd (UK) counsel (pairs with Chg:9)": "Ltd (UK) counsel",
+        "Plain Author": "Plain Author",
+        "Acme (Holdings) Ltd": "Acme (Holdings) Ltd",
+    }
+    for raw, want in cases.items():
+        assert _PAIRS_SUFFIX.sub("", raw).strip() == want, raw

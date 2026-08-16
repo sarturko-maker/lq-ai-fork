@@ -1,9 +1,9 @@
 """C4 RedlineService + import-boundary tests (ADR-F031).
 
-Exercises the Adeu SDK adapter on the pin (decompose → preview → apply →
-accept-all) and enforces the STRICT import boundary: app code must never import
-``adeu.server`` / ``adeu.mcp_components`` (a second network egress) — the C4
-analogue of the C1 fitz import-guard.
+Exercises the Adeu SDK adapter on the pin (validate → two-pass render → preview
+→ apply → accept-all; the ADR-F085 recipe) and enforces the STRICT import
+boundary: app code must never import ``adeu.server`` / ``adeu.mcp_components``
+(a second network egress) — the C4 analogue of the C1 fitz import-guard.
 """
 
 from __future__ import annotations
@@ -153,10 +153,13 @@ def _dotted(node: ast.AST) -> str | None:
 
 
 def test_app_never_imports_adeu_server() -> None:
-    """No app module may import or reference Adeu's bundled FastMCP server
-    (a second egress). Adeu is SDK-only (ADR-F031)."""
+    """No app module may import or reference Adeu's bundled server surfaces
+    (a second egress). Adeu is SDK-only (ADR-F031). ``adeu.serve`` (2.x's
+    JSON-lines daemon — one letter off ``adeu.server``) and ``adeu.cli`` both
+    transitively import ``adeu.mcp_components``, so they are banned by name too
+    (the F085 review found the one-letter gap)."""
     app_dir = pathlib.Path(__file__).resolve().parents[1].parent / "app"
-    banned = ("adeu.server", "adeu.mcp_components")
+    banned = ("adeu.server", "adeu.serve", "adeu.cli", "adeu.mcp_components")
     offenders: list[tuple[str, str]] = []
     for py in sorted(app_dir.rglob("*.py")):
         tree = ast.parse(py.read_text(encoding="utf-8"))
@@ -382,13 +385,154 @@ def test_worddiff_hyphenated_terms_do_not_corrupt() -> None:
     assert "the service-provider" in clean
 
 
-def test_worddiff_falls_back_for_nonunique_anchor() -> None:
-    """When the anchor is not uniquely locatable the edit still applies (wholesale
-    fallback) rather than crashing — the gate's D4 normally forbids this, so it is
-    the rare whitespace-mismatch safety net."""
+def test_ambiguous_anchor_rejected_with_actionable_problem() -> None:
+    """A non-unique anchor is REJECTED with a per-edit message (Adeu 2.x's
+    validate_edits shows the competing contexts) instead of the pre-2.x shim's
+    silent wholesale fallback onto the first occurrence — the gate's D4 forbids
+    ambiguity anyway, so the service must never guess a location."""
     svc = RedlineService()
-    # "The Customer" appears in several paragraphs → not unique → fallback path.
+    # "The Customer" appears in several paragraphs → ambiguous under strict mode.
     docx = _build_docx(_MSA)
     preview = svc.dry_run(docx, [ProposedEdit("The Customer", "Each party")])
-    assert preview.edits_applied >= 1
-    assert preview.edits_skipped == 0
+    assert preview.edits_applied == 0
+    assert preview.edits_skipped >= 1
+    assert preview.problems  # the model gets told WHICH edit and WHY
+
+
+# --------------------------------------------------------------------------- #
+# Two-pass recipe (ADR-F085) — comments span the logical edit; living redline
+# round 2 resolves over prior tracked changes (the probe scenarios as tests:
+# docs/fork/evidence/adeu2-probe/).
+# --------------------------------------------------------------------------- #
+
+
+def _ooxml_regions(docx_bytes: bytes) -> list[str]:
+    """local tag names of every tracked-change region in document order."""
+    import re as _re
+
+    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
+        xml = z.read("word/document.xml").decode("utf-8", "ignore")
+    return _re.findall(r"<w:(ins|del)\b", xml)
+
+
+def _comments_xml(docx_bytes: bytes) -> str:
+    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
+        parts = [n for n in z.namelist() if n.startswith("word/comments") and n.endswith(".xml")]
+        return "".join(z.read(n).decode("utf-8", "ignore") for n in parts)
+
+
+def test_commented_edit_is_surgical_and_comment_spans_the_clause() -> None:
+    """The recipe's whole point: a comment-carrying edit still fans out into
+    minimal regions (the uncommented apply pass), and ONE rationale comment
+    anchors across the clause (the comment-only annotate pass) — not Adeu's atomic
+    one-block commented rendering, and not the old comment-on-first-fragment."""
+    svc = RedlineService()
+    docx = _build_docx(_MSA)
+    res = svc.apply(
+        docx, [ProposedEdit(_INDEMNITY, _INDEMNITY_MUTUAL, "Mutualise indemnity; narrow trigger.")]
+    )
+    assert res.comments_applied == 1
+    # several minimal regions, not one struck-and-retyped block
+    assert len(_ooxml_regions(res.docx_bytes)) >= 4
+    comments = _comments_xml(res.docx_bytes)
+    assert "Mutualise indemnity" in comments
+    # the comment is range-anchored in the body (rejecting one word-region in
+    # review cannot orphan it)
+    with zipfile.ZipFile(io.BytesIO(res.docx_bytes)) as z:
+        body = z.read("word/document.xml").decode("utf-8", "ignore")
+    assert "commentRangeStart" in body and "commentRangeEnd" in body
+
+
+def test_living_redline_round2_resolves_over_round1_insertion() -> None:
+    """Round 2 on the redlined output (the ADR-F081 living redline): a target that
+    INCLUDES text round 1 inserted must resolve and land in the right clause, with
+    its rationale comment attached — the case where both the pre-2.x pinned shim
+    (silent wrong-clause mis-anchor, AP-05) and a naive commented native apply
+    (silent comment drop) fail."""
+    svc = RedlineService()
+    docx = _build_docx(_MSA)
+    r1 = svc.apply(docx, [ProposedEdit(_INDEMNITY, _INDEMNITY_MUTUAL, "Mutualise indemnity.")])
+    # Round 2 targets a span that only exists because round 1 inserted it.
+    r2 = svc.apply(
+        r1.docx_bytes,
+        [
+            ProposedEdit(
+                "a party breach of this Agreement.",
+                "a party material breach of this Agreement.",
+                "Limit the indemnity trigger to material breach.",
+            )
+        ],
+    )
+    assert r2.edits_applied == 1 and r2.edits_skipped == 0
+    assert r2.comments_applied == 1
+    comments = _comments_xml(r2.docx_bytes)
+    assert "Mutualise indemnity" in comments and "material breach" in comments
+    clean = _docx_text(svc.accept_all(r2.docx_bytes))
+    assert "a party material breach of this Agreement" in clean
+    # no mis-anchor: the untouched clauses survive verbatim
+    assert "within thirty (30) days" in clean
+    assert "one (1) year from the Effective Date" in clean
+
+
+def test_round2_target_inside_deleted_text_is_rejected() -> None:
+    """Text round 1 struck (pending deletion) is not editable — the edit must come
+    back as a per-edit problem, never land inside the deletion."""
+    svc = RedlineService()
+    docx = _build_docx(_MSA)
+    r1 = svc.apply(docx, [ProposedEdit(_INDEMNITY, _INDEMNITY_MUTUAL, "Mutualise.")])
+    preview = svc.dry_run(
+        r1.docx_bytes,
+        # round 1 deleted "the Customer use of the Services" (trigger rewritten)
+        [ProposedEdit("the Customer use of the Services", "the Customer's use")],
+    )
+    assert preview.edits_applied == 0
+    assert preview.edits_skipped >= 1
+    assert preview.problems
+
+
+def test_dry_run_problems_name_the_failing_edit() -> None:
+    """Per-edit attribution (VM2-A): with a clean first edit and a bad second one,
+    the problem message names edit 2 — the batch index space is the model's own
+    edit list."""
+    svc = RedlineService()
+    docx = _build_docx(_MSA)
+    preview = svc.dry_run(
+        docx,
+        [
+            ProposedEdit("within thirty (30) days.", "within sixty (60) days."),
+            ProposedEdit("this phrase is absent from the document", "x"),
+        ],
+    )
+    assert preview.edits_applied == 0  # all-or-nothing batch
+    assert any("Edit 2" in p for p in preview.problems)
+
+
+def test_repeated_new_text_still_carries_its_comment() -> None:
+    """The ordering discriminator (ADR-F085): the rationale comment anchors on
+    target_text (D4-unique), NOT on new_text — so an edit whose new_text already
+    appears verbatim elsewhere in the document still gets its comment. Under the
+    rejected apply-first ordering (comment-only on new_text after the apply) this
+    exact case skips the comment as ambiguous and the batch rejects."""
+    svc = RedlineService()
+    docx = _build_docx(
+        [
+            "1. Invoices under a Statement of Work are payable within sixty (60) days.",
+            "2. All other invoices are payable within thirty (30) days.",
+        ]
+    )
+    res = svc.apply(
+        docx,
+        [
+            ProposedEdit(
+                "All other invoices are payable within thirty (30) days.",
+                # new_text's payment phrase already exists verbatim in clause 1
+                "All other invoices are payable within sixty (60) days.",
+                "Align the general payment period with the SOW period per house terms.",
+            )
+        ],
+    )
+    assert res.edits_applied == 1
+    assert res.comments_applied == 1  # anchored on the unique target, never ambiguous
+    assert "house terms" in _comments_xml(res.docx_bytes)
+    clean = _docx_text(svc.accept_all(res.docx_bytes))
+    assert clean.count("sixty (60)") == 2 and "thirty (30)" not in clean
