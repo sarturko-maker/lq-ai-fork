@@ -4,7 +4,7 @@
 # keeping the pre-S6 container contract (port 8080 + GET /health) so
 # compose / helm / the caddy overlay keep working unchanged.
 
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 # Vite/SvelteKit bakes PUBLIC_* env vars into the static bundle at build
 # time. Production: leave unset (relative /api/v1 behind a reverse proxy).
 # Local Compose dev: passed via docker-compose.yml `args:` from .env's
