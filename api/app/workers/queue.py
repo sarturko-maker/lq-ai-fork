@@ -58,6 +58,15 @@ playbook queue; the playbook worker consumes it and runs the session via
 the LangGraph executor under the brakes. Must match
 :data:`app.workers.autonomous_worker.AUTONOMOUS_SESSION_JOB_NAME`."""
 
+INTAKE_EMAIL_JOB_NAME = "intake_email_job"
+"""INTAKE-1 (ADR-F086) — email-intake processing pipeline. Enqueued by
+``POST /api/v1/internal/intake/emails`` (the mail-bridge landing endpoint,
+``app.api.intake_emails``) after the envelope, thread upsert, eager
+candidate-project, attachment ingest, and ``intake_messages`` row are all
+committed. Must match
+:data:`app.workers.intake_worker.INTAKE_EMAIL_JOB_NAME`. STUB body until
+INTAKE-3 (the bound-area-agent run) lands."""
+
 AGENT_RUN_JOB_NAME = "agent_run_job"
 """F1-S1 (ADR-F009) — deep-agent run execution, at-most-once. Enqueued
 by ``POST /api/v1/agents/runs`` onto the shared playbook queue with a
@@ -323,6 +332,42 @@ async def enqueue_playbook_execution_job(execution_id: uuid.UUID) -> bool:
             extra={
                 "event": "playbook_execution_enqueue_failed",
                 "execution_id": str(execution_id),
+                "error": str(exc),
+            },
+        )
+        return False
+
+
+async def enqueue_intake_email_job(thread_id: uuid.UUID) -> bool:
+    """Enqueue the (stub, INTAKE-1) intake-email processing job onto the
+    shared playbook queue; return True on success.
+
+    Shares ``arq:m3a6`` with Easy Playbook/Tabular/agent runs per the
+    established Decision C-3 posture — one more bursty, low-volume
+    workload, no reason to isolate it onto its own queue.
+
+    Best-effort/non-fatal, matching every other ``enqueue_*`` helper here
+    EXCEPT :func:`enqueue_agent_run_job`: the caller
+    (``app.api.intake_emails.ingest_email``) already committed the thread/
+    project/attachment/message rows before calling this, so a failed
+    enqueue just means the thread stays at ``status='received'`` — no
+    zombie run, no orphaned partial write, safely re-enqueueable later.
+    """
+
+    try:
+        pool = await _get_m3a6_pool()
+        await pool.enqueue_job(INTAKE_EMAIL_JOB_NAME, str(thread_id))
+        log.info(
+            "enqueue_intake_email_job: enqueued",
+            extra={"event": "intake_email_enqueue", "thread_id": str(thread_id)},
+        )
+        return True
+    except Exception as exc:
+        log.warning(
+            "enqueue_intake_email_job: failed; thread stays 'received'",
+            extra={
+                "event": "intake_email_enqueue_failed",
+                "thread_id": str(thread_id),
                 "error": str(exc),
             },
         )

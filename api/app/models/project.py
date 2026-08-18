@@ -87,6 +87,17 @@ class Project(Base):
             "NOT (is_sandbox AND practice_area_id IS NOT NULL)",
             name="chk_projects_sandbox_no_area",
         ),
+        # INTAKE-1 (ADR-F086): the intake lifecycle. NULL = normal matter (the
+        # overwhelming majority of rows, unchanged). A non-NULL value marks a
+        # project that originated from an inbound intake email thread, created
+        # EAGERLY at ingest (before any agent has looked at it) — the agent's
+        # later `record_intake_outcome` decides whether it stays 'candidate',
+        # is promoted to a real matter, or is auto-'dismissed' (spam/FYI, no
+        # clutter survives). See `docs/adr/F086-email-intake-architecture.md`.
+        CheckConstraint(
+            "intake_state IS NULL OR intake_state IN ('candidate','promoted','dismissed')",
+            name="chk_projects_intake_state",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -125,6 +136,11 @@ class Project(Base):
         server_default=text("false"),
         default=False,
     )
+    # INTAKE-1 seam (ADR-F086): NULL = normal matter. 'candidate' = created
+    # eagerly by the intake email flow, awaiting the agent's outcome;
+    # 'promoted' = the lawyer kept it as a real matter; 'dismissed' = the
+    # agent (or lawyer) filed it away with nothing external. CHECK above.
+    intake_state: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

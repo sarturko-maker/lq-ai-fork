@@ -39,34 +39,28 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.config import get_settings
 from app.db.session import get_db
-from app.errors import NotFound, ValidationError
+from app.errors import NotFound, PayloadTooLarge, ValidationError
+from app.ingest import DEFAULT_MIME, ingest_bytes
 from app.models.document import Document
 from app.models.file import File as FileModel
 from app.models.project import Project
 from app.schemas.files import FileMetadata
 from app.schemas.wopi import EditorSessionResponse
 from app.security import create_wopi_token, decode_wopi_token
-from app.storage import (
-    StreamUploadResult,
-    delete_object,
-    stream_download,
-    stream_upload,
-)
+from app.storage import stream_download
 
 router = APIRouter(prefix="/files", tags=["files"])
 log = logging.getLogger(__name__)
 
-# Default MIME for the rare upload that arrives with no `Content-Type` on
-# the multipart part. Same fallback the IETF recommends for "we have no
-# idea what kind of bytes these are."
-DEFAULT_MIME = "application/octet-stream"
+# DEFAULT_MIME's canonical home is app.ingest (INTAKE-1); imported above so
+# ``get_file_content``'s response media-type fallback (below) keeps working
+# unchanged.
 
 
 # ---------------------------------------------------------------------------
@@ -130,35 +124,42 @@ def _strip_for_ascii_fallback(filename: str) -> str:
     return "".join(ch for ch in filename if 0x20 <= ord(ch) < 0x7F)
 
 
-async def _upload_file_stream(
-    upload: UploadFile,
-    *,
-    storage_path: str,
-    max_size_bytes: int,
-) -> StreamUploadResult:
-    """Adapter: feed an ``UploadFile``'s spool through ``stream_upload``.
+async def _read_upload_bytes(upload: UploadFile, *, max_size_bytes: int) -> bytes:
+    """Read an ``UploadFile`` fully, aborting the instant it exceeds the cap.
 
-    Reads ``upload.read(MULTIPART_PART_SIZE)`` repeatedly so we never
-    materialize the whole body. Starlette spools to a SpooledTemporaryFile
-    on disk past 1 MB by default, so for any file larger than that the
-    bytes are streaming through disk rather than RAM.
+    Reads ``upload.read(MULTIPART_PART_SIZE)`` repeatedly (Starlette spools
+    to a SpooledTemporaryFile on disk past 1 MB by default, so this never
+    holds more than the part size plus the spool file at once while
+    reading) and accumulates into one buffer for :func:`app.ingest.ingest_bytes`
+    — INTAKE-1's shared ingest primitive takes fully-buffered ``bytes`` so it
+    can serve both this HTTP route and the intake bridge's already-decoded
+    email attachments from one code path.
+
+    Raises :class:`app.errors.PayloadTooLarge` the instant the running byte
+    count exceeds ``max_size_bytes`` — same check, same error shape
+    (``limit_bytes``/``received_bytes``) ``stream_upload`` used to raise
+    here, just evaluated before any storage write rather than mid-multipart.
     """
 
     from app.storage import MULTIPART_PART_SIZE
 
-    async def _chunks() -> AsyncIterator[bytes]:
-        while True:
-            chunk = await upload.read(MULTIPART_PART_SIZE)
-            if not chunk:
-                break
-            yield chunk
-
-    return await stream_upload(
-        storage_path=storage_path,
-        chunks=_chunks(),
-        content_type=upload.content_type or DEFAULT_MIME,
-        max_size_bytes=max_size_bytes,
-    )
+    buffer = bytearray()
+    total_bytes = 0
+    while True:
+        chunk = await upload.read(MULTIPART_PART_SIZE)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > max_size_bytes:
+            raise PayloadTooLarge(
+                message=(
+                    f"Uploaded file exceeds the {max_size_bytes // (1024 * 1024)} MB "
+                    "per-request limit."
+                ),
+                details={"limit_bytes": max_size_bytes, "received_bytes": total_bytes},
+            )
+        buffer.extend(chunk)
+    return bytes(buffer)
 
 
 # ---------------------------------------------------------------------------
@@ -199,25 +200,23 @@ async def upload_file(
         ),
     ] = None,
 ) -> FileMetadata:
-    """Stream the upload to MinIO; persist metadata; return the ``File`` shape.
+    """Read the upload; persist it via ``ingest_bytes``; return the ``File`` shape.
 
     Order of operations:
 
     1. **Validate ``project_id``** if supplied. The form field is parsed
        as a UUID; the project must exist, be owned by the caller, and
        not be archived. Failures here return 422 *before* any bytes
-       touch MinIO so a bad project_id doesn't leak into orphan storage.
-    2. **Pre-allocate the file_id** locally so we know the storage path
-       before touching MinIO. (Per ADR 0005 the storage key is the bare
-       UUID.)
-    3. **Stream the upload to MinIO** via ``stream_upload``. This raises
-       :class:`PayloadTooLarge` if the streamed byte count exceeds the
-       configured cap; on any other exception, the multipart upload is
-       aborted (no orphan parts left behind).
-    4. **Insert the row** in ``files`` with the streamed size and SHA-256.
-       If the insert fails (e.g., the user has been deleted between
-       auth and now), we hard-delete the just-uploaded MinIO object so
-       we don't leak orphaned bytes.
+       touch storage so a bad project_id doesn't leak into orphan storage.
+    2. **Read the multipart body**, aborting with 413 the instant it
+       exceeds the configured cap (:func:`_read_upload_bytes`) — no bytes
+       reach storage for an oversized upload.
+    3. **Delegate to :func:`app.ingest.ingest_bytes`** (INTAKE-1) for
+       validation, the storage write, the ``files`` row, and the C5
+       enqueue — the same primitive the email-intake bridge endpoint uses
+       for its already-decoded attachments.
+    4. **Write the audit row and commit.** ``ingest_bytes`` only flushes,
+       so the file insert and its audit row land in one transaction here.
     5. **Return the ``FileMetadata``** matching the OpenAPI ``File`` schema.
     """
 
@@ -226,7 +225,9 @@ async def upload_file(
 
     # Filename is required by the OpenAPI sketch; FastAPI's UploadFile
     # always exposes `.filename` but it can be the empty string for a
-    # pathologically-formed multipart. Reject those explicitly.
+    # pathologically-formed multipart. Reject those explicitly, before
+    # reading any bytes. ``ingest_bytes`` re-checks this too (it has its
+    # own, non-HTTP caller in the intake bridge endpoint).
     filename = (file.filename or "").strip()
     if not filename:
         raise ValidationError(
@@ -260,114 +261,43 @@ async def upload_file(
                 details={"project_id": str(resolved_project_id)},
             )
 
-    file_id = uuid.uuid4()
-    storage_path = str(file_id)
-    mime_type = file.content_type or DEFAULT_MIME
+    data = await _read_upload_bytes(file, max_size_bytes=max_size_bytes)
 
-    log.info(
-        "file upload start",
-        extra={
-            "event": "file_upload_start",
-            "user_id": str(user.id),
-            "file_id": str(file_id),
-            # Use ``upload_filename`` not ``filename`` because ``filename``
-            # is a reserved attribute on Python's ``LogRecord`` and
-            # supplying it via ``extra`` raises a KeyError.
-            "upload_filename": filename,
-            "mime_type": mime_type,
-            "project_id": str(resolved_project_id) if resolved_project_id else None,
-        },
-    )
-
-    upload_result = await _upload_file_stream(
-        file,
-        storage_path=storage_path,
-        max_size_bytes=max_size_bytes,
-    )
-
-    row = FileModel(
-        id=file_id,
+    row = await ingest_bytes(
+        session=db,
+        settings=settings,
         owner_id=user.id,
         project_id=resolved_project_id,
         filename=filename,
-        mime_type=mime_type,
-        size_bytes=upload_result.size_bytes,
-        hash_sha256=upload_result.sha256_hex,
-        storage_path=upload_result.storage_path,
-        ingestion_status="pending",
+        content_type=file.content_type,
+        data=data,
     )
-    db.add(row)
-    try:
-        await db.flush()
-        # Privilege propagates from the project (if any) — audit_action
-        # resolves it from project_id without an extra fetch when the
-        # ORM Project isn't loaded here.
-        await audit_action(
-            db,
-            user_id=user.id,
-            action="file.uploaded",
-            resource_type="file",
-            resource_id=str(file_id),
-            project_id=resolved_project_id,
-            request=request,
-            details={
-                "filename": filename,
-                "size_bytes": upload_result.size_bytes,
-                "mime_type": mime_type,
-            },
-        )
-        await db.commit()
-    except IntegrityError:
-        # Failed to persist after the bytes were uploaded. Clean up the
-        # MinIO object so we don't leak orphaned storage.
-        await db.rollback()
-        try:
-            await delete_object(storage_path=storage_path)
-        except Exception:
-            log.warning(
-                "Failed to clean up MinIO object after row-insert failure",
-                extra={
-                    "event": "file_upload_cleanup_failed",
-                    "storage_path": storage_path,
-                },
-            )
-        raise
 
-    await db.refresh(row)
-
-    log.info(
-        "file upload complete",
-        extra={
-            "event": "file_upload_complete",
-            "user_id": str(user.id),
-            "file_id": str(file_id),
-            "size_bytes": upload_result.size_bytes,
-            "sha256": upload_result.sha256_hex,
+    # Privilege propagates from the project (if any) — audit_action
+    # resolves it from project_id without an extra fetch when the
+    # ORM Project isn't loaded here. Read the persisted row's fields
+    # (not the local `data`/`filename`) — ingest_bytes already refreshed
+    # it, and this keeps the audit row honest about what actually landed.
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="file.uploaded",
+        resource_type="file",
+        resource_id=str(row.id),
+        project_id=resolved_project_id,
+        request=request,
+        details={
+            "filename": row.filename,
+            "size_bytes": row.size_bytes,
+            "mime_type": row.mime_type,
         },
     )
-
-    # Enqueue the ingest job for the C5 document pipeline. Failures are
-    # non-fatal — the row stays at `pending` and the worker's startup
-    # sweep will pick it up. We import lazily so test environments
-    # that don't have arq installed (or that monkey-patch the queue)
-    # don't pay an import cost on every upload.
-    try:
-        from app.workers.queue import enqueue_ingest_job
-
-        await enqueue_ingest_job(file_id)
-    except Exception as exc:
-        # The enqueue helper itself catches exceptions and returns a
-        # bool, but defensively handle any path that raises (e.g., the
-        # import failed). The upload itself is committed; ingestion
-        # is delayed.
-        log.warning(
-            "enqueue_ingest_job raised; row remains pending",
-            extra={
-                "event": "file_upload_enqueue_raised",
-                "file_id": str(file_id),
-                "error": str(exc),
-            },
-        )
+    await db.commit()
+    # ingest_bytes()'s own refresh happened before this commit, which
+    # expires it again (SQLAlchemy's default expire_on_commit) — refresh
+    # once more so the serialization below never touches an expired
+    # attribute outside of an awaited call (the MissingGreenlet trap).
+    await db.refresh(row)
 
     return FileMetadata.model_validate(row)
 

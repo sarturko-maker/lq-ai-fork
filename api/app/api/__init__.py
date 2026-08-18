@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends
 from app.api import (
     admin,
     admin_intake_bridges,
+    admin_intake_mailboxes,
     agent_runs,
     assessments,
     auth,
@@ -37,6 +38,7 @@ from app.api import (
     files,
     inference,
     inference_override,
+    intake_emails,
     integrations_slack,
     integrations_teams,
     internal,
@@ -98,6 +100,13 @@ api_router.include_router(integrations_slack.router)
 # per-tenant secrets persisted because Teams uses app-level bot
 # credentials (one MICROSOFT_APP_ID per deployment).
 api_router.include_router(integrations_teams.router)
+
+# INTAKE-1 (ADR-F086): the (future) mail-bridge → api email-intake landing
+# surface. Same shared LQ_AI_BRIDGE_TOKEN bearer auth posture as the
+# slack-/teams-bridge endpoints above (require_bridge_auth at handler
+# level); mounted without `_active` deliberately — this is a
+# service-to-service caller with no user context.
+api_router.include_router(intake_emails.router)
 
 # M3-B8 — Word add-in version handshake. Unauthenticated: the task pane
 # calls this on mount BEFORE the user has signed in, so an out-of-date
@@ -165,6 +174,10 @@ api_router.include_router(admin.router, dependencies=_active)
 # AdminUser dependency; mounted under the `_active` group so the
 # bearer-token + must-change-password gates fire first.
 api_router.include_router(admin_intake_bridges.router, dependencies=_active)
+# INTAKE-1 (ADR-F086): admin CRUD for intake-mailbox bindings (provider +
+# inbox_id → practice area + owner user). Admin-gated at handler level;
+# mounted under the `_active` group like every other admin surface here.
+api_router.include_router(admin_intake_mailboxes.router, dependencies=_active)
 # M4-A4-i: Autonomous sessions read/halt API — per-user isolated, bearer-auth.
 api_router.include_router(autonomous.router, dependencies=_active)
 # F0-S2 (fork): deep-agent run records — kick-off + polled run/steps
