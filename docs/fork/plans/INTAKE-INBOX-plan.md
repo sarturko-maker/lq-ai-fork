@@ -148,7 +148,8 @@ engine; ADR-F042 matter-memory semantics on the candidate matter.
   status(received|processing|awaiting_human|replied|handled|error), last_message_id,
   last_inbound_at, auth_state(pass|fail|unknown), message_count, created_at, updated_at`.
 - `intake_messages` — idempotency + provenance: `id, thread_id FK, provider_message_id
-  (UNIQUE with mailbox), direction(in|out), run_id FK nullable, created_at`. Duplicate webhook
+  (UNIQUE with thread_id — shipped as `UNIQUE (thread_id, provider_message_id)`),
+  direction(in|out), run_id FK nullable, created_at`. Duplicate webhook
   delivery / websocket replay = no-op on the unique key.
 
 ## Doctrine, not policy config (MAINTAINER-RULED 2026-08-16)

@@ -9,27 +9,34 @@ authenticate their bridges: a shared ``LQ_AI_BRIDGE_TOKEN`` bearer via
 caller with no user context). Mounted WITHOUT the ``ActiveUser`` gate (see
 the router aggregation in ``app.api.__init__``).
 
-Flow (ADR-F086 architecture diagram):
+Flow (ADR-F086 architecture diagram; see the fresh-context review fix that
+made idempotency claim-first and leak-free):
 
 1. Resolve the active :class:`~app.models.intake.IntakeMailbox` by
-   ``(provider, inbox_id)`` — 404 if none is bound (never leaks whether a
-   soft-deleted/inactive binding once existed; same posture as any other
-   "unknown resource" 404 in this codebase).
-2. Idempotency: if ``(thread, provider_message_id)`` is already recorded,
-   return ``{"duplicate": true}`` and do nothing else — the
-   ``intake_messages`` unique key is the anchor; this is a fast-path
-   short-circuit ahead of it, not a replacement for it.
-3. Upsert the :class:`~app.models.intake.IntakeThread` — create at
-   ``status='received'`` or bump ``last_message_id``/``last_inbound_at``/
-   ``message_count``/``auth_state`` on an existing one.
+   ``(provider, inbox_id)`` — 404 if none is bound.
+2. Resolve or create the :class:`~app.models.intake.IntakeThread`. Creating
+   one races against a concurrent delivery of the FIRST message on the same
+   thread: on a flush-time ``IntegrityError`` (``uq_intake_threads_*``), we
+   roll back and re-select — the concurrent winner's row is what we
+   continue with.
+3. **Claim**: insert the :class:`~app.models.intake.IntakeMessage` row and
+   flush IMMEDIATELY — before any project creation or attachment upload.
+   This is the atomic idempotency anchor (``uq_intake_messages_*``): a
+   concurrent redelivery of the SAME message loses this race and exits as
+   ``duplicate: true`` having uploaded nothing. A pre-check SELECT would
+   leave a TOCTOU window where two concurrent deliveries both pass the
+   check and both upload; the flush-and-catch here closes it.
 4. If the thread has no project yet, create one EAGERLY
    (``intake_state='candidate'`` — ADR-F086: the project row is substrate,
    created before any agent has looked at it; the agent's later
    ``record_intake_outcome`` (INTAKE-3) promotes or dismisses it).
-5. Ingest every attachment via :func:`app.ingest.ingest_bytes`.
-6. Insert the :class:`~app.models.intake.IntakeMessage` row (direction
-   ``'in'`` — the idempotency anchor for future duplicate delivery).
-7. Commit, then enqueue ``intake_email_job`` on the shared ``arq:m3a6``
+5. Ingest every attachment via :func:`app.ingest.ingest_bytes`, tracking
+   each successfully-uploaded storage path. On ANY exception from this
+   point through the final commit (a later attachment too large, a DB
+   error, …) every already-uploaded object from THIS request is
+   best-effort deleted before the exception re-raises — a failed request
+   leaves no rows AND no orphaned blobs; redelivery retries cleanly.
+6. Commit, then enqueue ``intake_email_job`` on the shared ``arq:m3a6``
    queue — best-effort/non-fatal (log a warning, still return 200; the
    worker is a stub in this slice regardless — INTAKE-3 fills it in).
 
@@ -42,6 +49,7 @@ likewise events + counts only, never subject/body/sender values.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -58,6 +66,7 @@ from app.ingest import ingest_bytes
 from app.models.intake import IntakeMailbox, IntakeMessage, IntakeThread
 from app.models.project import Project
 from app.schemas.intake import InboundEmailEnvelope, IntakeEmailIngestResponse
+from app.storage import delete_object
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +87,41 @@ def _derive_project_name(subject: str) -> str:
     if not stripped:
         return _DEFAULT_PROJECT_NAME
     return stripped[:_PROJECT_NAME_MAX_LEN]
+
+
+async def _select_thread(
+    db: AsyncSession, *, mailbox_id: uuid.UUID, provider_thread_id: str
+) -> IntakeThread | None:
+    return (
+        await db.execute(
+            select(IntakeThread).where(
+                IntakeThread.mailbox_id == mailbox_id,
+                IntakeThread.provider_thread_id == provider_thread_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _cleanup_uploaded(storage_paths: list[str]) -> None:
+    """Best-effort delete of storage objects already written this request.
+
+    Called when the request fails AFTER one or more attachments were
+    already durably uploaded: a failed intake delivery must leave no
+    orphaned blobs behind, same invariant :func:`app.ingest.ingest_bytes`
+    upholds for its own single call — this covers the WIDER window across
+    an entire multi-attachment request (an earlier attachment's bytes
+    survive its own successful upload+flush even though a LATER attachment
+    in the same request is what ultimately fails).
+    """
+
+    for storage_path in storage_paths:
+        try:
+            await delete_object(storage_path=storage_path)
+        except Exception:
+            log.warning(
+                "intake email: failed to clean up storage object after request failure",
+                extra={"event": "intake_email_cleanup_failed", "storage_path": storage_path},
+            )
 
 
 @router.post(
@@ -107,123 +151,140 @@ async def ingest_email(
             details={"provider": envelope.provider, "inbox_id": envelope.inbox_id},
         )
 
-    thread = (
-        await db.execute(
-            select(IntakeThread).where(
-                IntakeThread.mailbox_id == mailbox.id,
-                IntakeThread.provider_thread_id == envelope.thread.provider_thread_id,
-            )
-        )
-    ).scalar_one_or_none()
+    # Capture plain scalars NOW: both IntegrityError branches below roll the
+    # session back, which expires every loaded ORM instance — a later
+    # `mailbox.<attr>` access would lazy-refresh outside an awaited call and
+    # raise MissingGreenlet (the documented async-session trap).
+    mailbox_id = mailbox.id
+    owner_user_id = mailbox.owner_user_id
+    practice_area_id = mailbox.practice_area_id
 
-    # Idempotency fast path: a thread that already recorded this exact
-    # provider_message_id is a duplicate delivery (retried webhook, replayed
-    # websocket event) — do nothing else. The intake_messages UNIQUE
-    # constraint is the real anchor; this is just the early, cheap check.
-    if thread is not None:
-        existing_message = (
-            await db.execute(
-                select(IntakeMessage.id).where(
-                    IntakeMessage.thread_id == thread.id,
-                    IntakeMessage.provider_message_id == envelope.message.provider_message_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if existing_message is not None:
-            log.info(
-                "intake email duplicate delivery",
-                extra={
-                    "event": "intake_email_duplicate",
-                    "mailbox_id": str(mailbox.id),
-                    "thread_id": str(thread.id),
-                },
-            )
-            return IntakeEmailIngestResponse(
-                duplicate=True,
-                thread_id=thread.id,
-                project_id=thread.project_id,
-                files_ingested=0,
-            )
+    thread = await _select_thread(
+        db, mailbox_id=mailbox_id, provider_thread_id=envelope.thread.provider_thread_id
+    )
 
-    now = datetime.now(tz=UTC)
     if thread is None:
         thread = IntakeThread(
-            mailbox_id=mailbox.id,
+            mailbox_id=mailbox_id,
             provider_thread_id=envelope.thread.provider_thread_id,
             subject=envelope.thread.subject,
-            status="received",
-            last_message_id=envelope.message.provider_message_id,
-            last_inbound_at=now,
-            auth_state=envelope.message.auth_state,
-            message_count=1,
+            message_count=0,
         )
         db.add(thread)
-        await db.flush()
-    else:
-        thread.status = "received"
-        thread.last_message_id = envelope.message.provider_message_id
-        thread.last_inbound_at = now
-        thread.auth_state = envelope.message.auth_state
-        thread.message_count += 1
-
-    # Eager project creation (ADR-F086): the project row is substrate — it
-    # exists before any agent has looked at the thread. `intake_state`
-    # starts 'candidate'; INTAKE-3's record_intake_outcome later promotes or
-    # dismisses it. Only the FIRST message on a thread creates one.
-    if thread.project_id is None:
-        from app.api.projects import _resolve_unique_slug
-        from app.schemas.projects import slugify
-
-        project_name = _derive_project_name(envelope.thread.subject)
-        desired_slug = slugify(project_name)
-        final_slug = await _resolve_unique_slug(
-            db, owner_id=mailbox.owner_user_id, desired=desired_slug
-        )
-        project = Project(
-            owner_id=mailbox.owner_user_id,
-            practice_area_id=mailbox.practice_area_id,
-            name=project_name,
-            slug=final_slug,
-            intake_state="candidate",
-        )
-        db.add(project)
         try:
             await db.flush()
-        except IntegrityError as exc:
+        except IntegrityError:
+            # A concurrent delivery of the FIRST message on this same
+            # thread won the race and already created it — roll back and
+            # continue with THEIR row rather than ours.
             await db.rollback()
-            raise Conflict(
-                "Slug collision creating the candidate matter for this thread; retry the delivery.",
-                details={"slug": final_slug},
-            ) from exc
-        thread.project_id = project.id
+            thread = await _select_thread(
+                db, mailbox_id=mailbox_id, provider_thread_id=envelope.thread.provider_thread_id
+            )
+            if thread is None:  # pragma: no cover - defensive; FK/unique imply it exists
+                raise Conflict(
+                    "Thread creation race could not be resolved; retry the delivery.",
+                    details={"provider_thread_id": envelope.thread.provider_thread_id},
+                ) from None
 
-    files_ingested = 0
-    for attachment in envelope.message.attachments:
-        await ingest_bytes(
-            session=db,
-            settings=settings,
-            owner_id=mailbox.owner_user_id,
-            project_id=thread.project_id,
-            filename=attachment.filename,
-            content_type=attachment.content_type,
-            data=attachment.decoded_bytes,
-        )
-        files_ingested += 1
-
+    # CLAIM (ADR-F086 idempotency anchor): the ONLY thing that decides
+    # duplicate-vs-new is this flush. Nothing above this line wrote
+    # anything that isn't safely re-creatable (thread rows are idempotent
+    # by construction — the unique constraint IS the arbiter).
     message_row = IntakeMessage(
         thread_id=thread.id,
         provider_message_id=envelope.message.provider_message_id,
         direction="in",
     )
     db.add(message_row)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        log.info(
+            "intake email duplicate delivery",
+            extra={"event": "intake_email_duplicate", "mailbox_id": str(mailbox_id)},
+        )
+        # `thread` may be stale after the rollback (SQLAlchemy expires
+        # objects touched by an aborted transaction) — re-select fresh
+        # rather than risk an out-of-async-context lazy-load.
+        current = await _select_thread(
+            db, mailbox_id=mailbox_id, provider_thread_id=envelope.thread.provider_thread_id
+        )
+        return IntakeEmailIngestResponse(
+            duplicate=True,
+            thread_id=current.id if current else None,
+            project_id=current.project_id if current else None,
+            files_ingested=0,
+        )
 
-    await db.commit()
+    # Everything from here on can fail partway through an upload; track
+    # every attachment that actually lands in storage so a later failure
+    # (in this loop OR at the final commit) can clean all of them up.
+    uploaded_storage_paths: list[str] = []
+    files_ingested = 0
+    try:
+        now = datetime.now(tz=UTC)
+        thread.status = "received"
+        thread.last_message_id = envelope.message.provider_message_id
+        thread.last_inbound_at = now
+        thread.auth_state = envelope.message.auth_state
+        thread.message_count += 1
+
+        # Eager project creation (ADR-F086): the project row is substrate —
+        # it exists before any agent has looked at the thread. Only the
+        # FIRST message on a thread creates one.
+        if thread.project_id is None:
+            from app.api.projects import _resolve_unique_slug
+            from app.schemas.projects import slugify
+
+            project_name = _derive_project_name(envelope.thread.subject)
+            desired_slug = slugify(project_name)
+            final_slug = await _resolve_unique_slug(
+                db, owner_id=owner_user_id, desired=desired_slug
+            )
+            project = Project(
+                owner_id=owner_user_id,
+                practice_area_id=practice_area_id,
+                name=project_name,
+                slug=final_slug,
+                intake_state="candidate",
+            )
+            db.add(project)
+            try:
+                await db.flush()
+            except IntegrityError as exc:
+                raise Conflict(
+                    "Slug collision creating the candidate matter for this thread; "
+                    "retry the delivery.",
+                    details={"slug": final_slug},
+                ) from exc
+            thread.project_id = project.id
+
+        for attachment in envelope.message.attachments:
+            row = await ingest_bytes(
+                session=db,
+                settings=settings,
+                owner_id=owner_user_id,
+                project_id=thread.project_id,
+                filename=attachment.filename,
+                content_type=attachment.content_type,
+                data=attachment.decoded_bytes,
+            )
+            uploaded_storage_paths.append(row.storage_path)
+            files_ingested += 1
+
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        await _cleanup_uploaded(uploaded_storage_paths)
+        raise
 
     log.info(
         "intake email ingested",
         extra={
             "event": "intake_email_ingested",
-            "mailbox_id": str(mailbox.id),
+            "mailbox_id": str(mailbox_id),
             "thread_id": str(thread.id),
             "project_id": str(thread.project_id),
             "files_ingested": files_ingested,
@@ -237,7 +298,9 @@ async def ingest_email(
     try:
         from app.workers.queue import enqueue_intake_email_job
 
-        await enqueue_intake_email_job(thread.id)
+        await enqueue_intake_email_job(
+            thread.id, provider_message_id=envelope.message.provider_message_id
+        )
     except Exception as exc:
         log.warning(
             "enqueue_intake_email_job raised; thread stays 'received'",

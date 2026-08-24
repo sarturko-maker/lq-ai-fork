@@ -24,6 +24,7 @@ Design notes
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from typing import Any
@@ -338,7 +339,22 @@ async def enqueue_playbook_execution_job(execution_id: uuid.UUID) -> bool:
         return False
 
 
-async def enqueue_intake_email_job(thread_id: uuid.UUID) -> bool:
+def intake_email_job_id(thread_id: uuid.UUID, provider_message_id: str) -> str:
+    """The deterministic arq job id for one inbound message on an intake thread.
+
+    Keyed on ``(thread_id, provider_message_id)`` — mirrors
+    :func:`agent_run_job_id`'s pattern. ``provider_message_id`` is
+    sender-controlled (email header value); hashed rather than embedded
+    raw so the job id (which can surface in logs/Redis tooling) never
+    carries untrusted text verbatim, and stays a bounded, well-formed key
+    regardless of what a hostile/malformed provider id contains.
+    """
+
+    digest = hashlib.sha256(provider_message_id.encode("utf-8")).hexdigest()[:16]
+    return f"intake-email:{thread_id}:{digest}"
+
+
+async def enqueue_intake_email_job(thread_id: uuid.UUID, *, provider_message_id: str) -> bool:
     """Enqueue the (stub, INTAKE-1) intake-email processing job onto the
     shared playbook queue; return True on success.
 
@@ -346,17 +362,32 @@ async def enqueue_intake_email_job(thread_id: uuid.UUID) -> bool:
     established Decision C-3 posture — one more bursty, low-volume
     workload, no reason to isolate it onto its own queue.
 
+    Deterministic ``_job_id`` (keyed on thread + THIS message, via
+    :func:`intake_email_job_id`) so a redelivered/re-enqueued webhook for
+    the same message can never double-queue a run for it — arq's
+    job-key semantics collapse the second enqueue to a no-op.
+
     Best-effort/non-fatal, matching every other ``enqueue_*`` helper here
     EXCEPT :func:`enqueue_agent_run_job`: the caller
     (``app.api.intake_emails.ingest_email``) already committed the thread/
     project/attachment/message rows before calling this, so a failed
     enqueue just means the thread stays at ``status='received'`` — no
     zombie run, no orphaned partial write, safely re-enqueueable later.
+
+    NOTE for INTAKE-3 (the future real job body): the payload is ONLY
+    ``thread_id`` — the job must re-derive everything else (which message
+    triggered it, the thread's current state, attachments) from the DB at
+    execution time, not from enqueue-time closure state. This keeps the
+    job replay-safe and keeps email content out of the arq/Redis payload.
     """
 
     try:
         pool = await _get_m3a6_pool()
-        await pool.enqueue_job(INTAKE_EMAIL_JOB_NAME, str(thread_id))
+        await pool.enqueue_job(
+            INTAKE_EMAIL_JOB_NAME,
+            str(thread_id),
+            _job_id=intake_email_job_id(thread_id, provider_message_id),
+        )
         log.info(
             "enqueue_intake_email_job: enqueued",
             extra={"event": "intake_email_enqueue", "thread_id": str(thread_id)},

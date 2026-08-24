@@ -1,20 +1,26 @@
-"""Unit/integration tests for ``app.ingest.ingest_bytes()`` — INTAKE-1 (ADR-F086).
+"""Unit/integration tests for ``app.ingest`` — INTAKE-1 (ADR-F086).
 
-Covers the packaged ingest primitive extracted from ``app.api.files.upload_file``:
+Covers the two packaged ingest primitives:
 
-* Happy path — validates, stores, and records a ``files`` row; only
-  flushes (never commits), so the caller controls the transaction.
-* Filename validation (empty/whitespace → ``ValidationError``).
-* Content-type fallback to :data:`app.ingest.DEFAULT_MIME`.
-* Size cap (``PayloadTooLarge``, same ``limit_bytes``/``received_bytes``
-  shape the HTTP route's 413 uses).
-* Enqueue failure is non-fatal.
-* A flush-time ``IntegrityError`` (bad FK) cleans up the just-uploaded
-  storage object before re-raising.
+* :func:`app.ingest.ingest_bytes` — for callers with a fully-buffered
+  payload (the intake bridge's email attachments). Validates, stores, and
+  delegates to :func:`app.ingest.register_ingested_file` for the row +
+  enqueue. Deliberately does NOT clean up storage on a flush-time
+  IntegrityError itself — that responsibility moved to the caller (the
+  intake bridge tracks storage paths across a whole multi-attachment
+  request; ``upload_file`` does its own single-attempt cleanup) after the
+  fresh-context review that flagged the original single-call cleanup as
+  insufficient for the multi-attachment case.
+* :func:`app.ingest.register_ingested_file` — "bytes are already in
+  storage; record the row + enqueue" — shared by ``ingest_bytes`` and
+  ``app.api.files.upload_file`` (which streams via ``stream_upload``
+  directly and calls this for the row half only).
 
 ``test_files_endpoints.py`` covers the HTTP-route-level behavior
-(``upload_file`` calling through to this function) and pins that the
-existing upload test suite passes unchanged.
+(``upload_file`` streaming + calling ``register_ingested_file``) and pins
+that the existing upload test suite passes unchanged.
+``test_intake_emails.py`` covers the request-level cleanup-on-failure
+behavior across a multi-attachment envelope.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.errors import PayloadTooLarge, ValidationError
-from app.ingest import DEFAULT_MIME, ingest_bytes
+from app.ingest import DEFAULT_MIME, ingest_bytes, register_ingested_file
 from app.models.file import File
 from app.models.user import User
 from app.security import hash_password
@@ -196,10 +202,18 @@ async def test_ingest_bytes_enqueue_failure_is_non_fatal(
 
 
 @pytest.mark.integration
-async def test_ingest_bytes_cleans_up_storage_on_integrity_error(
+async def test_ingest_bytes_cleans_up_its_own_object_on_integrity_error(
     db_session: AsyncSession, fake_s3: FakeS3Client
 ) -> None:
-    """A bad owner_id (FK violation at flush) deletes the just-uploaded object."""
+    """A bad owner_id (FK violation at flush) propagates AND self-cleans.
+
+    The caller can only clean up storage paths it learned from SUCCESSFUL
+    returns — this failing call's freshly-uploaded object is invisible to
+    it, so ``ingest_bytes`` must delete its own object before re-raising.
+    (Cleanup of EARLIER successful uploads when a LATER step fails remains
+    the caller's job — see ``test_intake_emails.py``'s
+    ``test_failure_on_second_attachment_cleans_up_first_and_commits_nothing``.)
+    """
 
     settings = get_settings()
     bogus_owner_id = uuid.uuid4()  # no such row in `users`
@@ -212,10 +226,55 @@ async def test_ingest_bytes_cleans_up_storage_on_integrity_error(
             project_id=None,
             filename="orphan.txt",
             content_type="text/plain",
-            data=b"never persisted",
+            data=b"would orphan without self-cleanup",
         )
 
-    assert fake_s3.objects == {}
+    # No blob survives a failed ingest — the just-uploaded object was
+    # deleted before the exception propagated.
+    assert len(fake_s3.objects) == 0
+
+
+@pytest.mark.integration
+async def test_register_ingested_file_happy_path(db_session: AsyncSession, owner: User) -> None:
+    """Row fields land as given; ``id`` is derived from ``storage_path``."""
+
+    file_id = uuid.uuid4()
+    row = await register_ingested_file(
+        session=db_session,
+        owner_id=owner.id,
+        project_id=None,
+        filename="stream-uploaded.pdf",
+        content_type="application/pdf",
+        size=12345,
+        sha256="a" * 64,
+        storage_path=str(file_id),
+    )
+    assert row.id == file_id
+    assert row.filename == "stream-uploaded.pdf"
+    assert row.mime_type == "application/pdf"
+    assert row.size_bytes == 12345
+    assert row.hash_sha256 == "a" * 64
+    assert row.storage_path == str(file_id)
+    assert row.ingestion_status == "pending"
+
+
+@pytest.mark.integration
+async def test_register_ingested_file_propagates_integrity_error(
+    db_session: AsyncSession,
+) -> None:
+    """No cleanup here either — same contract as ``ingest_bytes`` (see above)."""
+
+    with pytest.raises(IntegrityError):
+        await register_ingested_file(
+            session=db_session,
+            owner_id=uuid.uuid4(),  # no such user
+            project_id=None,
+            filename="orphan.txt",
+            content_type="text/plain",
+            size=1,
+            sha256="b" * 64,
+            storage_path=str(uuid.uuid4()),
+        )
 
 
 @pytest.mark.integration

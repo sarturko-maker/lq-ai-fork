@@ -7,19 +7,28 @@ Covers ``POST /api/v1/internal/intake/emails``:
 * Happy path — one envelope with a base64 attachment → thread + candidate
   project (``intake_state='candidate'``) + ``files`` row + ``intake_messages``
   row (direction ``'in'``).
-* Idempotency — re-delivering the same ``(thread, provider_message_id)``
-  returns ``duplicate: true`` and creates nothing new.
+* Idempotency (claim-first, fresh-context-review fix) — the IntakeMessage
+  insert IS the atomic claim: a pre-existing message row makes the request
+  a no-op BEFORE any attachment is uploaded; re-delivering the same
+  ``(thread, provider_message_id)`` returns ``duplicate: true``.
+* Leak-free failure — a later attachment failing mid-request cleans up
+  every already-uploaded object from THIS request and commits no rows.
+* Thread-creation race — a concurrent delivery of the FIRST message on a
+  brand-new thread is resolved by rollback + re-select, not a 500.
 * Follow-up — a second message on the SAME ``provider_thread_id`` reuses
   the thread + project, bumps ``message_count``, creates no second project.
 * Unknown ``(provider, inbox_id)`` → 404.
-* Boundary rejection (422): an attachment over the 25 MB decoded cap; more
-  than 10 attachments.
+* Boundary rejection (422): an attachment over the 25 MB decoded cap; the
+  aggregate 50 MB decoded cap across all attachments; more than 10
+  attachments; an embedded NUL byte in a free-text field.
 * An empty subject still produces a valid (fallback-named) candidate matter.
+* Content-free logs — a hostile filename never appears in any log record.
 """
 
 from __future__ import annotations
 
 import base64
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -32,6 +41,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import intake_emails as intake_emails_module
 from app.config import get_settings
 from app.db.session import get_db
 from app.main import app
@@ -401,3 +411,237 @@ async def test_empty_subject_falls_back_to_default_project_name(
         await db_session.execute(select(Project).where(Project.id == uuid.UUID(body["project_id"])))
     ).scalar_one()
     assert project.name == "Intake — (no subject)"
+
+
+# ---------------------------------------------------------------------------
+# Claim-first idempotency + leak-free failure (fresh-context review fix)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_preexisting_message_row_is_claimed_first_no_upload_attempted(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    mailbox: IntakeMailbox,
+    fake_s3: FakeS3Client,
+) -> None:
+    """A message row inserted directly (simulating a delivery that already
+    landed) makes a redelivery with the SAME ids a no-op BEFORE the claim
+    step ever reaches the attachment loop — no attachment is uploaded."""
+
+    thread = IntakeThread(
+        mailbox_id=mailbox.id,
+        provider_thread_id="preclaimed-thread",
+        subject="Already here",
+        message_count=1,
+    )
+    db_session.add(thread)
+    await db_session.flush()
+    existing_message = IntakeMessage(
+        thread_id=thread.id, provider_message_id="preclaimed-msg", direction="in"
+    )
+    db_session.add(existing_message)
+    await db_session.commit()
+
+    res = await _post(
+        client,
+        _envelope(
+            provider_thread_id="preclaimed-thread",
+            provider_message_id="preclaimed-msg",
+            attachments=[_attachment(data=b"must never be uploaded")],
+        ),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["duplicate"] is True
+    assert body["thread_id"] == str(thread.id)
+    assert body["files_ingested"] == 0
+
+    assert fake_s3.objects == {}
+    files = (await db_session.execute(select(File))).scalars().all()
+    assert files == []
+    messages = (
+        (
+            await db_session.execute(
+                select(IntakeMessage).where(IntakeMessage.thread_id == thread.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(messages) == 1  # only the pre-existing one
+
+
+@pytest.mark.integration
+async def test_failure_on_second_attachment_cleans_up_first_and_commits_nothing(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    mailbox: IntakeMailbox,
+    fake_s3: FakeS3Client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Attachment 1 uploads fine; attachment 2 trips ``ingest_bytes``'s OWN
+    per-file cap (lowered below the envelope's 25 MB per-item bound so a
+    schema-valid attachment can still fail server-side). The whole request
+    must fail (4xx), attachment 1's already-uploaded object must be
+    deleted, and no row from this request may be committed."""
+
+    monkeypatch.setenv("LQ_AI_MAX_UPLOAD_SIZE_MB", "1")
+    get_settings.cache_clear()
+    try:
+        small = _attachment(filename="a1.bin", data=b"x" * 100)
+        # Under the envelope's 25 MB per-attachment cap, but over the
+        # server's (lowered) 1 MB per-file cap enforced inside ingest_bytes.
+        oversized = _attachment(filename="a2.bin", data=b"y" * (2 * 1024 * 1024))
+
+        res = await _post(
+            client,
+            _envelope(provider_thread_id="two-attachment-thread", attachments=[small, oversized]),
+        )
+        assert 400 <= res.status_code < 600, res.text
+    finally:
+        get_settings.cache_clear()
+
+    # Attachment 1's object was uploaded, then cleaned up on the request's
+    # overall failure; attachment 2 never got as far as an upload call.
+    assert fake_s3.objects == {}
+
+    # Single-transaction semantics: the whole request rolled back — no
+    # thread, message, project, or file row survives a failed delivery.
+    assert (await db_session.execute(select(IntakeThread))).scalars().all() == []
+    assert (await db_session.execute(select(IntakeMessage))).scalars().all() == []
+    assert (await db_session.execute(select(Project))).scalars().all() == []
+    assert (await db_session.execute(select(File))).scalars().all() == []
+
+
+@pytest.mark.integration
+async def test_thread_creation_race_recovers_via_reselect(
+    client: AsyncClient, db_session: AsyncSession, mailbox: IntakeMailbox
+) -> None:
+    """A concurrent delivery creates (and commits) the SAME brand-new
+    thread between our SELECT and our INSERT. The handler must roll back,
+    re-select, and continue with the concurrent winner's row — not 500 on
+    the unique-constraint IntegrityError."""
+
+    real_select_thread = intake_emails_module._select_thread
+    calls = {"n": 0}
+
+    async def _racy_select_thread(
+        db: AsyncSession, *, mailbox_id: uuid.UUID, provider_thread_id: str
+    ) -> IntakeThread | None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # Simulate a concurrent request winning the race: it creates
+            # and commits the thread we haven't seen yet.
+            concurrent = IntakeThread(
+                mailbox_id=mailbox_id,
+                provider_thread_id=provider_thread_id,
+                subject="Concurrent winner",
+                message_count=0,
+            )
+            db.add(concurrent)
+            await db.commit()
+            return None
+        return await real_select_thread(
+            db, mailbox_id=mailbox_id, provider_thread_id=provider_thread_id
+        )
+
+    with patch("app.api.intake_emails._select_thread", _racy_select_thread):
+        res = await _post(client, _envelope(provider_thread_id="race-thread"))
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["duplicate"] is False
+
+    threads = (
+        (
+            await db_session.execute(
+                select(IntakeThread).where(IntakeThread.provider_thread_id == "race-thread")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Exactly one thread survives — OUR attempted insert lost the race and
+    # was abandoned; the concurrent winner's row is what the request used.
+    assert len(threads) == 1
+    assert threads[0].subject == "Concurrent winner"
+    assert threads[0].message_count == 1
+
+
+# ---------------------------------------------------------------------------
+# NUL bytes + aggregate attachment cap (SHOULD-FIX 3/4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_nul_byte_in_subject_returns_422(client: AsyncClient, mailbox: IntakeMailbox) -> None:
+    res = await _post(client, _envelope(subject="NDA review\x00"))
+    assert res.status_code == 422
+
+
+@pytest.mark.integration
+async def test_nul_byte_in_from_addr_returns_422(
+    client: AsyncClient, mailbox: IntakeMailbox
+) -> None:
+    body = _envelope()
+    body["message"]["from_addr"] = "counterparty@example.com\x00"
+    res = await _post(client, body)
+    assert res.status_code == 422
+
+
+@pytest.mark.integration
+async def test_nul_byte_in_attachment_filename_returns_422(
+    client: AsyncClient, mailbox: IntakeMailbox
+) -> None:
+    res = await _post(client, _envelope(attachments=[_attachment(filename="nda\x00.docx")]))
+    assert res.status_code == 422
+
+
+@pytest.mark.integration
+async def test_nul_byte_in_header_value_returns_422(
+    client: AsyncClient, mailbox: IntakeMailbox
+) -> None:
+    body = _envelope()
+    body["message"]["headers"] = {"Precedence": "bulk\x00"}
+    res = await _post(client, body)
+    assert res.status_code == 422
+
+
+@pytest.mark.integration
+async def test_aggregate_attachment_cap_returns_422(
+    client: AsyncClient, mailbox: IntakeMailbox
+) -> None:
+    """Three attachments each UNDER the 25 MB per-item cap but summing well
+    past the 50 MB aggregate cap must still be rejected."""
+
+    chunk = b"x" * (18 * 1024 * 1024)  # 18 MB each -> 54 MB total
+    attachments = [_attachment(filename=f"big{i}.bin", data=chunk) for i in range(3)]
+    res = await _post(client, _envelope(attachments=attachments))
+    assert res.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Content-free logs (SHOULD-FIX 5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_hostile_filename_never_appears_in_logs(
+    client: AsyncClient,
+    mailbox: IntakeMailbox,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The attachment filename is sender-controlled on the intake path; it
+    must never land in a log record (message text OR any ``extra`` value)."""
+
+    hostile = "SENDER-CONTROLLED-MARKER-should-never-be-logged.exe"
+    caplog.set_level(logging.INFO)
+
+    res = await _post(client, _envelope(attachments=[_attachment(filename=hostile)]))
+    assert res.status_code == 200, res.text
+
+    for record in caplog.records:
+        assert hostile not in record.getMessage()
+        for value in vars(record).values():
+            assert hostile not in str(value)
