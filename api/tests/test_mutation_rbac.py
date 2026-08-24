@@ -72,6 +72,9 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
     # (require_bridge_auth); no user context.
     ("POST", "/api/v1/integrations/slack/workspaces"): "bridge-token auth (no user)",
     ("POST", "/api/v1/integrations/teams/tenants"): "bridge-token auth (no user)",
+    # INTAKE-1 (fork, ADR-F086) — mail-bridge landing endpoint; same
+    # require_bridge_auth shared-secret posture as the two bridge entries above.
+    ("POST", "/api/v1/internal/intake/emails"): "bridge-token auth (no user)",
     # NOTE (SETUP-5b §E): /autonomous/* mutations are NOT allowlisted — they
     # are gated like all tenant-data writes. get_autonomous_enabled_user now
     # stacks on MutatingUser (both checks hold: viewer role gate first, then
@@ -158,8 +161,13 @@ def test_mutating_route_entry_count_pinned() -> None:
     142 → 143.
     WORKSPACE-3 (ADR-F082) adds 1 mutating route (PUT
     /matters/{project_id}/files/{file_id}/summary, MutatingUser-gated — the human
-    half of auto-write-then-correct): 143 → 144."""
-    assert len(_mutating_routes()) == 144
+    half of auto-write-then-correct): 143 → 144.
+    INTAKE-1 (fork, ADR-F086) adds 4 mutating routes: POST
+    /internal/intake/emails (bridge-token auth, allowlisted above) + POST
+    /admin/intake-mailboxes + PATCH/DELETE /admin/intake-mailboxes/{mailbox_id}
+    (all three AdminUser-gated — pass the drift guard automatically, no
+    allowlist entry): 144 → 148."""
+    assert len(_mutating_routes()) == 148
 
 
 @pytest.mark.unit
@@ -180,13 +188,17 @@ def test_api_v1_path_count_pinned() -> None:
     B-7a (ADR-F067 D4) adds 3 paths (GET /profiles, GET /profiles/{name},
     POST /profiles/{name}/apply): 193 → 196.
     WORKSPACE-3 (ADR-F082) adds 1 path (PUT
-    /matters/{project_id}/files/{file_id}/summary): 196 → 197."""
+    /matters/{project_id}/files/{file_id}/summary): 196 → 197.
+    INTAKE-1 (fork, ADR-F086) adds 3 paths: POST /internal/intake/emails +
+    /admin/intake-mailboxes (POST+GET share one path) +
+    /admin/intake-mailboxes/{mailbox_id} (PATCH+DELETE share one path):
+    197 → 200."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 197
+    assert len(paths) == 200
 
 
 @pytest.mark.unit

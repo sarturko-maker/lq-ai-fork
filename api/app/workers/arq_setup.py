@@ -48,6 +48,9 @@ Registered functions:
 * :func:`app.workers.agent_run_worker.agent_run_job`
   (F1-S1, ADR-F009) — deep-agent run execution, at-most-once
   (per-function ``max_tries=1``; lease claim before composing).
+* :func:`app.workers.intake_worker.intake_email_job`
+  (INTAKE-1, ADR-F086) — email-intake processing pipeline. STUB body
+  (logs + returns) until INTAKE-3 lands the real bound-area-agent run.
 
 Registered cron jobs:
 
@@ -96,6 +99,7 @@ from app.workers.autonomous_worker import (
     autonomous_session_job,
 )
 from app.workers.easy_playbook_worker import easy_playbook_generation_job
+from app.workers.intake_worker import intake_email_job
 from app.workers.playbook_worker import playbook_execution_job
 from app.workers.tabular_worker import tabular_execution_job
 
@@ -314,6 +318,10 @@ class WorkerSettings:
         playbook_execution_job,
         tabular_execution_job,
         autonomous_session_job,
+        # INTAKE-1 (ADR-F086): STUB body until INTAKE-3 lands the real
+        # bound-area-agent run; registered now so the substrate (envelope
+        # landing → enqueue) is independently verifiable end-to-end.
+        intake_email_job,
         # agent_run_job is appended by _populate_class_attrs wrapped in
         # arq's func() so it carries per-function max_tries=1 + its own
         # timeout (at-most-once, ADR-F009) without touching the legacy

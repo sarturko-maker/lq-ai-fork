@@ -224,6 +224,11 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/intake-bridges",
         "/api/v1/admin/intake-bridges/slack/{workspace_id}",
         "/api/v1/admin/intake-bridges/teams/{tenant_id}",
+        # INTAKE-1 (fork, ADR-F086) — mail-bridge landing endpoint (bearer-token,
+        # no user) + admin intake-mailboxes CRUD (admin-only)
+        "/api/v1/internal/intake/emails",
+        "/api/v1/admin/intake-mailboxes",
+        "/api/v1/admin/intake-mailboxes/{mailbox_id}",
         # M4-A4-i — Autonomous sessions read/halt API (per-user)
         "/api/v1/autonomous/sessions",
         "/api/v1/autonomous/sessions/{session_id}",
@@ -451,7 +456,11 @@ async def test_openapi_paths_match_sketch() -> None:
     #   POST /profiles/{name}/apply (193 -> 196).
     # +1: WORKSPACE-3 (ADR-F082) — PUT /matters/{project_id}/files/{file_id}/summary,
     #   the human half of auto-write-then-correct (196 -> 197).
-    assert len(actual) == 197  # +3: ADR-F054 capability panel (GET/PUT
+    # +3: INTAKE-1 (ADR-F086) — mail-bridge landing endpoint (POST
+    #   /internal/intake/emails) + admin intake-mailboxes CRUD (POST+GET
+    #   /admin/intake-mailboxes share one path; PATCH+DELETE
+    #   /admin/intake-mailboxes/{mailbox_id} share one path) (197 -> 200).
+    assert len(actual) == 200  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

@@ -67,6 +67,8 @@ _PARAM_VALUES: dict[str, str] = {
     # M3-D4 — admin intake-bridges surface
     "workspace_id": _DUMMY_UUID,
     "tenant_id": _DUMMY_UUID,
+    # INTAKE-1 (fork, ADR-F086) — admin intake-mailboxes surface
+    "mailbox_id": _DUMMY_UUID,
     # F0-S2 (fork) — agent-runs surface
     "run_id": _DUMMY_UUID,
     # F0-S5 (fork) — conversations (ADR-F008)
@@ -282,6 +284,14 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/admin/intake-bridges"),
     ("DELETE", "/api/v1/admin/intake-bridges/slack/{workspace_id}"),
     ("DELETE", "/api/v1/admin/intake-bridges/teams/{tenant_id}"),
+    # INTAKE-1 (fork, ADR-F086) — mail-bridge landing endpoint (bridge-token
+    # bearer auth) + admin intake-mailboxes CRUD. Dedicated coverage in
+    # tests/test_intake_emails.py + tests/test_admin_intake_mailboxes.py.
+    ("POST", "/api/v1/internal/intake/emails"),
+    ("POST", "/api/v1/admin/intake-mailboxes"),
+    ("GET", "/api/v1/admin/intake-mailboxes"),
+    ("PATCH", "/api/v1/admin/intake-mailboxes/{mailbox_id}"),
+    ("DELETE", "/api/v1/admin/intake-mailboxes/{mailbox_id}"),
     # D4 — Organization Profile singleton
     ("GET", "/api/v1/organization-profile"),
     ("PUT", "/api/v1/organization-profile"),

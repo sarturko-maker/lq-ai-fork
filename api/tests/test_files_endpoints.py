@@ -67,10 +67,13 @@ async def fake_s3() -> FakeS3Client:
 async def client(db_session: AsyncSession, fake_s3: FakeS3Client) -> AsyncIterator[AsyncClient]:
     """In-process AsyncClient with a fake S3 client patched in.
 
-    Patches ``app.storage.s3_client`` to yield the in-memory fake. Note:
-    we patch in *both* modules where ``s3_client`` is referenced — the
-    handlers call through to ``app.storage.stream_upload`` etc., which
-    read ``s3_client`` from the module's own namespace.
+    Patches ``app.storage.s3_client`` — ONE patch point covers every
+    storage function (``stream_upload``, ``upload_bytes``, ``delete_object``,
+    …) regardless of which module calls them (this file's ``upload_file``
+    route calls ``stream_upload`` directly; ``app.ingest``'s
+    ``register_ingested_file``/``ingest_bytes`` call ``upload_bytes``),
+    because each resolves ``s3_client`` via ``app.storage``'s OWN module
+    namespace at call time, not the caller's.
     """
 
     @asynccontextmanager

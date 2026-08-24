@@ -47,6 +47,7 @@ from app.audit import audit_action
 from app.config import get_settings
 from app.db.session import get_db
 from app.errors import NotFound, ValidationError
+from app.ingest import DEFAULT_MIME, register_ingested_file
 from app.models.document import Document
 from app.models.file import File as FileModel
 from app.models.project import Project
@@ -63,10 +64,9 @@ from app.storage import (
 router = APIRouter(prefix="/files", tags=["files"])
 log = logging.getLogger(__name__)
 
-# Default MIME for the rare upload that arrives with no `Content-Type` on
-# the multipart part. Same fallback the IETF recommends for "we have no
-# idea what kind of bytes these are."
-DEFAULT_MIME = "application/octet-stream"
+# DEFAULT_MIME's canonical home is app.ingest (INTAKE-1); imported above so
+# ``get_file_content``'s response media-type fallback (below) keeps working
+# unchanged.
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +214,9 @@ async def upload_file(
        :class:`PayloadTooLarge` if the streamed byte count exceeds the
        configured cap; on any other exception, the multipart upload is
        aborted (no orphan parts left behind).
-    4. **Insert the row** in ``files`` with the streamed size and SHA-256.
+    4. **Insert the row** via :func:`app.ingest.register_ingested_file`
+       (shared with the email-intake bridge's already-decoded attachments,
+       ``app.ingest.ingest_bytes``) with the streamed size and SHA-256.
        If the insert fails (e.g., the user has been deleted between
        auth and now), we hard-delete the just-uploaded MinIO object so
        we don't leak orphaned bytes.
@@ -285,20 +287,17 @@ async def upload_file(
         max_size_bytes=max_size_bytes,
     )
 
-    row = FileModel(
-        id=file_id,
-        owner_id=user.id,
-        project_id=resolved_project_id,
-        filename=filename,
-        mime_type=mime_type,
-        size_bytes=upload_result.size_bytes,
-        hash_sha256=upload_result.sha256_hex,
-        storage_path=upload_result.storage_path,
-        ingestion_status="pending",
-    )
-    db.add(row)
     try:
-        await db.flush()
+        row = await register_ingested_file(
+            session=db,
+            owner_id=user.id,
+            project_id=resolved_project_id,
+            filename=filename,
+            content_type=mime_type,
+            size=upload_result.size_bytes,
+            sha256=upload_result.sha256_hex,
+            storage_path=upload_result.storage_path,
+        )
         # Privilege propagates from the project (if any) — audit_action
         # resolves it from project_id without an extra fetch when the
         # ORM Project isn't loaded here.
@@ -345,29 +344,6 @@ async def upload_file(
             "sha256": upload_result.sha256_hex,
         },
     )
-
-    # Enqueue the ingest job for the C5 document pipeline. Failures are
-    # non-fatal — the row stays at `pending` and the worker's startup
-    # sweep will pick it up. We import lazily so test environments
-    # that don't have arq installed (or that monkey-patch the queue)
-    # don't pay an import cost on every upload.
-    try:
-        from app.workers.queue import enqueue_ingest_job
-
-        await enqueue_ingest_job(file_id)
-    except Exception as exc:
-        # The enqueue helper itself catches exceptions and returns a
-        # bool, but defensively handle any path that raises (e.g., the
-        # import failed). The upload itself is committed; ingestion
-        # is delayed.
-        log.warning(
-            "enqueue_ingest_job raised; row remains pending",
-            extra={
-                "event": "file_upload_enqueue_raised",
-                "file_id": str(file_id),
-                "error": str(exc),
-            },
-        )
 
     return FileMetadata.model_validate(row)
 

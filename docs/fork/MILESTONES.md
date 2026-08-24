@@ -901,6 +901,12 @@ synthetic pack behind a CLI; ADR-F001 forecloses "under the LegalQuants banner")
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **TAILSCALE-EDGE hardening (INTAKE-1 security review, 2026-08-18):** `deploy/caddy-tailscale/
+  Caddyfile` (self-host VM edge) has no `/api/v1/internal*` deny and no `request_body` cap —
+  pre-existing gap affecting every bridge route (slack/teams/intake), token-gated but
+  defense-in-depth missing vs the main Caddyfile. Mirror the main edge's guards next time the
+  deploy layer is touched.
+
 - **NAME-DEDUP follow-ups (ADR-F081 review, 2026-07-11):** `respond_to_counterparty` re-runs in the
   same round mint sibling rows with the identical "(response).docx" name (its `_response_filename`
   bump never triggers — the source is always the exact-named counterparty doc); WOPI's first-save

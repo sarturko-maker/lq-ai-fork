@@ -28,6 +28,7 @@ from app.models.editor_lock import EditorLock
 from app.models.enhance_prompt import EnhancePromptInteraction
 from app.models.file import File
 from app.models.inference import InferenceRoutingLog
+from app.models.intake import IntakeMailbox, IntakeMessage, IntakeThread
 from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
 from app.models.org_playbook_version import OrgPlaybookVersion
 from app.models.org_skill import OrgSkillVersion
@@ -66,6 +67,9 @@ __all__ = [
     "EnhancePromptInteraction",
     "File",
     "InferenceRoutingLog",
+    "IntakeMailbox",
+    "IntakeMessage",
+    "IntakeThread",
     "KnowledgeBase",
     "KnowledgeBaseFile",
     "MatterMemoryEntry",
