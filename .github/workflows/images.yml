@@ -61,7 +61,7 @@ jobs:
             file: ./deploy/caddy/Dockerfile
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # skills/community is a git SUBMODULE (pinned gitlink) — without this
           # the build context has an empty skills/community/ and the baked

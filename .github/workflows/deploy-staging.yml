@@ -65,7 +65,7 @@ jobs:
           echo "Deploying $SHA (tag sha-${SHA:0:12})"
 
       - name: Checkout the deployed SHA
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Sync the compose file + deploy script that MATCH the image SHA.
           ref: ${{ steps.tag.outputs.sha }}
