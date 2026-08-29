@@ -901,6 +901,25 @@ synthetic pack behind a CLI; ADR-F001 forecloses "under the LegalQuants banner")
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **PIN-ATTRIBUTION fix (memory-video prep, 2026-08-25):** the Memory tab's Activity feed labels a
+  human pin "agent" — the pin endpoint leaves `author` NULL (deferred from C3b-1; the CHECK already
+  admits `'lawyer'`, reserved for exactly this) and `MemoryPanel.svelte:994` falls back `?? 'agent'`.
+  Fix both ends: `create_matter_correction` writes `author='lawyer'`; the web activity row displays
+  "lawyer" for `kind='correction'` regardless of stored author (corrections are structurally
+  human-only, which also fixes historical NULL rows). Update the `_MATTER_MEMORY_AUTHORS` comment in
+  `models/project.py` when done.
+- **Bridge suites not CI-gated (found in INTAKE-2, 2026-08-29):** `ci.yml` never runs the
+  slack-bridge or teams-bridge test suites (only web/api/gateway — and now mail-bridge). Add
+  jobs mirroring `mail-bridge-checks` for both.
+- **slack-bridge LOG_LEVEL alias bug (found in INTAKE-2):** compose passes
+  `LQ_AI_BRIDGE_LOG_LEVEL` but `slack-bridge/app/config.py` `Settings.log_level` has no env
+  alias, so the var never takes effect. mail-bridge fixed its own copy with `AliasChoices`;
+  port the fix back.
+- **httpx credential-URL logging audit (found in INTAKE-2):** httpx logs full request URLs at
+  INFO; any service fetching a credential-bearing/presigned URL leaks it into logs. mail-bridge
+  mutes httpx/httpcore to WARNING (`observability.mute_url_logging()`); audit gateway/api for
+  the same pattern (S3 presigned GETs, provider calls) and apply where needed.
+
 - **TAILSCALE-EDGE hardening (INTAKE-1 security review, 2026-08-18):** `deploy/caddy-tailscale/
   Caddyfile` (self-host VM edge) has no `/api/v1/internal*` deny and no `request_body` cap —
   pre-existing gap affecting every bridge route (slack/teams/intake), token-gated but

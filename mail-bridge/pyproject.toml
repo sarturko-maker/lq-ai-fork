@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lq-ai-mail-bridge"
+version = "0.1.0"
+description = "LQ.AI mail bridge — email intake ingress + approved-reply egress (INTAKE-2, ADR-F086)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "LegalQuants" }]
+
+# INTAKE-2 (ADR-F086) — the mail-bridge is the SOLE holder of mailbox
+# credentials, mirroring the gateway's key-holder role for provider keys and
+# the slack-/teams-bridge's role for their platforms. It:
+#
+# 1. Subscribes to the intake inbox over AgentMail's websocket (dev ingress —
+#    the dev box has no public URL) or receives Svix-signed webhooks (prod).
+# 2. Normalizes each inbound message into the provider-agnostic
+#    InboundEmail envelope and POSTs it to the api's
+#    /internal/intake/emails behind LQ_AI_BRIDGE_TOKEN.
+# 3. Exposes POST /send for INTAKE-4's human-approved replies. Reply-only:
+#    there is no cold-send surface, by design.
+#
+# Every dependency here is SBOM surface. The list is deliberately the
+# slack-bridge's minus Slack, plus exactly two provider-specific packages.
+dependencies = [
+    "fastapi>=0.115,<0.137",
+    "uvicorn[standard]>=0.32,<0.48",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.4,<3",
+    # httpx is used inbound (FastAPI TestClient transport) and outbound (the
+    # presigned attachment GET + the POST to the LQ.AI api).
+    "httpx>=0.27,<0.29",
+    # agentmail: the provider SDK. Pinned EXACT — the probe found 0.5.9's
+    # models lag the live API (undeclared fields arrive and survive only via
+    # model_dump), so a silent minor bump could change deserialization under
+    # us. Bump deliberately, re-running the probe.
+    # (docs/fork/evidence/intake-probe/findings.md)
+    "agentmail==0.5.9",
+    # svix: AgentMail signs production webhooks with Svix. Used ONLY for
+    # signature verification over the RAW request body (no Svix API calls).
+    # Floor is 2.0 deliberately: allowing the 1.x line makes pip backtrack
+    # through ~60 sdists on every install, and 2.x is what the webhook
+    # verify/sign surface here was written against.
+    "svix>=2.0,<3",
+    # OpenTelemetry — mirrors api/ + gateway/ + slack-bridge/ so the bridge
+    # participates in the M1 OTel substrate from day one.
+    "opentelemetry-api>=1.27,<2",
+    "opentelemetry-sdk>=1.27,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
+    "opentelemetry-instrumentation-fastapi>=0.48b0,<1",
+    "opentelemetry-instrumentation-httpx>=0.48b0,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<0.25",
+    "ruff>=0.6,<0.14",
+    "mypy>=1.11,<2",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+# Third-party surfaces only. Blanket `ignore_missing_imports` would also mask a
+# typo in one of OUR modules, so it is scoped to the provider SDKs: `agentmail`
+# ships py.typed but its `core.*` helpers are untyped Fern internals, and `svix`
+# re-exports from `standardwebhooks`.
+[[tool.mypy.overrides]]
+module = ["agentmail.*", "svix.*", "standardwebhooks.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

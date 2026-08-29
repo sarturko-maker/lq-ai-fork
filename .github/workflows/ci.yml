@@ -7,6 +7,7 @@ name: CI
 #   - web/    : svelte-check + Vitest
 #   - api/    : ruff + mypy (standard mode) + pytest (with Postgres)
 #   - gateway/: ruff + mypy --strict + pytest
+#   - mail-bridge/: ruff + mypy --strict + pytest (INTAKE-2, ADR-F086)
 #
 # Out of scope (deferred to future waves):
 #   - Cypress E2E (heavier; needs a stack-up step + LLM provider keys)
@@ -152,6 +153,43 @@ jobs:
         run: ruff format --check gateway
 
       - name: mypy --strict (per CLAUDE.md)
+        run: mypy app
+
+      - name: pytest
+        run: pytest -q
+
+  mail-bridge-checks:
+    # INTAKE-2 (ADR-F086). The mail-bridge is the sole holder of mailbox
+    # credentials, so its own suite gates every PR — same shape as the
+    # gateway job (ruff + mypy --strict + pytest). No live AgentMail call
+    # is made: the SDK, the CDN download and the api are faked at the
+    # injection seams.
+    name: Mail bridge (ruff + mypy --strict + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mail-bridge
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: mail-bridge/pyproject.toml
+
+      - name: Install mail-bridge package + dev extras
+        run: pip install -e ".[dev]"
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+      - name: mypy --strict
         run: mypy app
 
       - name: pytest
