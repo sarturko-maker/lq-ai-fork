@@ -695,6 +695,52 @@ services:
       timeout: 3s
       retries: 10
 
+  mail-bridge:
+    # INTAKE-2 (ADR-F086) — email intake bridge. Gated by the ``mail``
+    # profile so operators who don't run email intake don't pay the SBOM
+    # cost or run a service they have nothing to do with.
+    #
+    # Bring up with: ``docker compose --profile mail up -d mail-bridge``
+    #
+    # ADR-F086: this service is the SOLE holder of mailbox credentials —
+    # the Inference Gateway's key-holder pattern applied to email. The api
+    # never sees AGENTMAIL_API_KEY and never calls AgentMail.
+    # LQ_AI_BRIDGE_TOKEN is REUSED from the slack-/teams-bridge (one bearer
+    # authenticates every bridge to the api) and additionally gates this
+    # bridge's own /send in the api → bridge direction (INTAKE-4).
+    #
+    # Ingress depends on AGENTMAIL_WEBHOOK_SECRET: unset (dev, no public
+    # URL) ⇒ the websocket subscriber dials out; set (prod) ⇒ the
+    # Svix-verified POST /agentmail/webhook route is mounted as well.
+    build:
+      context: ./mail-bridge
+      dockerfile: Dockerfile
+    profiles: ["mail"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      # Provider credentials (operator obtains from the AgentMail console)
+      AGENTMAIL_API_KEY: ${AGENTMAIL_API_KEY:-}
+      AGENTMAIL_INBOX_ADDRESS: ${AGENTMAIL_INBOX_ADDRESS:-}
+      # Optional — prod only; its presence mounts the webhook route.
+      AGENTMAIL_WEBHOOK_SECRET: ${AGENTMAIL_WEBHOOK_SECRET:-}
+      # LQ.AI-side coordinates
+      LQ_AI_BACKEND_URL: ${LQ_AI_BACKEND_URL:-http://api:8000}
+      LQ_AI_BRIDGE_TOKEN: ${LQ_AI_BRIDGE_TOKEN:-}
+      # Observability (opt-in)
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-lq-ai-mail-bridge}
+      LQ_AI_MAIL_BRIDGE_LOG_LEVEL: ${LQ_AI_MAIL_BRIDGE_LOG_LEVEL:-INFO}
+    ports:
+      - "${MAIL_BRIDGE_BIND_ADDR:-127.0.0.1}:${MAIL_BRIDGE_HOST_PORT:-8004}:8004"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8004/healthz', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 # ============================================================
 # Persistent volumes (PRD §6.5)
 # ============================================================
