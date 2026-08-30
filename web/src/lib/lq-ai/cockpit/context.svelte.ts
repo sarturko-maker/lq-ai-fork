@@ -15,7 +15,7 @@
  */
 import { getContext, setContext } from 'svelte';
 
-import { agentsApi, practiceAreasApi } from '$lib/lq-ai/api';
+import { agentsApi, intakeThreadsApi, practiceAreasApi } from '$lib/lq-ai/api';
 import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type { MatterActivityResponse } from '$lib/lq-ai/api/agents';
 import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
@@ -41,6 +41,31 @@ export class CockpitShellState {
 	 * the shell tree.
 	 */
 	editorOpen = $state(false);
+	/**
+	 * INTAKE-5a — how many email threads are waiting on a human, for the rail's
+	 * Inbox badge. The list endpoint returns ITEMS, not a count, so this asks for
+	 * ONE bounded page of the server's own attention set (ranks 0–2) and counts
+	 * it; a full page renders as "99+" rather than pretending the page size is
+	 * the truth. Refreshed on the existing cockpit reload cadence — no new SSE
+	 * (plan § Web). A failure leaves the badge absent rather than shouting: the
+	 * Inbox view itself surfaces the error when the lawyer opens it.
+	 */
+	inboxAttention = $state(0);
+
+	/** Page size for the badge probe; `badgeCount` renders a full page as 99+. */
+	static readonly INBOX_BADGE_PAGE = 100;
+
+	async loadInboxAttention(): Promise<void> {
+		try {
+			const page = await intakeThreadsApi.listIntakeThreads({
+				attention: true,
+				limit: CockpitShellState.INBOX_BADGE_PAGE
+			});
+			this.inboxAttention = page.items.length;
+		} catch {
+			this.inboxAttention = 0;
+		}
+	}
 
 	async loadAreas(): Promise<void> {
 		try {

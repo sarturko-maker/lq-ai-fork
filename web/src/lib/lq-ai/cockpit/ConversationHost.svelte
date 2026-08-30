@@ -32,6 +32,8 @@
 	import GridsPanel from '$lib/lq-ai/components/matter/GridsPanel.svelte';
 	import TabularWorkspace from '$lib/lq-ai/components/TabularWorkspace.svelte';
 	import CapabilitiesPanel from '$lib/lq-ai/components/matter/CapabilitiesPanel.svelte';
+	import IntakeInboxPanel from '$lib/lq-ai/components/intake/IntakeInboxPanel.svelte';
+	import IntakeThreadDetail from '$lib/lq-ai/components/intake/IntakeThreadDetail.svelte';
 	import DocumentEditorPanel, {
 		handBackInstruction
 	} from '$lib/lq-ai/components/matter/DocumentEditorPanel.svelte';
@@ -156,10 +158,13 @@
 	// (area-agnostic — ADR-F042/F044). C7a adds a "Documents" tab onto the matter's
 	// files (incl. downloadable redline outputs — ADR-F046). 'register' stays Privacy-only.
 	let matterTab = $state<
-		'conversation' | 'register' | 'memory' | 'documents' | 'grids' | 'capabilities'
-	>(
-		'conversation'
-	);
+		'conversation' | 'register' | 'memory' | 'documents' | 'grids' | 'capabilities' | 'inbox'
+	>('conversation');
+
+	// INTAKE-5a: which intake thread the matter's Inbox tab has open. Panel-local
+	// (not URL state) — the matter view's `?thread=` already means the AGENT
+	// conversation, and overloading it would break the resume deep link.
+	let intakeThreadId = $state<string | null>(null);
 
 	// PRIV-9a: when a Privacy matter has the width, show chat + the ROPA
 	// register side by side (resizable) instead of the one-at-a-time toggle, so
@@ -189,7 +194,14 @@
 					{ id: 'grids' as const, label: 'Grids' },
 					// ADR-F054: the capability panel — toggle the area's skills/tools/playbooks
 					// (+ MCP placeholder) for this matter. Full-width panel like Memory/Documents.
-					{ id: 'capabilities' as const, label: 'Capabilities' }
+					{ id: 'capabilities' as const, label: 'Capabilities' },
+					// INTAKE-5a (ADR-F086, plan ruling 1): this matter's email threads.
+					// The plan wants the tab hidden when the matter has no intake threads
+					// AND is not intake-born, but the matter read model this host holds
+					// (`MatterActivity`) carries neither fact and the plan forbids an extra
+					// API call per matter — so it is shown for every matter for now; the
+					// panel's own empty state is honest when there is nothing.
+					{ id: 'inbox' as const, label: 'Inbox' }
 				]
 			: [])
 	]);
@@ -200,7 +212,8 @@
 		matterTab === 'memory' ||
 			matterTab === 'documents' ||
 			matterTab === 'grids' ||
-			matterTab === 'capabilities'
+			matterTab === 'capabilities' ||
+			matterTab === 'inbox'
 	);
 
 	// If the active tab leaves the strip (e.g. a Privacy matter widens past the
@@ -702,6 +715,34 @@
 								{nowMs}
 								onOpenGrid={openGrid}
 							/>
+						</div>
+					{/if}
+					{#if matterTab === 'inbox' && matter}
+						<!-- Inbox tab (INTAKE-5a, ADR-F086): this matter's email threads, the
+					     same component as the cockpit Inbox with `projectId` set. The
+					     decision itself stays in the conversation (plan ruling 2). -->
+						<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+							{#if intakeThreadId}
+								<IntakeThreadDetail
+									threadId={intakeThreadId}
+									{nowMs}
+									onBack={() => (intakeThreadId = null)}
+									onOpenConversation={(d) => {
+										// One resume path: hand the conversation back to the host's
+										// own selection, which the URL already deep-links.
+										intakeThreadId = null;
+										matterTab = 'conversation';
+										onSelectThread(d.agentThreadId);
+									}}
+								/>
+							{:else}
+								<IntakeInboxPanel
+									projectId={matter.project_id}
+									reloadKey={registerReloadKey}
+									{nowMs}
+									onOpen={(id) => (intakeThreadId = id)}
+								/>
+							{/if}
 						</div>
 					{/if}
 					{#if matterTab === 'capabilities' && matter}

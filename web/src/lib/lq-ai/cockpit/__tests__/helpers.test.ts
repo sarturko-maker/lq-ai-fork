@@ -38,7 +38,14 @@ function stateOf(url: string): CockpitState {
 describe('cockpit URL state', () => {
 	it('lands on the area list with no params', () => {
 		const sel = stateOf('/lq-ai');
-		expect(sel).toEqual({ area: null, matter: null, thread: null, unfiled: false });
+		expect(sel).toEqual({
+			area: null,
+			matter: null,
+			thread: null,
+			unfiled: false,
+			inbox: false,
+			intake: null
+		});
 		expect(viewOf(sel)).toBe('areas');
 	});
 
@@ -51,7 +58,14 @@ describe('cockpit URL state', () => {
 	it('round-trips matter + thread → matter view', () => {
 		const url = cockpitUrl({ area: 'commercial', matter: 'p-1', thread: 't-1' });
 		const sel = stateOf(url);
-		expect(sel).toEqual({ area: 'commercial', matter: 'p-1', thread: 't-1', unfiled: false });
+		expect(sel).toEqual({
+			area: 'commercial',
+			matter: 'p-1',
+			thread: 't-1',
+			unfiled: false,
+			inbox: false,
+			intake: null
+		});
 		expect(viewOf(sel)).toBe('matter');
 	});
 
@@ -62,6 +76,33 @@ describe('cockpit URL state', () => {
 		expect(sel.matter).toBeNull();
 		expect(sel.thread).toBe('t-9');
 		expect(viewOf(sel)).toBe('unfiled');
+	});
+
+	it('round-trips the INTAKE-5a inbox view, list and detail', () => {
+		const list = stateOf(cockpitUrl({ inbox: true }));
+		expect(list.inbox).toBe(true);
+		expect(list.intake).toBeNull();
+		expect(viewOf(list)).toBe('inbox');
+
+		const detail = stateOf(cockpitUrl({ inbox: true, intake: 'it-9' }));
+		expect(detail.intake).toBe('it-9');
+		expect(viewOf(detail)).toBe('inbox');
+	});
+
+	it('inbox is cross-matter — it drops area/matter/thread', () => {
+		const url = cockpitUrl({
+			inbox: true,
+			intake: 'it-9',
+			area: 'commercial',
+			matter: 'p-1',
+			thread: 't-1'
+		});
+		expect(url).toBe('/lq-ai?view=inbox&intake=it-9');
+		const sel = stateOf(url);
+		expect(sel.area).toBeNull();
+		expect(sel.matter).toBeNull();
+		expect(sel.thread).toBeNull();
+		expect(sel.unfiled).toBe(false);
 	});
 
 	it('omits empty params entirely', () => {
