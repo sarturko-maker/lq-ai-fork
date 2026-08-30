@@ -290,6 +290,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/internal/intake/emails"),
     ("POST", "/api/v1/admin/intake-mailboxes"),
     ("GET", "/api/v1/admin/intake-mailboxes"),
+    # INTAKE-5a (fork, ADR-F086) — the lawyer's Inbox read surface
+    ("GET", "/api/v1/intake/threads"),
+    ("GET", "/api/v1/intake/threads/{thread_id}"),
     ("PATCH", "/api/v1/admin/intake-mailboxes/{mailbox_id}"),
     ("DELETE", "/api/v1/admin/intake-mailboxes/{mailbox_id}"),
     # D4 — Organization Profile singleton

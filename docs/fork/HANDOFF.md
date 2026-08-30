@@ -5,104 +5,95 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 ## State
 
-- Branch: `intake-4b-hitl-send` — **INTAKE-4b built, reviewed, live-verified; PR open** (this PR).
-  Migration **0101** (`intake_messages.send_error`). ADR-**F087** proposed (HITL verbs for
-  `draft_email_reply` + the approved send; amends F071). Dev DB at 0101; api/arq-worker/
-  ingest-worker/mail-bridge/web rebuilt from this branch. INTAKE-4a merged #296 (`7db6b0cd`).
-- **Live proof on dev (matter `ORG-COM-0011`, conversation `23b2e471…`):**
-  1. Approve on the pre-4b paused ask (run `9e9ed16d…`) → resumed run `267fac3d…` `completed`;
-     `intake_messages` out row with provider id `<010001a0…>`, subject stamped `[ORG-COM-0011]`,
-     bridge `POST /send 200`, thread → `replied`; the reply arrived in the maintainer's Gmail on
-     the original thread with `Reply-To: oscar-lq+org-com-0011@…` (verified via the SDK).
-  2. Maintainer replied from Gmail → landed on the SAME intake thread `dfedec48…` (layer 1; its
-     `In-Reply-To` = our sent id, so layer 2 would match too) → requeue → run `05db8b6f…` read
-     it, wrote a Fact + Matter File, `record_intake_outcome`, paused on a NEW draft whose ask
-     carries `allowed_decisions: [approve, edit, reject]`.
-  3. **`edit`** on that ask → resumed run `e3c82460…` `completed`; the out row body carries the edit and the maintainer's Gmail received exactly the edited text (14:56 UTC).
-  A pre-4b ask degrades to approve/reject (422 `decision_not_allowed_for_pending_tool` on
-  `edit`) — by design (digest has no `review_configs`).
-- Three bugs found ONLY live and fixed in this PR: (a) one agent conversation now has MANY
-  intake threads (4a layers 2/3) → `load_intake_thread_for_run` `MultipleResultsFound`; runs now
-  bind to their thread via `intake_messages.run_id` + conversation lineage, fail closed on
-  ambiguity; (b) the paused HITL row stays `awaiting_input` forever → intake worker saw the
-  conversation as in-flight forever; now ONE helper `run_service.newest_live_run` /
-  `is_conversation_in_flight` shared with the resume guard; (c) arq kept
-  `arq:result:intake-email:*` for 1h and `enqueue_job` silently returned None on the reused
-  deterministic id → requeue-on-settle was a no-op for an hour; intake job registered
-  `keep_result=0`, helper returns `job is not None`, refused requeue logs WARNING.
-- Milestone INTAKE: 0/1/2/3/4a done (#290/#291/#293/#294/#296), 4b = this PR. Next INTAKE-5.
+- Branch: `intake-5a-inbox-surface` — **INTAKE-5a built, reviewed, live-verified; PR #299**.
+  Migration **0102** (`intake_threads.summary` + `summary_run_id`, read indexes, `intake_state`
+  CHECK narrowed to `NULL|candidate`). No new ADR — the slice implements the accepted plan
+  `docs/fork/plans/INTAKE-5-plan.md` (#298) rulings 1–3 and 6–9 under ADR-F086. Dev DB at 0102;
+  api/arq-worker/ingest-worker/web rebuilt from this branch.
+- **Live proof** (`docs/fork/evidence/intake-5a/`): a synthesised Contoso email produced a
+  five-bullet summary on new matter `NWT-COM-0013` with a paused draft; the cockpit Inbox lists
+  four live-ask threads first with the first bullet as the row's grey line; the thread view opens
+  on the summary with the chain collapsed; matter Inbox tab and admin mailbox page render.
+- Found live and fixed (`b0303f54`): sent replies have no `provider_timestamp` → chain sorted
+  them after every inbound; order now `coalesce(provider_timestamp, created_at)`.
+- Milestone INTAKE: 0/1/2/3/4a/4b done (#290/#291/#293/#294/#296/#297), 5 plan #298, 5a = this PR.
+  Next: **INTAKE-5b** (human attach, ADR-F089).
 - Untracked on purpose: `sample-documents/` except `commercial-intake-pack/`, 4 scenario live
-  tests, PYMUPDF research, `docs/fork/evidence/{demo-rehearsal,memory-demo-rehearsal}/`.
+  tests, PYMUPDF + DEEPSEEK-HARNESS research, `docs/fork/evidence/{demo-rehearsal,memory-demo-rehearsal}/`.
 
-## Done (INTAKE-4b — this PR)
+## Done (INTAKE-5a — this PR)
 
-- `ResumeDecision` gains `edit` + `edited_args` (subject/body; `to` unreachable — the bridge
-  derives recipients); per-tool `allowed_decisions` (floor tool approve/edit/reject; every other
-  gated tool approve/reject) enforced in schema, endpoint (422) and runner (`EDITABLE_TOOL_NAMES`);
-  `_build_resume_command` emits `edited_action`; `respond` = reject+message (UI verb, no runner
-  path; doctrine coaches the redraft). Middleware contract verified against installed langchain.
-- `draft_email_reply` executes the send: out row first (keyed `draft:<sha256(thread+tool_call_id)>`,
-  `InjectedToolCallId`), bridge `POST /send` via constructor-injected `MailBridgeClient`
-  (api holds only `LQ_AI_BRIDGE_TOKEN`; `LQ_AI_MAIL_BRIDGE_URL` in compose), idempotency key =
-  that per-ask hash, `reply_to_tag` = the reference (bridge composes the plus-address from ITS
-  inbox), stores provider id, thread → `replied`, `db.commit()` before returning; failure →
-  `send_error` class only, thread `error`; delivered-row guard; no retries anywhere.
-- mail-bridge: `idempotency_key` required (bounded per-process LRU, 409 on repeat, also passed
-  to the provider), `reply_to_tag` pattern-validated, no subject on `reply()` (SDK has none —
-  wire subject is the provider's `Re: <original>`; the tag rides Reply-To + our provider id).
-- Web `HitlConfirmCard`: draft editor (subject/body) for `draft_email_reply` only, "Approve &
-  send" (approve or edit), "Respond" (reject+message, disabled when empty), "Refuse".
-- Reviews (fresh-context, Opus): 1 blocker (row-id idempotency key could not stop a genuine
-  re-execution → double send) + 4 should-fix + 5 nits — all fixed; then the three live-only bugs.
-- Suites: api containerized `-m "not provider"` (pre-live-fix commit `eef2150b`) **4141 passed /
-  2 pre-existing env failures** (`test_branding`, `test_health`) / 4 skipped; touched suites after
-  each fix 302/303/277 passed; mail-bridge 115; web check 0 errors, vitest 114 files / 1401;
-  ruff + mypy clean (api, bridge). Migration 0101 up→down→up on throwaway pgvector.
+- `record_intake_outcome` requires `summary` (1–5 `{title ≤40, text ≤300}`, plain text, control
+  chars rejected, `extra=forbid`), full rewrite each call, `summary_run_id` stamped; safe-fail
+  leaves the previous summary; doctrine `skills/intake-triage/SKILL.md` § "The summary" coaches
+  the shape (spam = one bullet naming the category, nothing quoted).
+- `GET /intake/threads` (owner fence: project owner, or mailbox owner for orphaned threads;
+  attention rank 0..5 per ruling 3 computed once for ORDER BY + `attention=true`; `live_ask`
+  from `newest_live_run` semantics via lateral joins, no N+1; offset cursor opaque, capped 10k;
+  limit ≤100) + `GET /intake/threads/{id}` (newest 200 messages kept, `messages_truncated`;
+  `file_ids` parallel to `attachment_filenames`, filename-matched within the matter only).
+  Zero logging in the router; log-capture test proves no body/address/subject/summary in records.
+- Web: `CockpitView 'inbox'` (`?view=inbox&intake=<id>`), Inbox nav entry + attention badge,
+  `IntakeInboxPanel` / `IntakeThreadDetail` / `intake-panel-helpers.ts` (vitest), matter tab
+  `inbox` (shown for every matter — `MatterActivity` carries no thread count), admin
+  `intake-mailboxes` page over the INTAKE-1 CRUD. F013 tokens + primitives only; no `{@html}`.
+- Review (fresh-context Opus): no blockers; fixed in `cdd391c9`: bounded file lookup, newest-200
+  truncation, honest summary label ("last email"), dead duplicate helpers removed, web
+  `pendingHitlStep` = FIRST hitl step (matches the server gate), badge boundary, cursor cap.
+- Suites: api full `-m "not provider"` on `619b8e2f` 4210 passed / 7 failed (2 pre-existing env
+  `test_branding`/`test_health` + 5 test-maintenance fixed in `a1fa3f1b`); touched suites on
+  `a1fa3f1b` 228 passed; `test_intake_threads_api.py` on `b0303f54` 41 passed; migration 0102
+  up→down→up on throwaway pgvector; mypy 259 files clean; ruff clean; web check 0 errors, vitest
+  116 files / 1452.
 
-## Next slice — INTAKE-5 — the inbox surface
+## Next slice — INTAKE-5b — human attach (1 day)
 
-Not yet planned. Candidates from the plan's non-goals: cockpit inbox listing threads + paused
-asks across matters (Agent Inbox UX as the reference, Svelte on the F013 tokens); matter view
-listing its threads; human "attach to Matter X" (A1); agent-proposed attach; retire
-`intake_state` `promoted/dismissed`. Craft backlog seen live: reply signature block + tone hint
-in the doctrine; drafts double the `Re:` prefix in the recorded subject (wire subject is fine).
+Plan ruling 4 + ADR-F089 to draft: `POST /intake/threads/{id}/attach {project_id}` moves the
+thread, its `agent_threads.project_id` and the files ingested from its attachments onto an OPEN
+matter the caller owns (404 otherwise); 409 `thread_busy` while `is_conversation_in_flight`;
+clears `claimed_reference`; archives an intake-born source matter only when it is now empty
+(note "merged into <ref>"); audit row ids/counts only. Web: "Attach to matter…" on the thread
+detail + `AttachToMatterDialog` (owner's open matters, consequences spelled out). Live script:
+stranger's tagged email → stub with claim → attach to `ORG-COM-0011` → stub archived → next reply
+from that sender continues the SAME conversation. Then INTAKE-6 acceptance (5-email pack).
 
 ## Pick up exactly here
 
-1. Merge this PR when CI is green (gate items 1–5 in the PR body).
-2. Write the INTAKE-5 plan (maintainer edits), then build.
+1. Merge PR #299 when CI is green (gate items in the PR body).
+2. Draft ADR-F089 + build INTAKE-5b (Opus backend, Sonnet dialog), review, live, merge.
 Working model: Sonnet easy / Opus implement+review+fix / Fable orchestrate, design, live-verify,
-merge. Task tracker owed: #538/#539/#540/#541 → completed (MCP task tools disconnected).
+merge.
 
 ## Gotchas
 
-- **Background Bash commands get stopped early on this box** — run anything long as a `nohup`
-  script writing a log and watch it with Monitor; builds of 5 services exceed 10 min (two groups).
-- **The full api suite mounts the WORKTREE**: any edit to that worktree during the run poisons
-  the result (45 spurious failures once). Run the suite on a quiet tree; needs the dev image
-  tagged `lq-ai-api` (`docker build -f api/Dockerfile.dev -t lq-ai-api api`), the repo mounted
-  at `/repo` with `-w /repo/api` (wizard/profile tests), and compose run from the MAIN checkout
-  (the worktree has no `.env`). Rebuild the prod api tag afterwards.
-- **A paused HITL run row is never mutated**: "live ask" and "in flight" are DERIVED from the
-  newest non-failed/cancelled run on the conversation (`run_service.newest_live_run`). Never add a
-  second definition.
-- **arq deterministic job ids + kept results = silent dedup.** Any job whose id is legitimately
-  reused must be registered `keep_result=0`; `enqueue_job` returning None is a refusal.
-- Minting an admin token for live checks: inside the api container
-  `app.security.jwt.create_access_token(user_id, email, is_admin=True)`; write to a file, never
-  print. The Gmail API reply tool ignores `Reply-To` (addresses `From`) — mail clients honour it.
-- Roster PATCH `side` ∈ `ours|counterparty|other|unknown`; any PATCH (re)confirms → opens the
-  layer-3 gate. Layer-3 attach needs `trust='confirmed'` AND an `@` alias.
-- `ruff.toml` at repo root: run ruff from the root, never inside the api container.
-- **Bare `pytest -q` inside the api container runs every provider test** — use `-m "not provider"`.
-- `docker compose run api …` auto-migrates the dev DB. Intake runs ALWAYS compile a HITL policy →
-  need a checkpointer. api health endpoint is `/health`. `docker compose config` → ALWAYS
-  `--no-interpolate`. The intake 404 = "no active mailbox binding".
-- AgentMail traps: `thread.attachments` ≠ union of message attachments; fresh `attachment_id`
-  for identical bytes; events out of order; `messages.list` rows carry no body; SDK type-lags;
-  provider LOWERCASES addresses; caller Message-ID header stored but provider `message_id`
-  canonical; `reply()` takes no subject; plus-addressing delivers to the base inbox.
+- **Prod rebuilds overwrite the `lq-ai-api` tag** → no pytest in the container. Build the dev
+  image as `lq-ai-api-dev` and run suites with an override file
+  (`services.api.image: lq-ai-api-dev`, `build: !reset null`) via
+  `docker compose -f docker-compose.yml -f <override> run --rm -T -v <tree>:/repo -w /repo/api api pytest …`.
+- **`pgrep -f`/`pkill -f` match your own shell** on this box — anchor patterns (`^/bin/bash <script>`)
+  or you kill the caller / wait forever.
+- **Background Bash commands get stopped early** — long jobs run as `setsid nohup … & disown`
+  scripts writing a log, watched with Monitor; builds of 5 services exceed 10 min (two groups).
+- **The full api suite mounts a worktree** — never edit that tree during the run.
+- Synthesising an inbound email for live tests: run a python snippet INSIDE the mail-bridge
+  container (`docker compose cp` + `exec`) so `LQ_AI_BRIDGE_TOKEN` stays in its env; envelope =
+  `InboundEmailEnvelope` (`provider`, `inbox_id`=mailbox address, `thread{provider_thread_id,
+  subject}`, `message{provider_message_id, from_addr, to, timestamp, text, auth_state}`).
+- Headless screenshots: puppeteer-core (in the job tmp dir) + `/usr/bin/chromium`, login by
+  writing `lq_ai_auth` `{access_token, refresh_token:null, expires_at, user:null}` to
+  localStorage; token minted inside the api container into a file, never printed.
+- Many intake threads share ONE agent conversation → `live_ask` is per conversation and is
+  legitimately true on every sibling thread while a run is paused.
+- Sent `intake_messages` rows have NO `provider_timestamp` — sort with the created_at fallback.
+- **A paused HITL run row is never mutated**: "live ask"/"in flight" derive from
+  `run_service.newest_live_run`; the web `pendingHitlStep` takes the FIRST hitl step like the
+  server gate. arq deterministic ids need `keep_result=0`.
+- Roster PATCH `side` ∈ `ours|counterparty|other|unknown`; layer-3 attach needs `trust='confirmed'`
+  AND an `@` alias. `ruff` from the repo root with `--no-cache` (the `.ruff_cache` dir is
+  root-owned). Bare `pytest -q` in the api container runs provider tests — use `-m "not provider"`.
+- AgentMail traps: `reply()` takes no subject; plus-addressing delivers to the base inbox; provider
+  lowercases addresses; caller Message-ID stored but provider `message_id` canonical.
 - INTAKE tripwires: project row created EAGERLY at ingest; `draft_email_reply` hitl-gated
-  UNCONDITIONALLY and its execution IS the send; AgentMail creds never in `api`; weak stamps
-  never auto-merge; no retries around a send, ever.
-- Adeu 2.4.0 substrate facts live in ADR-F085.
+  UNCONDITIONALLY and its execution IS the send; AgentMail creds never in `api`; weak stamps never
+  auto-merge; no retries around a send, ever; summary is agent text about untrusted mail — text
+  interpolation only.

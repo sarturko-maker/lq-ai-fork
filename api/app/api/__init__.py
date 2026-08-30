@@ -39,6 +39,7 @@ from app.api import (
     inference,
     inference_override,
     intake_emails,
+    intake_threads,
     integrations_slack,
     integrations_teams,
     internal,
@@ -183,6 +184,12 @@ api_router.include_router(autonomous.router, dependencies=_active)
 # F0-S2 (fork): deep-agent run records — kick-off + polled run/steps
 # reads for the ADR-F002 capability rail. Per-user isolated.
 api_router.include_router(agent_runs.router, dependencies=_active)
+# INTAKE-5a (ADR-F086): the lawyer's Inbox — read-only intake thread list +
+# detail. Owner-fenced at the handler level (the thread's matter owner, or the
+# mailbox owner for a thread whose matter was hard-deleted); cross-user reads
+# 404. Read-only this slice, so the ordinary `_active` gate is the whole gate —
+# the human-attach WRITE (INTAKE-5b) adds `MutatingUser` + an audit row.
+api_router.include_router(intake_threads.router, dependencies=_active)
 # F1-S2 (fork, ADR-F002): practice areas — curated cockpit left rail.
 api_router.include_router(practice_areas.router, dependencies=_active)
 # B-7a (ADR-F067 D4): shipped agent-profile manifests — list/detail + the

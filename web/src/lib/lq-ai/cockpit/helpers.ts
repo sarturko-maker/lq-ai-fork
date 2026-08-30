@@ -21,23 +21,35 @@ export interface CockpitState {
 	thread: string | null;
 	/** The "unfiled conversations" bucket is open. */
 	unfiled: boolean;
+	/** The Inbox (email threads) view is open — INTAKE-5a, plan ruling 1/8. */
+	inbox: boolean;
+	/** The intake thread whose detail is open inside the Inbox; null = the list. */
+	intake: string | null;
 }
 
-export type CockpitView = 'areas' | 'matters' | 'matter' | 'unfiled';
+export type CockpitView = 'areas' | 'matters' | 'matter' | 'unfiled' | 'inbox';
 
 export function parseCockpitState(params: URLSearchParams): CockpitState {
+	const view = params.get('view');
 	return {
 		area: params.get('area'),
 		matter: params.get('matter'),
 		thread: params.get('thread'),
-		unfiled: params.get('view') === 'unfiled'
+		unfiled: view === 'unfiled',
+		inbox: view === 'inbox',
+		intake: params.get('intake')
 	};
 }
 
 /** Build the cockpit URL for a selection (omits empty params). */
 export function cockpitUrl(state: Partial<CockpitState>): string {
 	const params = new URLSearchParams();
-	if (state.unfiled) {
+	if (state.inbox) {
+		// INTAKE-5a: the cockpit Inbox is cross-matter, so it carries no
+		// area/matter/thread — only which thread's detail is open (deep-linkable).
+		params.set('view', 'inbox');
+		if (state.intake) params.set('intake', state.intake);
+	} else if (state.unfiled) {
 		params.set('view', 'unfiled');
 		if (state.thread) params.set('thread', state.thread);
 	} else {
@@ -54,6 +66,7 @@ export function cockpitUrl(state: Partial<CockpitState>): string {
  * area list (MILESTONES § F1 — no auto-landing in Commercial).
  */
 export function viewOf(state: CockpitState): CockpitView {
+	if (state.inbox) return 'inbox';
 	if (state.unfiled) return 'unfiled';
 	if (state.matter) return 'matter';
 	if (state.area) return 'matters';
@@ -77,8 +90,12 @@ export function timeAgo(iso: string | null, nowMs: number): string {
 	return new Date(then).toLocaleDateString();
 }
 
-/** StatusTone → the calm StatusDot tone (F2-VL2). */
-const TONE_TO_DOT: Record<StatusTone, DotStatus> = {
+/**
+ * StatusTone → the calm StatusDot tone (F2-VL2). Exported since INTAKE-5a so the
+ * Inbox chips route through the SAME map as run status — intake statuses can
+ * never disagree with run statuses (plan ruling 8).
+ */
+export const TONE_TO_DOT: Record<StatusTone, DotStatus> = {
 	running: 'running',
 	ok: 'completed',
 	warn: 'attention',

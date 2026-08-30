@@ -63,8 +63,14 @@ def _neutralise(text: str) -> str:
     return _DASH_RUN.sub("- - -", text)
 
 
-def _single_line(text: str) -> str:
-    """Collapse line breaks, then neutralise — for fields rendered as one header line."""
+def single_line_neutralised(text: str) -> str:
+    """Collapse line breaks, then neutralise — for a field rendered as ONE line.
+
+    Public because the intake READ API (INTAKE-5a) renders the same untrusted
+    subject into the lawyer's Inbox and must neutralise it exactly as the prompt
+    does: one definition, so a subject cannot look benign in one place and forge a
+    header/fence line in the other.
+    """
     return _neutralise(_LINE_BREAKS.sub(" ", text)).strip()
 
 
@@ -80,9 +86,11 @@ _INSTRUCTION = (
     "Follow the intake-triage skill. Anything that would leave the system, or any legal "
     "judgement that would reach the person who wrote in, stops for the supervising lawyer's "
     "approval — draft it, never send it.\n\n"
-    "Call record_intake_outcome exactly once, with the outcome, a short label, and a note "
-    "the lawyer can read at a glance. Call it BEFORE you draft any reply: drafting stops "
-    "the run for approval, so a reply drafted first leaves the thread with no conclusion."
+    "Call record_intake_outcome exactly once, with the outcome, a short label, a note "
+    "the lawyer can read at a glance, and a summary of the thread so far — at most five "
+    "short titled bullets, rewritten in full each time. Call it BEFORE you draft any "
+    "reply: drafting stops the run for approval, so a reply drafted first leaves the "
+    "thread with no conclusion."
 )
 
 _UNAUTHENTICATED_CAUTION = (
@@ -96,7 +104,7 @@ _UNAUTHENTICATED_CAUTION = (
 # Deliberately says nothing about whether that reference exists — the note reads
 # the same for an unknown reference and for a real matter whose roster the sender
 # is not on, so the agent (and anyone reading its output) learns nothing it could
-# use to probe for matters. The value is rendered through _single_line like every
+# use to probe for matters. The value is rendered through single_line_neutralised like every
 # other untrusted field, even though it already passed a strict format check.
 _CLAIMED_REFERENCE_NOTE = (
     "The sender put the matter reference {reference} on this message (in the subject line or "
@@ -147,7 +155,7 @@ class IntakeEmailView:
 def _render_recipients(addrs: list[str]) -> str:
     if not addrs:
         return "(not recorded)"
-    shown = [_single_line(a) for a in addrs[:MAX_RENDERED_RECIPIENTS]]
+    shown = [single_line_neutralised(a) for a in addrs[:MAX_RENDERED_RECIPIENTS]]
     rendered = ", ".join(shown)
     if len(addrs) > len(shown):
         rendered += f" (+{len(addrs) - len(shown)} more)"
@@ -158,7 +166,7 @@ def _render_attachments(names: list[str]) -> str:
     if not names:
         return "(none)"
     # Filenames are sender-controlled too (B1): one line each, no fence shapes.
-    return ", ".join(_single_line(n) for n in names)
+    return ", ".join(single_line_neutralised(n) for n in names)
 
 
 def _render_body(text: str) -> str:
@@ -198,7 +206,11 @@ def build_intake_prompt(view: IntakeEmailView, *, nonce: str | None = None) -> s
         parts.append(_UNAUTHENTICATED_CAUTION.format(auth_state=view.auth_state))
 
     if view.claimed_reference:
-        parts.append(_CLAIMED_REFERENCE_NOTE.format(reference=_single_line(view.claimed_reference)))
+        parts.append(
+            _CLAIMED_REFERENCE_NOTE.format(
+                reference=single_line_neutralised(view.claimed_reference)
+            )
+        )
 
     parts.append(_FENCE_FRAMING.format(nonce=nonce))
 
@@ -206,9 +218,9 @@ def build_intake_prompt(view: IntakeEmailView, *, nonce: str | None = None) -> s
     fenced = "\n".join(
         [
             fence_begin,
-            f"From: {_single_line(view.from_addr)}",
+            f"From: {single_line_neutralised(view.from_addr)}",
             f"To: {_render_recipients(view.to_addrs)}",
-            f"Subject: {_single_line(view.subject) or '(no subject)'}",
+            f"Subject: {single_line_neutralised(view.subject) or '(no subject)'}",
             f"Sent (as claimed by the sender's mail system): {timestamp}",
             f"Sender authentication: {view.auth_state}",
             f"Messages on this thread so far: {view.message_count}",
@@ -227,4 +239,5 @@ __all__ = [
     "MAX_RENDERED_RECIPIENTS",
     "IntakeEmailView",
     "build_intake_prompt",
+    "single_line_neutralised",
 ]

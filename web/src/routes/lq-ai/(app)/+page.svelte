@@ -26,6 +26,8 @@
 	import CenteredEntry from '$lib/lq-ai/cockpit/CenteredEntry.svelte';
 	import ConversationHost from '$lib/lq-ai/cockpit/ConversationHost.svelte';
 	import MattersPanel from '$lib/lq-ai/cockpit/MattersPanel.svelte';
+	import IntakeInboxPanel from '$lib/lq-ai/components/intake/IntakeInboxPanel.svelte';
+	import IntakeThreadDetail from '$lib/lq-ai/components/intake/IntakeThreadDetail.svelte';
 	import { getCockpitState } from '$lib/lq-ai/cockpit/context.svelte';
 	import { cockpitUrl, launchIntent, parseCockpitState, viewOf } from '$lib/lq-ai/cockpit/helpers';
 
@@ -148,6 +150,29 @@
 		);
 	}
 
+	// --- INTAKE-5a: the email Inbox view (plan rulings 1/2/8) ----------------
+	// Selection lives in the URL like every other cockpit view, so a thread the
+	// lawyer is looking at deep-links and survives a reload.
+	function openIntakeThread(threadId: string) {
+		nav(cockpitUrl({ inbox: true, intake: threadId }));
+	}
+
+	function backToInbox() {
+		// A visit may have settled something — re-count the rail badge.
+		cockpit.loadInboxAttention();
+		nav(cockpitUrl({ inbox: true }));
+	}
+
+	function openIntakeConversation(detail: { projectId: string | null; agentThreadId: string }) {
+		// The decision stays in the conversation (ruling 2): hand off to the
+		// matter view, where HitlConfirmCard already works. Prefer the matter's
+		// OWN area so the deep link back-navigates correctly.
+		const area =
+			cockpit.activity?.matters.find((m) => m.project_id === detail.projectId)?.practice_area_key ??
+			null;
+		nav(cockpitUrl({ area, matter: detail.projectId, thread: detail.agentThreadId }));
+	}
+
 	function onThreadCreated(detail: { threadId: string; projectId: string | null }) {
 		// Sync the URL to the conversation the panel just created so the
 		// deep-link/reload contract holds. If the user re-pointed the composer's
@@ -212,6 +237,19 @@
 			onActivity={() => cockpit.loadActivity()}
 		/>
 	{/key}
+{:else if view === 'inbox'}
+	<!-- INTAKE-5a: the lawyer's front door onto every email thread the intake
+	     mailbox has handled. Same main pane, list ⇄ detail by URL state. -->
+	{#if sel.intake}
+		<IntakeThreadDetail
+			threadId={sel.intake}
+			nowMs={cockpit.nowMs}
+			onBack={backToInbox}
+			onOpenConversation={openIntakeConversation}
+		/>
+	{:else}
+		<IntakeInboxPanel nowMs={cockpit.nowMs} onOpen={openIntakeThread} />
+	{/if}
 {:else if view === 'unfiled'}
 	<ConversationHost
 		matter={null}

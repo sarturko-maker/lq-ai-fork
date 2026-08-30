@@ -26,6 +26,7 @@
 	import CockpitHeader from '$lib/lq-ai/cockpit/CockpitHeader.svelte';
 	import { CockpitShellState, setCockpitState } from '$lib/lq-ai/cockpit/context.svelte';
 	import { cockpitUrl, MOTION, motionMs, parseCockpitState } from '$lib/lq-ai/cockpit/helpers';
+	import { badgeCount } from '$lib/lq-ai/components/intake/intake-panel-helpers';
 	import { activeTabFor, visibleTabsFor, type TabDef } from '$lib/lq-ai/tabs';
 
 	let { children } = $props();
@@ -109,6 +110,8 @@
 		initPreferences(); // feeds the header Tools-menu gating (autonomous opt-in)
 		cockpit.loadAreas();
 		cockpit.loadActivity();
+		// The Inbox badge rides the existing cockpit reload cadence (no new SSE).
+		cockpit.loadInboxAttention();
 		cockpit.nowMs = serverNowMs();
 		ticker = setInterval(() => {
 			cockpit.nowMs = serverNowMs();
@@ -131,6 +134,16 @@
 		drawerOpen = false;
 		nav(cockpitUrl({ unfiled: true }));
 	}
+
+	// INTAKE-5a: the email Inbox, a fourth cockpit view (plan ruling 8).
+	function openInbox() {
+		drawerOpen = false;
+		nav(cockpitUrl({ inbox: true }));
+	}
+
+	const inboxBadge = $derived(
+		badgeCount(cockpit.inboxAttention, CockpitShellState.INBOX_BADGE_PAGE)
+	);
 
 	function newMatter() {
 		// "Start something new" → the landing launcher (ADR-F002: a matter binds
@@ -160,10 +173,13 @@
 		user={$auth.user ?? null}
 		selectedAreaKey={sel.area}
 		unfiledOpen={sel.unfiled}
+		inboxOpen={sel.inbox}
+		{inboxBadge}
 		{toolTabs}
 		{activeTab}
 		onSelectArea={enterArea}
 		onSelectUnfiled={openUnfiled}
+		onSelectInbox={openInbox}
 		onNewMatter={newMatter}
 		onSelectTool={selectTool}
 	/>

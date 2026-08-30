@@ -24,6 +24,10 @@ tools, so no ``practice_area_tool_groups`` row exists or is needed:
   ``projects.intake_state`` is PROVENANCE ("born from email") and the grant gate for
   these tools — the agent path never writes it.
 
+  INTAKE-5a (ADR-F086 ruling 7) makes the call carry a required ``summary``: the
+  agent's one-to-five-bullet account of THE THREAD SO FAR, REWRITTEN IN FULL every
+  time, which is what the lawyer's Inbox opens on instead of the email chain.
+
 * :func:`draft_email_reply` — composes a reply, records it as a ``direction='out'``
   ``intake_messages`` row and, INTAKE-4b (ADR-F087), SENDS it. There is still no
   auto-send path: the tool is interrupt-gated UNCONDITIONALLY by
@@ -150,7 +154,9 @@ def build_intake_tools(
         practice_area_id=binding.practice_area_id,
     )
 
-    async def record_intake_outcome(outcome: str, label: str, note: str) -> str:
+    async def record_intake_outcome(
+        outcome: str, label: str, note: str, summary: list[dict[str, str]]
+    ) -> str:
         """Conclude this intake thread — call this exactly once, last.
 
         `outcome` must be one of exactly two values:
@@ -170,16 +176,28 @@ def build_intake_tools(
 
         `note` is one short paragraph the lawyer reads at a glance: what this is,
         what you did, and what (if anything) you need from them.
+
+        `summary` is THE THREAD SO FAR for someone who has never seen it: one to
+        five bullets, each `{"title": "...", "text": "..."}`. The title is two or
+        three words the lawyer's eye lands on ("What they want", "What we did",
+        "Where it stands", "Open point", "Proposed next step") — at most 40
+        characters; the text is one plain sentence under it — at most 300
+        characters, one line, no line breaks. Rewrite ALL of it every time you
+        conclude, describing the WHOLE chain including the latest message: it
+        replaces the previous version outright, and the lawyer reads it instead of
+        opening the emails. Put no email addresses in a title.
         """
         return await guarded_dispatch(
             "record_intake_outcome",
             lambda db: _record_intake_outcome(
                 db,
                 binding,
+                run_id=run_id,
                 intake_thread_id=intake_thread_id,
                 outcome=outcome,
                 label=label,
                 note=note,
+                summary=summary,
             ),
             ctx,
         )
@@ -386,17 +404,20 @@ async def _record_intake_outcome(
     db: AsyncSession,
     binding: MatterBinding,
     *,
+    run_id: uuid.UUID,
     intake_thread_id: uuid.UUID,
     outcome: str,
     label: str,
     note: str,
+    summary: list[dict[str, str]],
 ) -> str:
-    """Validate → write the outcome onto the thread → apply the project effect."""
+    """Validate → write the outcome + summary onto the thread → apply the project effect."""
     try:
         proposal = RecordIntakeOutcomeInput(
             outcome=outcome,  # type: ignore[arg-type]  # Pydantic validates the closed set
             label=label,
             note=note,
+            summary=summary,  # type: ignore[arg-type]  # Pydantic validates the item shape
         )
     except ValidationError as exc:
         return _rejection_text(exc, tool="record_intake_outcome")
@@ -426,6 +447,13 @@ async def _record_intake_outcome(
     thread.outcome = proposal.outcome
     thread.label = proposal.label
     thread.outcome_note = proposal.note
+    # INTAKE-5a (ADR-F086 ruling 7): a FULL REWRITE, every call. The summary is
+    # "the thread so far", not an append-only log, so merging an old list with a
+    # new one would produce an account of the thread that no run ever wrote. The
+    # safe-fail path (``safe_fail_intake_thread``) deliberately leaves whatever is
+    # here in place and the read API flags it stale instead.
+    thread.summary = [item.model_dump() for item in proposal.summary]
+    thread.summary_run_id = run_id
     # INTAKE-4b (ADR-F087): a SEND already settled this thread — `replied` (a letter
     # went to the counterparty) or `error` (one was approved and did not go). Both are
     # later, stronger facts than the outcome's bookkeeping, and `error` is the only
@@ -745,6 +773,12 @@ async def safe_fail_intake_thread(
     leave its thread stuck at ``processing`` forever, invisible in the lawyer's
     "waiting for me" list. The note is a FIXED fork-authored string — never model
     text, never an exception message.
+
+    ``summary`` is deliberately LEFT ALONE (INTAKE-5a): a run that did not conclude
+    has no account of the thread to offer, and blanking the previous run's would
+    replace something true-as-of-last-time with nothing. The read API compares
+    ``summary_run_id`` against the newest settled run instead and shows the reader
+    "the agent's last run did not finish", which is the honest form of the same fact.
 
     Returns whether it changed anything. Never raises: it must not mask the run's
     own outcome (the caller invokes it from a ``finally``).

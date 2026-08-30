@@ -282,12 +282,15 @@ describe('pendingHitlStep (HITL-3, ADR-F071)', () => {
 		expect(pendingHitlStep(makeRun({ status: 'awaiting_input' }), steps)).toBeNull();
 	});
 
-	it('returns the LAST hitl_request when several are present', () => {
+	it('returns the FIRST hitl_request when several are present — the resume gate picks that one', () => {
+		// `POST /agents/runs/{id}/resume` derives the allowed decisions from the
+		// first `hitl_request` (ORDER BY seq ASC LIMIT 1, api/app/api/agent_runs.py),
+		// so the card must render the same step the server would act on.
 		const steps = [
 			makeStep({ id: 'h-1', seq: 1, kind: 'hitl_request', name: 'apply_redline' }),
 			makeStep({ id: 'h-2', seq: 2, kind: 'hitl_request', name: 'send_email' })
 		];
-		expect(pendingHitlStep(makeRun({ status: 'awaiting_input' }), steps)?.id).toBe('h-2');
+		expect(pendingHitlStep(makeRun({ status: 'awaiting_input' }), steps)?.id).toBe('h-1');
 	});
 });
 

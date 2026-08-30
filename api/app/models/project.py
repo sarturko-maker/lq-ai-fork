@@ -88,15 +88,17 @@ class Project(Base):
             "NOT (is_sandbox AND practice_area_id IS NOT NULL)",
             name="chk_projects_sandbox_no_area",
         ),
-        # INTAKE-1 (ADR-F086): the intake lifecycle. NULL = normal matter (the
-        # overwhelming majority of rows, unchanged). A non-NULL value marks a
-        # project that originated from an inbound intake email thread, created
-        # EAGERLY at ingest (before any agent has looked at it) — the agent's
-        # later `record_intake_outcome` decides whether it stays 'candidate',
-        # is promoted to a real matter, or is auto-'dismissed' (spam/FYI, no
-        # clutter survives). See `docs/adr/F086-email-intake-architecture.md`.
+        # INTAKE-1 (ADR-F086): intake PROVENANCE, not a lifecycle. NULL = normal
+        # matter (the overwhelming majority of rows, unchanged); 'candidate' =
+        # this matter was born from an inbound intake email thread, created
+        # EAGERLY at ingest (before any agent has looked at it). ADR-F086
+        # Amendment A1 retired the 'promoted'/'dismissed' pair — every intake
+        # thread IS a matter, so there is no promotion step: the agent's
+        # `record_intake_outcome` closes the matter (archived_at) or leaves it
+        # open, and never writes this column. Narrowed by migration 0102
+        # (INTAKE-5a ruling 6). See `docs/adr/F086-email-intake-architecture.md`.
         CheckConstraint(
-            "intake_state IS NULL OR intake_state IN ('candidate','promoted','dismissed')",
+            "intake_state IS NULL OR intake_state IN ('candidate')",
             name="chk_projects_intake_state",
         ),
         # INTAKE-4a (ADR-F088): the SQL mirror of
@@ -144,10 +146,10 @@ class Project(Base):
         server_default=text("false"),
         default=False,
     )
-    # INTAKE-1 seam (ADR-F086): NULL = normal matter. 'candidate' = created
-    # eagerly by the intake email flow, awaiting the agent's outcome;
-    # 'promoted' = the lawyer kept it as a real matter; 'dismissed' = the
-    # agent (or lawyer) filed it away with nothing external. CHECK above.
+    # INTAKE-1 seam (ADR-F086), narrowed to two values by ADR-F086 Amendment A1
+    # + migration 0102: NULL = normal matter; 'candidate' = created eagerly by
+    # the intake email flow. Provenance and the intake-tool grant gate — never a
+    # lifecycle, and never written by the agent path. CHECK above.
     intake_state: Mapped[str | None] = mapped_column(Text, nullable=True)
     # INTAKE-4a (ADR-F088, migration 0100): the neutral matter reference
     # ``ORG-AREA-NNNN``, allocated once at creation and IMMUTABLE — no PUT/PATCH

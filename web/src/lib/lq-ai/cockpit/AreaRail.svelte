@@ -21,6 +21,7 @@
 	 */
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import InboxIcon from '@lucide/svelte/icons/inbox';
+	import MailIcon from '@lucide/svelte/icons/mail';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -40,10 +41,13 @@
 		user,
 		selectedAreaKey,
 		unfiledOpen,
+		inboxOpen,
+		inboxBadge = null,
 		toolTabs,
 		activeTab,
 		onSelectArea,
 		onSelectUnfiled,
+		onSelectInbox,
 		onNewMatter,
 		onSelectTool
 	}: {
@@ -55,12 +59,18 @@
 		user: User | null;
 		selectedAreaKey: string | null;
 		unfiledOpen: boolean;
+		/** INTAKE-5a: the email Inbox view is the open one. */
+		inboxOpen: boolean;
+		/** Rendered badge for threads waiting on a human; null = no badge. */
+		inboxBadge?: string | null;
 		/** The tool surfaces to list under "Tools" (already role/pref-filtered). */
 		toolTabs: TabDef[];
 		/** The tab id the canvas is currently showing, for the active highlight. */
 		activeTab: TabId | null;
 		onSelectArea: (area: PracticeArea) => void;
 		onSelectUnfiled: () => void;
+		/** Open the email Inbox (INTAKE-5a, plan ruling 8 — a fourth nav view). */
+		onSelectInbox: () => void;
 		/** Start something new — routes to the landing launcher (ADR-F002). */
 		onNewMatter: () => void;
 		/** Open a tool surface (renders in the canvas for migrated surfaces). */
@@ -191,7 +201,31 @@
 		</div>
 	</div>
 
-	<div class="border-sidebar-border shrink-0 border-t px-2 py-2">
+	<div class="border-sidebar-border shrink-0 space-y-0.5 border-t px-2 py-2">
+		<!-- INTAKE-5a (plan ruling 8): the email Inbox is a fourth cockpit view,
+		     beside Unfiled — not a separate app. The badge counts the threads the
+		     server itself says need a human (attention ranks 0-2). -->
+		<button
+			type="button"
+			class="flex h-9 w-full items-center justify-between rounded-md px-2.5 text-sm font-medium transition-colors duration-150 {inboxOpen
+				? 'bg-card text-foreground shadow-xs'
+				: 'hover:bg-sidebar-accent'}"
+			data-testid="lq-cockpit-inbox"
+			onclick={onSelectInbox}
+		>
+			<span class="flex min-w-0 items-center gap-2">
+				<MailIcon class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+				<span class="truncate">Inbox</span>
+			</span>
+			{#if inboxBadge}
+				<span
+					class="bg-brand text-brand-foreground rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
+					data-testid="lq-cockpit-inbox-badge"
+				>
+					{inboxBadge}
+				</span>
+			{/if}
+		</button>
 		<button
 			type="button"
 			class="flex h-9 w-full items-center justify-between rounded-md px-2.5 text-sm font-medium transition-colors duration-150 {unfiledOpen
