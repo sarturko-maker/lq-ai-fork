@@ -5,8 +5,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 ## State
 
-- Branch: `intake-3-intake-run` — **INTAKE-3 (the intake run) implemented, reviewed, and
-  LIVE-VERIFIED 2026-08-30**, this PR. Migration **0099** (intake_threads.outcome CHECK
+- Branch: `main` — **INTAKE-3 MERGED #294 (`8e7bb631`, 2026-08-30)**. Migration **0099** (intake_threads.outcome CHECK
   `dealt_with|needs_human`, intake_messages content columns, `intake-triage` skill bound to
   Commercial). Dev DB is at 0099; api/arq-worker/ingest-worker rebuilt together.
 - **Maintainer ruling R10 / Amendment A1 (2026-08-29): EVERY intake thread IS a matter.**
@@ -50,22 +49,28 @@ then CLAUDE.md, then the ADRs/plans named below.
   post-fix touched-module suites 383 passed; ruff + mypy clean; migration up→down→up on a
   throwaway pgvector container.
 
-## Next slice — INTAKE-4 (#541) — HITL edit/respond + approved send (ADR-F087)
+## Next slice — INTAKE-4 (#541) — PLAN WRITTEN, awaiting maintainer edit
 
-Consumer of the bridge `/send` (reply-only). The lawyer approves/edits the persisted draft →
-api calls mail-bridge `/send` with `reply_to_message_id`; `intake_messages` out row gets the
-provider id; thread → `replied`. Widen HITL from approve/reject to edit/respond for
-`draft_email_reply` only (ADR-F087). Design first: where the draft lives in the cockpit
-(matter view vs inbox surface, INTAKE-5), and the "attach to existing Matter X" operation
-(A1) — plan both before code. Backlog from INTAKE-3: retire `intake_state` enum values
-`promoted/dismissed` (schema cleanup); docs/db-schema.md lacks the email-intake tables.
+**Read `docs/fork/plans/INTAKE-4-plan.md` first.** Maintainer rulings 2026-08-30 already in it:
+neutral naming (no product name anywhere user-visible; codebase is Apache-2.0); matter
+reference `ORG-AREA-NNNN` (admin org code + per-area code + per-org-per-area counter table,
+assigned to EVERY matter, backfilled); AREA = HOME area only (cross-area pull-in = future
+milestone; keep-possible invariants in NORTH-STAR + plan); stamping layers (References →
+subject tag gated on Roster membership → agent suggestion → human attach) with weak layers
+never auto-merging; HITL verbs edit/respond for `draft_email_reply` ONLY (ADR-F087); the
+tool's execution IS the send via bridge `/send`, idempotent. Two sub-slices: **4a** reference +
+stamping substrate (migration 0100, ADR-F088) → **4b** HITL edit/respond + approved send.
+Open for the maintainer: year segment in the reference (default NO); plus-address probe.
 
 ## Pick up exactly here
 
-If this PR is merged: start INTAKE-4 with a written plan (ADR-F087 draft) — read ADR-F086
-+ Amendment A1, the plan § Security posture, and `mail-bridge/app/main.py` `/send`. If not
-merged: check `gh pr view --repo sarturko-maker/lq-ai-fork` for CI, then squash-merge per
-ADR-F005. Working model: Sonnet easy / Opus implement+review+fix / Fable orchestrate, design,
+1. Ask the maintainer to edit/accept `INTAKE-4-plan.md` (year segment? plus-address probe?).
+2. Probe (Sonnet): does AgentMail `reply` honour a caller-supplied Message-ID / custom
+   headers? Does a plus-address deliver to the base inbox? Record in
+   `docs/fork/evidence/intake-probe/findings.md`.
+3. INTAKE-4a build (Opus) per plan; drift-guards for area codes; live: tagged forward from a
+   Roster sender lands on the same matter.
+Working model: Sonnet easy / Opus implement+review+fix / Fable orchestrate, design,
 live-verify, merge. Task tracker owed: #538/#539/#540 → completed (MCP task tools
 disconnected).
 

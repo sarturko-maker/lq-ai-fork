@@ -43,6 +43,12 @@ brakes are not overhead, they are why a legal client buys it.
 
 ## Keep-possible invariants
 
+- **Matters outlive their home practice area.** A matter is owned by one HOME area (its
+  reference `ORG-AREA-NNNN`, its intake agent, its memory) but must be able to pull in helper
+  areas later (Commercial matter → Privacy agent). Nothing may assume one-area-per-matter
+  beyond `projects.practice_area_id` = home; naming is neutral (no product name in
+  references, headers, subjects). (Maintainer, 2026-08-30.)
+
 Standing rules (gateway-only egress, chokepoint, declarative config, transparency) already point
 this way. Four gaps no current ADR answers — slices must not make them harder:
 
