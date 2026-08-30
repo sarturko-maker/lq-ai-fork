@@ -86,6 +86,11 @@ NO_OUTCOME_NOTE = "run ended without a recorded outcome"
 # assigns the real id. "Starts with this" is therefore exactly "never went out".
 _DRAFT_ID_PREFIX = "draft:"
 
+# INTAKE-4b: a thread nobody has started work on yet (the landing endpoint's initial
+# state). Used only as the last-resort tie-break when no message on the conversation
+# has been processed at all — see load_intake_thread_for_run.
+_PENDING_THREAD_STATUSES = frozenset({"received"})
+
 # Thread statuses a settled SEND put on the thread. ``record_intake_outcome`` must not
 # overwrite them: "we replied" / "the send failed" is a stronger, later fact about the
 # thread than the outcome's own bookkeeping, and losing `error` loses the only place a
@@ -115,6 +120,7 @@ def build_intake_tools(
     *,
     run_id: uuid.UUID,
     binding: MatterBinding,
+    intake_thread_id: uuid.UUID,
     bridge: BridgeClient | None = None,
 ) -> list[Callable[..., Any]]:
     """Build the two intake tools for one run on an intake-born matter.
@@ -122,6 +128,12 @@ def build_intake_tools(
     The guard context grants exactly :data:`INTAKE_TOOL_NAMES`; ``binding.project_id``
     scopes every write, so the blast radius is this one matter and the one
     intake thread bound to it.
+
+    ``intake_thread_id`` is the ONE thread this run is working on, resolved ONCE at
+    the composition root by :func:`load_intake_thread_for_run` and handed down. A
+    conversation can carry several intake threads (ADR-F088 layer 2/3), so neither tool
+    may re-derive "the thread" from the project — that was the crash and, once
+    LIMIT-1'd, would have been the wrong thread.
 
     ``bridge`` (INTAKE-4b, ADR-F087) is the mail-bridge send seam, constructed at the
     composition root and injected here — never reached for as a global. ``None`` means
@@ -161,7 +173,14 @@ def build_intake_tools(
         """
         return await guarded_dispatch(
             "record_intake_outcome",
-            lambda db: _record_intake_outcome(db, binding, outcome=outcome, label=label, note=note),
+            lambda db: _record_intake_outcome(
+                db,
+                binding,
+                intake_thread_id=intake_thread_id,
+                outcome=outcome,
+                label=label,
+                note=note,
+            ),
             ctx,
         )
 
@@ -205,6 +224,7 @@ def build_intake_tools(
                 db,
                 binding,
                 run_id=run_id,
+                intake_thread_id=intake_thread_id,
                 to=to,
                 subject=subject,
                 body=body,
@@ -219,9 +239,13 @@ def build_intake_tools(
 
 
 async def load_intake_thread_for_run(
-    db: AsyncSession, *, project_id: uuid.UUID, agent_thread_id: uuid.UUID | None
+    db: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    agent_thread_id: uuid.UUID | None,
+    run_id: uuid.UUID | None = None,
 ) -> IntakeThread | None:
-    """The intake thread this RUN is the intake run OF, or ``None``.
+    """The intake thread this RUN is working on, or ``None``.
 
     Under ADR-F086 Amendment A1 an intake-born matter is an ordinary matter: the
     lawyer opens it in the cockpit and chats about it like any other. Those chats run
@@ -230,32 +254,130 @@ async def load_intake_thread_for_run(
     arming the intake doctrine and tools, and letting a settled cockpit run flip a
     thread that is still processing (adversarial review S2/S5). The intake run is the
     one whose agent conversation IS the thread's ``agent_thread_id``; nothing else is.
+
+    **ONE conversation now holds MANY intake threads** (INTAKE-4a, ADR-F088). The
+    layer-2/3 resolver deliberately opens a NEW ``intake_threads`` row when a reply or
+    a tagged mail arrives on a fresh provider thread, attaches it to the same matter,
+    and gives it the SAME ``agent_thread_id`` so the conversation continues. "The
+    thread on this conversation" therefore stopped being a single row, and the old
+    ``scalar_one_or_none()`` here raised ``MultipleResultsFound`` — which killed the
+    resume of the first live approval (three rows: one ``awaiting_human``, two still
+    ``received``). A ``LIMIT 1`` would only have replaced a crash with a coin flip, so
+    the run is bound to its thread EXPLICITLY, in three deterministic steps:
+
+    1. **This run's own work.** The worker stamps an inbound message's ``run_id`` at
+       the moment it starts a run for it (``intake_worker``), so the message carrying
+       this ``run_id`` names the thread the run was started for.
+    2. **The conversation's lineage.** A resume is a NEW ``agent_runs`` row with no
+       messages of its own, so fall back to the newest inbound processed by ANY run on
+       this same agent conversation — precisely the message the paused run was working
+       on.
+    3. **The single working thread.** With nothing processed yet, take the one thread
+       that is not still ``received``.
+
+    Ambiguity beyond that is a bug, not a state to guess through: it logs an ERROR with
+    counts and ids and returns ``None``, which fails CLOSED (no intake tools, no
+    doctrine, no thread flipped) rather than acting on the wrong thread.
     """
     if agent_thread_id is None:
         return None
-    return (
-        await db.execute(
-            select(IntakeThread).where(
-                IntakeThread.project_id == project_id,
-                IntakeThread.agent_thread_id == agent_thread_id,
+    candidates = await load_conversation_intake_threads(
+        db, project_id=project_id, agent_thread_id=agent_thread_id
+    )
+    if len(candidates) <= 1:
+        return candidates[0] if candidates else None
+
+    by_id = {thread.id: thread for thread in candidates}
+    thread_ids = list(by_id)
+
+    def _newest_processed(run_filter: Any) -> Any:
+        return (
+            select(IntakeMessage.thread_id)
+            .where(
+                IntakeMessage.thread_id.in_(thread_ids),
+                IntakeMessage.direction == "in",
+                run_filter,
+            )
+            .order_by(IntakeMessage.created_at.desc(), IntakeMessage.id.desc())
+            .limit(1)
+        )
+
+    bound: uuid.UUID | None = None
+    if run_id is not None:
+        bound = (
+            await db.execute(_newest_processed(IntakeMessage.run_id == run_id))
+        ).scalar_one_or_none()
+    if bound is None:
+        bound = (
+            await db.execute(
+                _newest_processed(
+                    IntakeMessage.run_id.in_(
+                        select(AgentRun.id).where(AgentRun.thread_id == agent_thread_id)
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+    if bound is not None:
+        return by_id[bound]
+
+    working = [t for t in candidates if t.status not in _PENDING_THREAD_STATUSES]
+    if len(working) == 1:
+        return working[0]
+    logger.error(
+        "cannot bind this run to one intake thread on its conversation",
+        extra={
+            "event": "intake_thread_binding_ambiguous",
+            "run_id": str(run_id) if run_id is not None else None,
+            "agent_thread_id": str(agent_thread_id),
+            "candidates": len(candidates),
+            "working": len(working),
+        },
+    )
+    return None
+
+
+async def load_conversation_intake_threads(
+    db: AsyncSession, *, project_id: uuid.UUID, agent_thread_id: uuid.UUID | None
+) -> list[IntakeThread]:
+    """EVERY intake thread on this agent conversation, oldest first (ADR-F088).
+
+    The requeue-on-settle contract operates over all of them: a mail that arrives while
+    a run is in flight lands on a SIBLING thread as often as on the one being worked,
+    and settling that run is the moment the whole conversation is free again.
+    """
+    if agent_thread_id is None:
+        return []
+    return list(
+        (
+            await db.execute(
+                select(IntakeThread)
+                .where(
+                    IntakeThread.project_id == project_id,
+                    IntakeThread.agent_thread_id == agent_thread_id,
+                )
+                .order_by(IntakeThread.created_at.asc(), IntakeThread.id.asc())
             )
         )
-    ).scalar_one_or_none()
+        .scalars()
+        .all()
+    )
 
 
-async def _load_thread_for_project(db: AsyncSession, project_id: uuid.UUID) -> IntakeThread | None:
-    """The intake thread bound to this matter (oldest if ever more than one).
+async def _load_bound_thread(
+    db: AsyncSession, binding: MatterBinding, intake_thread_id: uuid.UUID
+) -> IntakeThread | None:
+    """The ONE intake thread this run was bound to, re-read in the tool's session.
 
-    Used by the TOOLS, which are only ever granted to a run that
-    :func:`load_intake_thread_for_run` already identified as the thread's intake run —
-    so the project binding is a sufficient key there.
+    Matter-scoped as well as id-scoped: the id arrives from the composition root, but
+    a tool never trusts an identifier it did not re-check against this run's matter
+    (the same posture as every other matter-scoped read here).
     """
     return (
         await db.execute(
-            select(IntakeThread)
-            .where(IntakeThread.project_id == project_id)
-            .order_by(IntakeThread.created_at.asc(), IntakeThread.id.asc())
-            .limit(1)
+            select(IntakeThread).where(
+                IntakeThread.id == intake_thread_id,
+                IntakeThread.project_id == binding.project_id,
+            )
         )
     ).scalar_one_or_none()
 
@@ -264,6 +386,7 @@ async def _record_intake_outcome(
     db: AsyncSession,
     binding: MatterBinding,
     *,
+    intake_thread_id: uuid.UUID,
     outcome: str,
     label: str,
     note: str,
@@ -278,7 +401,7 @@ async def _record_intake_outcome(
     except ValidationError as exc:
         return _rejection_text(exc, tool="record_intake_outcome")
 
-    thread = await _load_thread_for_project(db, binding.project_id)
+    thread = await _load_bound_thread(db, binding, intake_thread_id)
     if thread is None:
         # Not an intake run after all (or the thread was deleted underneath us).
         return (
@@ -356,6 +479,7 @@ async def _draft_email_reply(
     binding: MatterBinding,
     *,
     run_id: uuid.UUID,
+    intake_thread_id: uuid.UUID,
     to: list[str],
     subject: str,
     body: str,
@@ -411,7 +535,7 @@ async def _draft_email_reply(
             "what the lawyer should attach if a document has to travel with the reply."
         )
 
-    thread = await _load_thread_for_project(db, binding.project_id)
+    thread = await _load_bound_thread(db, binding, intake_thread_id)
     if thread is None:
         return (
             "This matter is not an intake thread, so there is no email to reply to. "
@@ -633,7 +757,10 @@ async def safe_fail_intake_thread(
             # S5: only the thread's OWN intake run may park it — a lawyer's cockpit
             # run on the same matter must never flip a thread that is still processing.
             thread = await load_intake_thread_for_run(
-                db, project_id=run.project_id, agent_thread_id=run.thread_id
+                db,
+                project_id=run.project_id,
+                agent_thread_id=run.thread_id,
+                run_id=run_id,
             )
             if thread is None or thread.status != "processing":
                 return False
@@ -665,7 +792,7 @@ async def requeue_pending_intake_message(
     *,
     enqueue: Callable[[uuid.UUID, str], Awaitable[bool]] | None = None,
 ) -> bool:
-    """B3 — hand the thread's NEXT unprocessed message back to the queue.
+    """B3 — hand the CONVERSATION's next unprocessed message back to the queue.
 
     A follow-up that landed while a run was in flight is deliberately left unclaimed
     by :func:`app.workers.intake_worker.process_intake_thread` (it returns
@@ -677,7 +804,7 @@ async def requeue_pending_intake_message(
     exit re-enqueues here.
 
     Called once per settled run, right after the safe-fail hook; a no-op for every
-    non-intake run and for a thread with nothing pending. Never raises — it must not
+    non-intake run and for a conversation with nothing pending on any of its threads. Never raises — it must not
     mask the run's own outcome.
     """
     if enqueue is None:
@@ -694,16 +821,21 @@ async def requeue_pending_intake_message(
             run = await db.get(AgentRun, run_id)
             if run is None or run.project_id is None or run.status == "running":
                 return False
-            thread = await load_intake_thread_for_run(
+            # ADR-F088: EVERY intake thread on this conversation, not just the one
+            # this run worked. A mail that arrives mid-run is attached by the layer-2/3
+            # resolver as a SIBLING thread and deferred there; settling this run is the
+            # moment the whole conversation is free, so the oldest pending inbound
+            # ACROSS the siblings is the one to hand back.
+            threads = await load_conversation_intake_threads(
                 db, project_id=run.project_id, agent_thread_id=run.thread_id
             )
-            if thread is None:
+            if not threads:
                 return False
             pending = (
                 await db.execute(
                     select(IntakeMessage)
                     .where(
-                        IntakeMessage.thread_id == thread.id,
+                        IntakeMessage.thread_id.in_([t.id for t in threads]),
                         IntakeMessage.direction == "in",
                         IntakeMessage.run_id.is_(None),
                     )
@@ -713,7 +845,7 @@ async def requeue_pending_intake_message(
             ).scalar_one_or_none()
             if pending is None:
                 return False
-            thread_id, provider_message_id = thread.id, pending.provider_message_id
+            thread_id, provider_message_id = pending.thread_id, pending.provider_message_id
         queued = await enqueue(thread_id, provider_message_id)
         logger.info(
             "intake thread has a deferred message; re-enqueued after the run settled",
@@ -749,6 +881,7 @@ __all__ = [
     "INTAKE_TOOL_NAMES",
     "NO_OUTCOME_NOTE",
     "build_intake_tools",
+    "load_conversation_intake_threads",
     "load_intake_thread_for_run",
     "requeue_pending_intake_message",
     "safe_fail_intake_thread",

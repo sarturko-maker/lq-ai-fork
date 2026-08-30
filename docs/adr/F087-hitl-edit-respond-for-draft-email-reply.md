@@ -169,6 +169,43 @@ is PROVEN (findings.md, external send 2026-08-30). The residual gap: a third par
 receives a *forward* of our reply gets neither stamp. That is layer 3's job and layer 3
 needs the tag in the subject — reopen it if AgentMail adds `subject` to `reply()`.
 
+### One conversation, many intake threads — binding a run to its thread
+
+Found by the first live approval on dev (run `9e9ed16d` → resume `997bd4a5`), which died
+with `MultipleResultsFound` before anything was sent. INTAKE-4a's own design is the cause:
+the layer-2/3 resolver attaches a reply or a tagged mail arriving on a *fresh provider
+thread* as a NEW `intake_threads` row on the same matter, carrying the SAME
+`agent_thread_id` so the agent conversation continues. The matter in question had three
+(one `awaiting_human`, two still `received`). Every helper keyed on "the thread whose
+`agent_thread_id` is this run's conversation" — a `scalar_one_or_none()` that had silently
+become a multi-row query, in the tool-grant path, in `safe_fail_intake_thread` and in
+`requeue_pending_intake_message` alike.
+
+`LIMIT 1` is not the fix: it turns a crash into a coin flip about which counterparty
+thread a reply is sent on. The run is bound to ONE thread explicitly, resolved once at the
+composition root and handed to the tools as an id (they may not re-derive it), by:
+
+1. **this run's own work** — the worker stamps `intake_messages.run_id` when it starts a
+   run for a message, so that message names the thread;
+2. **the conversation's lineage** — a resume is a new `agent_runs` row with no messages of
+   its own, so fall back to the newest inbound processed by ANY run on the same agent
+   conversation, which is exactly what the paused run was working on;
+3. **the single working thread** — with nothing processed yet, the one thread not still
+   `received`.
+
+Anything still ambiguous is a bug, not a state to guess through: it logs an ERROR with
+counts and ids and returns `None`, which fails CLOSED (no intake tools, no doctrine, no
+thread flipped). No new column and no migration: the binding already exists in
+`intake_messages.run_id`; it simply was not being read.
+
+Two consequences follow from the same fact. `requeue_pending_intake_message` now hands back
+the oldest pending inbound **across every thread on the conversation** — a mail that lands
+mid-run is attached to a *sibling* thread and deferred there, and settling the in-flight
+run is the moment the whole conversation is free, so a per-thread requeue would strand it
+exactly as B3 described. And `safe_fail_intake_thread` parks only the bound thread: the
+pending siblings have not been looked at by anyone, and marking them "waiting for you"
+would invent a decision nobody was asked for.
+
 ## Consequences
 
 - The lawyer's edit is what is sent, and the row, the audit trail and the mailbox agree.

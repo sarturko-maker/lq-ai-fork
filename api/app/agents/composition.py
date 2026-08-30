@@ -759,6 +759,11 @@ async def compose_and_execute_run(
         # policy onto it. The intake run is the one whose conversation IS the thread's
         # ``agent_thread_id`` — so the gate is provenance AND identity.
         is_intake_run = False
+        # INTAKE-4b (ADR-F087/F088): the ONE intake thread this run is working on,
+        # resolved in the project block below. None for every non-intake run — and
+        # also when the binding is genuinely ambiguous, which fails CLOSED (no intake
+        # tools, no doctrine) rather than guessing a thread.
+        intake_thread_id: uuid.UUID | None = None
         is_follow_up = False
         async with session_factory() as db:
             run = await db.get(AgentRun, run_id)
@@ -802,12 +807,18 @@ async def compose_and_execute_run(
                 ).scalar_one_or_none()
                 if project is not None:
                     if project.intake_state is not None:
-                        is_intake_run = (
-                            await load_intake_thread_for_run(
-                                db, project_id=project.id, agent_thread_id=thread_id
-                            )
-                            is not None
+                        # INTAKE-4b: resolve the run's intake thread ONCE, here, and
+                        # hand the id to the tools. A conversation can carry several
+                        # intake threads (ADR-F088 layer 2/3), so "the thread" is a
+                        # binding decision, not something a tool may re-derive.
+                        intake_thread = await load_intake_thread_for_run(
+                            db,
+                            project_id=project.id,
+                            agent_thread_id=thread_id,
+                            run_id=run_id,
                         )
+                        intake_thread_id = intake_thread.id if intake_thread else None
+                        is_intake_run = intake_thread_id is not None
                     binding = MatterBinding(
                         project_id=project.id,
                         user_id=run.user_id,
@@ -1164,7 +1175,7 @@ async def compose_and_execute_run(
             # "structural grant, not area data" precedent as the matter-memory tools
             # above. An ordinary cockpit chat on the same matter gets NEITHER these
             # tools nor the doctrine (S2). Grant set disjoint from every other grant.
-            if is_intake_run:
+            if is_intake_run and intake_thread_id is not None:
                 # INTAKE-4b (ADR-F087): the mail-bridge send seam is built HERE (the
                 # composition root) and injected — never reached for inside the tool.
                 # None when the deployment configured no bridge: the tool then keeps
@@ -1173,6 +1184,7 @@ async def compose_and_execute_run(
                     session_factory,
                     run_id=run_id,
                     binding=binding,
+                    intake_thread_id=intake_thread_id,
                     bridge=mail_bridge_client_provider(),
                 )
         # SETUP-4a (ADR-F062, supersedes ADR-F054 D1): the area's domain tool GROUPS are
