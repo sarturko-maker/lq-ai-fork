@@ -27,16 +27,22 @@
 	import StatusDot from '$lib/lq-ai/components/primitives/StatusDot.svelte';
 	import { timeAgo } from '$lib/lq-ai/cockpit/helpers';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
-	import { getIntakeThread, type IntakeThreadDetail } from '$lib/lq-ai/api/intakeThreads';
+	import {
+		getIntakeThread,
+		summariseIntakeThread,
+		type IntakeThreadDetail
+	} from '$lib/lq-ai/api/intakeThreads';
 	import {
 		attentionChip,
-		authLabel,
+		canSummarise,
 		chainSummaryLine,
 		matterHref,
-		matterRef,
+		matterLabel,
 		messageSender,
-		outcomeLabel,
-		summaryState
+		noteNeedsClamp,
+		receiptChips,
+		summaryState,
+		waitingLine
 	} from './intake-panel-helpers';
 
 	let {
@@ -55,6 +61,13 @@
 	let data = $state<IntakeThreadDetail | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	// "What the agent did": the note is clamped to three lines unless the reader asks
+	// for the rest (INTAKE-5a.1 — the card was a wall of text in UAT).
+	let noteExpanded = $state(false);
+	// "Summarise now" (INTAKE-5a.1): queue the read-only backfill pass for a settled
+	// thread the agent never wrote an account of.
+	let summarising = $state(false);
+	let summariseNote = $state<string | null>(null);
 
 	let loadGeneration = 0;
 	let destroyed = false;
@@ -91,16 +104,39 @@
 		if (threadId === lastThreadId) return;
 		lastThreadId = threadId;
 		data = null;
+		noteExpanded = false;
+		summariseNote = null;
 		void load(threadId);
 	});
 
 	const thread = $derived(data?.thread ?? null);
 	const messages = $derived(data?.messages ?? []);
 	const chip = $derived(thread ? attentionChip(thread) : null);
+	const chips = $derived(thread ? receiptChips(thread) : []);
+	const waiting = $derived(thread ? waitingLine(thread) : null);
+	const clampNote = $derived(thread ? noteNeedsClamp(thread.outcome_note) : false);
+	const summariseOffered = $derived(thread ? canSummarise(thread) : false);
 	const summary = $derived(thread ? summaryState(thread) : 'none');
 	const chainOpen = $derived(summary === 'none');
 	const canOpenConversation = $derived(Boolean(thread?.agent_thread_id));
 	const openLabel = $derived(thread?.live_ask ? 'Open conversation · decide' : 'Open conversation');
+
+	async function summariseNow() {
+		if (!thread || summarising) return;
+		summarising = true;
+		summariseNote = null;
+		try {
+			await summariseIntakeThread(thread.id);
+			// The pass runs on the worker; the summary appears on the next load.
+			summariseNote = 'Asked the agent for a summary — it will appear here shortly.';
+		} catch (e) {
+			// The server names every refusal (thread_busy, matter_closed, …); show its
+			// words rather than inventing a reason.
+			summariseNote = e instanceof LQAIApiError ? e.message : 'Could not ask for a summary.';
+		} finally {
+			summarising = false;
+		}
+	}
 
 	function openConversation() {
 		if (!thread?.agent_thread_id) return;
@@ -143,6 +179,12 @@
 				</h1>
 				<StatusDot status={chip.dot} label={chip.label} class="shrink-0 whitespace-nowrap" />
 			</div>
+
+			{#if waiting}
+				<!-- INTAKE-5a.1: one conversation, one run at a time — this thread is not
+				     being read, it is queued behind a decision only the lawyer can make. -->
+				<p class="text-muted-foreground text-sm" data-testid="lq-intake-waiting">{waiting}</p>
+			{/if}
 
 			{#if thread.auth_state === 'fail'}
 				<!-- Spoof signal, raised BEFORE the human acts on the email. -->
@@ -266,43 +308,51 @@
 					<p class="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
 						What the agent did
 					</p>
-					<dl class="space-y-2.5 text-xs">
+
+					<!-- Outcome, sender check and the agent's label as chips — the list's own
+					     chip shape and tones (INTAKE-5a.1), so no new colour enters here. -->
+					<div class="flex flex-wrap gap-x-3 gap-y-1.5" data-testid="lq-intake-chips">
+						{#each chips as receipt, i (i)}
+							<StatusDot status={receipt.dot} label={receipt.label} class="whitespace-nowrap" />
+						{/each}
+					</div>
+
+					{#if thread.outcome_note}
 						<div>
-							<dt class="text-muted-foreground">Matter</dt>
-							<dd class="mt-0.5 font-mono break-all">
-								{#if matterHref(thread)}
-									<a class="text-brand hover:underline" href={matterHref(thread)}
-										>{matterRef(thread)}</a
-									>
-								{:else}
-									<span class="text-muted-foreground">{matterRef(thread)}</span>
-								{/if}
-							</dd>
-						</div>
-						<div>
-							<dt class="text-muted-foreground">Outcome</dt>
-							<dd class="text-foreground mt-0.5">{outcomeLabel(thread.outcome)}</dd>
-							{#if thread.outcome_note}
-								<dd class="text-muted-foreground mt-0.5 leading-relaxed">{thread.outcome_note}</dd>
+							<p
+								class="text-muted-foreground text-xs leading-relaxed {!noteExpanded && clampNote
+									? 'line-clamp-3'
+									: ''}"
+								data-testid="lq-intake-note"
+							>
+								{thread.outcome_note}
+							</p>
+							{#if clampNote}
+								<button
+									type="button"
+									class="text-brand mt-1 text-xs hover:underline"
+									onclick={() => (noteExpanded = !noteExpanded)}
+									data-testid="lq-intake-note-toggle"
+								>
+									{noteExpanded ? 'Show less' : 'Show more'}
+								</button>
 							{/if}
 						</div>
-						{#if thread.label}
-							<div>
-								<dt class="text-muted-foreground">Label</dt>
-								<dd class="text-foreground mt-0.5 break-words">{thread.label}</dd>
-							</div>
-						{/if}
-						<div>
-							<dt class="text-muted-foreground">Sender check</dt>
-							<dd
-								class="mt-0.5 {thread.auth_state === 'fail'
-									? 'text-destructive'
-									: 'text-foreground'}"
-							>
-								{authLabel(thread.auth_state)}
-							</dd>
-						</div>
-					</dl>
+					{/if}
+
+					<div class="text-xs">
+						<p class="text-muted-foreground">Matter</p>
+						<p class="mt-0.5 break-words">
+							{#if matterHref(thread)}
+								<a class="text-brand hover:underline" href={matterHref(thread)}
+									>{matterLabel(thread)}</a
+								>
+							{:else}
+								<span class="text-muted-foreground">{matterLabel(thread)}</span>
+							{/if}
+						</p>
+					</div>
+
 					<Button
 						class="w-full"
 						disabled={!canOpenConversation}
@@ -314,6 +364,27 @@
 					>
 						{openLabel}
 					</Button>
+
+					{#if summariseOffered}
+						<!-- The backfill: a settled thread the agent never wrote an account of
+						     (it was concluded before summaries existed, or its run did not
+						     finish). One read-only pass, no reply tool, nothing moved. -->
+						<Button
+							variant="outline"
+							size="sm"
+							class="w-full"
+							disabled={summarising}
+							onclick={summariseNow}
+							data-testid="lq-intake-summarise"
+						>
+							{summarising ? 'Asking…' : 'Summarise now'}
+						</Button>
+					{/if}
+					{#if summariseNote}
+						<p class="text-muted-foreground text-xs" data-testid="lq-intake-summarise-note">
+							{summariseNote}
+						</p>
+					{/if}
 				</aside>
 			</div>
 		{/if}
