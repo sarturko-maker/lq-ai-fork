@@ -900,6 +900,11 @@ synthetic pack behind a CLI; ADR-F001 forecloses "under the LegalQuants banner")
 
 ## Backlog
 
+- **Cross-area matters (future milestone):** a Commercial matter needs Privacy advice → pull in
+  the Privacy agent (subagent inside the run vs handover with cross-area memory visibility, who
+  approves). Keep-possible now: matter reference `ORG-AREA-NNNN` names the HOME area only;
+  helper areas = future `matter_areas` relation (INTAKE-4 plan § rulings).
+
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
 - **PIN-ATTRIBUTION fix (memory-video prep, 2026-08-25):** the Memory tab's Activity feed labels a
