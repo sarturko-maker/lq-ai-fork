@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -27,6 +27,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.intake_tools import requeue_pending_intake_message
+from app.agents.run_service import is_conversation_in_flight, newest_live_run
 from app.config import get_settings
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
@@ -517,3 +518,156 @@ async def test_deferred_message_is_picked_up_after_the_run_settles(
         run_b = await db.get(AgentRun, uuid.UUID(second["run_id"]))
         assert run_a is not None and run_b is not None
         assert run_a.thread_id == run_b.thread_id
+
+
+# --------------------------------------------------------------------------- #
+# In-flight = the conversation's NEWEST live run (ADR-F087, INTAKE-4b live test)
+# --------------------------------------------------------------------------- #
+
+
+async def _add_run(
+    factory: async_sessionmaker[AsyncSession],
+    row: Seeded,
+    agent_thread_id: uuid.UUID,
+    *,
+    status: str,
+) -> uuid.UUID:
+    """One more run on an EXISTING conversation, newer than the ones before it."""
+    async with factory() as db:
+        run = AgentRun(
+            user_id=row.user_id,
+            thread_id=agent_thread_id,
+            project_id=row.project_id,
+            status=status,
+            prompt=f"[resume: {status}]",
+            max_steps=8,
+            started_at=datetime.now(tz=UTC) + timedelta(seconds=5),
+        )
+        db.add(run)
+        await db.commit()
+        return run.id
+
+
+async def _pause_and_add_follow_up(
+    factory: async_sessionmaker[AsyncSession], row: Seeded, run_id: uuid.UUID
+) -> uuid.UUID:
+    """Park the run at ``awaiting_input`` (a HITL pause — the row is never mutated
+    again) and drop an unclaimed follow-up on the thread. Returns the conversation."""
+    async with factory() as db:
+        run = await db.get(AgentRun, run_id)
+        assert run is not None
+        run.status = "awaiting_input"
+        agent_thread_id = run.thread_id
+        db.add(
+            IntakeMessage(
+                thread_id=row.thread_id,
+                provider_message_id=f"msg-{uuid.uuid4().hex[:8]}",
+                direction="in",
+                from_addr="counterparty@example.net",
+                to_addrs=["legal-intake@example.com"],
+                body_text="One more thing, while you were waiting for the lawyer.",
+            )
+        )
+        await db.commit()
+        return agent_thread_id
+
+
+@pytest.mark.integration
+async def test_a_paused_run_alone_still_holds_the_conversation(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
+) -> None:
+    """The lawyer owns the next move: nothing may start beside a live ask."""
+    first = await process_intake_thread(
+        commit_factory, get_settings(), seeded.thread_id, enqueue=_ok
+    )
+    await _pause_and_add_follow_up(commit_factory, seeded, uuid.UUID(first["run_id"]))
+
+    out = await process_intake_thread(commit_factory, get_settings(), seeded.thread_id, enqueue=_ok)
+    assert out["status"] == "deferred"
+
+
+@pytest.mark.integration
+async def test_a_completed_resume_frees_the_conversation_the_pause_never_will(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
+) -> None:
+    """THE live bug (ADR-F087). HITL-2 never mutates the paused row, so it sits at
+    ``awaiting_input`` forever — and the old "does ANY run sit at running/
+    awaiting_input" check therefore deferred every sibling FOREVER, even after the
+    resume run had done the work and completed. The rule is the NEWEST live run."""
+    first = await process_intake_thread(
+        commit_factory, get_settings(), seeded.thread_id, enqueue=_ok
+    )
+    agent_thread_id = await _pause_and_add_follow_up(
+        commit_factory, seeded, uuid.UUID(first["run_id"])
+    )
+    await _add_run(commit_factory, seeded, agent_thread_id, status="completed")
+
+    out = await process_intake_thread(commit_factory, get_settings(), seeded.thread_id, enqueue=_ok)
+    assert out["status"] == "started"
+    assert out["run_id"] != first["run_id"]
+    async with commit_factory() as db:
+        started = await db.get(AgentRun, uuid.UUID(out["run_id"]))
+        assert started is not None
+        # Same conversation — the paused run's ask is history, not a fork.
+        assert started.thread_id == agent_thread_id
+
+
+@pytest.mark.integration
+async def test_a_failed_resume_leaves_the_ask_live_and_the_conversation_busy(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
+) -> None:
+    """A resume that died BEFORE driving the graph (enqueue failure, worker restart)
+    never consumed the interrupt: the ask is still answerable, so the conversation is
+    still busy. `failed`/`cancelled` are excluded from "newest live run" for exactly
+    this reason — the same rule the resume endpoint's stale guard applies."""
+    first = await process_intake_thread(
+        commit_factory, get_settings(), seeded.thread_id, enqueue=_ok
+    )
+    agent_thread_id = await _pause_and_add_follow_up(
+        commit_factory, seeded, uuid.UUID(first["run_id"])
+    )
+    for dead in ("failed", "cancelled"):
+        await _add_run(commit_factory, seeded, agent_thread_id, status=dead)
+        out = await process_intake_thread(
+            commit_factory, get_settings(), seeded.thread_id, enqueue=_ok
+        )
+        assert out["status"] == "deferred", dead
+
+
+@pytest.mark.integration
+async def test_newest_live_run_is_one_rule_for_both_call_sites(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
+) -> None:
+    """The unit behind both the worker's deferral and the resume endpoint's
+    stale-resume guard. Two copies of this rule drifted once and starved a mailbox;
+    pin the shared one."""
+    first = await process_intake_thread(
+        commit_factory, get_settings(), seeded.thread_id, enqueue=_ok
+    )
+    paused_id = uuid.UUID(first["run_id"])
+    agent_thread_id = await _pause_and_add_follow_up(commit_factory, seeded, paused_id)
+
+    async with commit_factory() as db:
+        newest = await newest_live_run(db, agent_thread_id)
+        assert newest is not None
+        assert (newest.id, newest.status) == (paused_id, "awaiting_input")
+        assert await is_conversation_in_flight(db, agent_thread_id) is True
+
+    # A failed successor does not supersede the pause (it never consumed it).
+    await _add_run(commit_factory, seeded, agent_thread_id, status="failed")
+    async with commit_factory() as db:
+        newest = await newest_live_run(db, agent_thread_id)
+        assert newest is not None and newest.id == paused_id
+        assert await is_conversation_in_flight(db, agent_thread_id) is True
+
+    # A completed one does: the ask is resolved and the conversation is free.
+    completed_id = await _add_run(commit_factory, seeded, agent_thread_id, status="completed")
+    async with commit_factory() as db:
+        newest = await newest_live_run(db, agent_thread_id)
+        assert newest is not None and newest.id == completed_id
+        assert await is_conversation_in_flight(db, agent_thread_id) is False
+
+    # An unknown conversation is neither live nor in flight.
+    async with commit_factory() as db:
+        assert await newest_live_run(db, uuid.uuid4()) is None
+        assert await is_conversation_in_flight(db, uuid.uuid4()) is False

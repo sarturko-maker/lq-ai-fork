@@ -52,10 +52,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.intake_prompt import IntakeEmailView, build_intake_prompt
-from app.agents.run_service import AgentThreadBusy, start_agent_run
+from app.agents.run_service import (
+    AgentThreadBusy,
+    is_conversation_in_flight,
+    start_agent_run,
+)
 from app.config import Settings, get_settings
 from app.db.session import get_session_factory
-from app.models.agent_run import AgentRun
 from app.models.intake import IntakeMailbox, IntakeMessage, IntakeThread
 from app.models.project import Project
 from app.schemas.agent_runs import AgentRunStatus, BudgetProfile
@@ -79,11 +82,6 @@ DEFAULT_INTAKE_MAX_STEPS = 40
 # The conversation's display title. FIXED and fork-authored: an email subject is
 # untrusted sender text and must never land in a display/title field (ADR-F086).
 INTAKE_THREAD_TITLE = "Legal intake — email thread"
-
-# A run is "in flight" on the thread's conversation at either of these statuses:
-# ``running`` (executing) or ``awaiting_input`` (paused on a HITL approval — the
-# lawyer owns the next move; a second run would fork the conversation).
-_IN_FLIGHT_RUN_STATUSES = (AgentRunStatus.running.value, AgentRunStatus.awaiting_input.value)
 
 # Fork-authored, fixed (never model text): a follow-up landed on a thread whose
 # matter was already closed, so there is nothing to run against.
@@ -165,23 +163,14 @@ async def process_intake_thread(
         # An in-flight run on this conversation means the previous message is still
         # being worked (or is paused on the lawyer's approval). Leave THIS message
         # unclaimed — the next enqueue picks it up — rather than forking the thread.
-        if thread.agent_thread_id is not None:
-            in_flight = (
-                await db.execute(
-                    select(AgentRun.id)
-                    .where(
-                        AgentRun.thread_id == thread.agent_thread_id,
-                        AgentRun.status.in_(_IN_FLIGHT_RUN_STATUSES),
-                    )
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if in_flight is not None:
-                log.info(
-                    "intake_email_job: a run is already in flight on this thread; deferring",
-                    extra={"event": "intake_job_deferred", "thread_id": str(thread_id)},
-                )
-                return {"status": "deferred", "thread_id": str(thread_id)}
+        if thread.agent_thread_id is not None and await is_conversation_in_flight(
+            db, thread.agent_thread_id
+        ):
+            log.info(
+                "intake_email_job: a run is already in flight on this thread; deferring",
+                extra={"event": "intake_job_deferred", "thread_id": str(thread_id)},
+            )
+            return {"status": "deferred", "thread_id": str(thread_id)}
 
         # The matter may already be CLOSED (a 'dealt_with' outcome archives it, and
         # archiving is the memory fence). Composition refuses to bind an archived

@@ -206,6 +206,29 @@ exactly as B3 described. And `safe_fail_intake_thread` parks only the bound thre
 pending siblings have not been looked at by anyone, and marking them "waiting for you"
 would invent a decision nobody was asked for.
 
+### "In flight" is the newest live run, not any live run
+
+The second live finding, after the send itself worked end to end: the requeue hook fired
+for the sibling thread and the worker deferred it *again*, permanently. HITL-2 never
+mutates a paused row — "superseded" is derived, not written — so run `9e9ed16d` sits at
+`awaiting_input` for the life of the conversation. The intake worker asked "does ANY run
+here sit at `running`/`awaiting_input`?", which from that moment on is always yes: every
+sibling thread starved, however long ago the resume actually completed the work.
+
+The resume endpoint had already needed the right rule and hand-rolled it inline (its
+stale-resume guard: the newest run excluding `failed`/`cancelled`, by `started_at desc,
+id desc`). Two copies of one rule, and the copy that drifted is the one that starved a
+mailbox — so the rule now lives once, in `run_service.newest_live_run` /
+`is_conversation_in_flight`, and both call sites use it:
+
+* **the conversation is in flight** iff its newest live run is `running` or
+  `awaiting_input`;
+* **a pause is still the live ask** iff the newest live run *is* that paused run.
+
+`failed`/`cancelled` stay excluded in both directions, for the same reason in both: a
+resume that died before driving the graph never consumed the interrupt, so the ask is
+still answerable and the conversation is still busy.
+
 ## Consequences
 
 - The lawyer's edit is what is sent, and the row, the audit trail and the mailbox agree.

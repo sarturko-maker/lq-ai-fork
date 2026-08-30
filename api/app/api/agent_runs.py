@@ -69,7 +69,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import get_agent_checkpointer, has_checkpoint
 from app.agents.hitl import decisions_allowed_for_step
-from app.agents.run_service import AgentThreadBusy, start_agent_run
+from app.agents.run_service import AgentThreadBusy, newest_live_run, start_agent_run
 from app.agents.stream import (
     CHANNEL_CLOSED,
     SSE_DONE,
@@ -1064,20 +1064,12 @@ async def resume_agent_run(
     # `_pending_interrupts` is the authoritative double-execution guard — a resume
     # after the interrupt WAS consumed settles `failed` ("no pending interrupt"),
     # never double-runs the tool.
-    latest_live_run_id = (
-        await db.execute(
-            select(AgentRun.id)
-            .where(
-                AgentRun.thread_id == run.thread_id,
-                AgentRun.status.not_in(
-                    [AgentRunStatus.failed.value, AgentRunStatus.cancelled.value]
-                ),
-            )
-            .order_by(AgentRun.started_at.desc(), AgentRun.id.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if latest_live_run_id != run.id:
+    #
+    # INTAKE-4b: "the conversation's newest live run" is `run_service.newest_live_run`,
+    # shared with the intake worker's in-flight check. A second, hand-rolled copy of
+    # this rule drifted there and starved a mailbox (ADR-F087) — one definition now.
+    latest_live = await newest_live_run(db, run.thread_id)
+    if latest_live is None or latest_live.id != run.id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="run_superseded")
 
     # Matter-archived honesty guard (mirrors create_agent_run): if the paused
