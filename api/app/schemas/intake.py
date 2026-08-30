@@ -95,9 +95,31 @@ def _reject_nul_bytes(value: str) -> str:
     return value
 
 
+def _reject_control_chars(value: str) -> str:
+    """Reject (never strip) ANY control character — INTAKE-5a, ADR-F086.
+
+    Stricter than :func:`_reject_nul_bytes`, and deliberately so: this guards the
+    agent-written ``intake_threads.summary`` bullets, which are model text ABOUT
+    untrusted mail rendered straight into the lawyer's Inbox. A summary bullet is
+    one short plain-text line, so a newline, a tab, an ANSI escape, a bidi
+    override or a line/paragraph separator is never legitimate content — it is
+    someone trying to make the rendered list read as something it is not. C0
+    (``\x00``-``\x1f``), DEL, C1 (``\x80``-``\x9f``) and U+2028/U+2029 are all
+    refused; the model is told which character class it must fix and retries.
+    """
+
+    for ch in value:
+        code = ord(ch)
+        if code < 0x20 or code == 0x7F or 0x80 <= code <= 0x9F or code in (0x2028, 0x2029):
+            raise ValueError("must not contain control characters or line breaks")
+    return value
+
+
 # A free-text field that must never carry an embedded NUL byte. Stacks with
 # whatever length/emptiness Field(...) constraints the field itself adds.
 _NulFreeStr = Annotated[str, AfterValidator(_reject_nul_bytes)]
+# A single line of plain text — no NULs, no control characters at all.
+_PlainLineStr = Annotated[str, AfterValidator(_reject_control_chars)]
 _NulFreeAddr = Annotated[
     str, StringConstraints(max_length=_ADDR_MAX_CHARS), AfterValidator(_reject_nul_bytes)
 ]
@@ -277,14 +299,41 @@ DRAFT_REPLY_BODY_MAX_CHARS = 50_000
 DRAFT_REPLY_MAX_RECIPIENTS = 20
 DRAFT_REPLY_MAX_ATTACHMENTS = 10
 
+# INTAKE-5a (ADR-F086, plan ruling 7): the thread summary's shape. Small on
+# purpose — the point of the Inbox is that a fresh reader takes in the whole
+# thread at a glance, so five short bullets is the budget, not a target.
+INTAKE_SUMMARY_MAX_ITEMS = 5
+INTAKE_SUMMARY_TITLE_MAX_CHARS = 40
+INTAKE_SUMMARY_TEXT_MAX_CHARS = 300
+
+
+class IntakeSummaryItem(BaseModel):
+    """One bullet of the agent's account of an intake thread (ADR-F086, ruling 7).
+
+    ``title`` is the two-or-three-word lead the UI renders in bold ("What they
+    want", "Where it stands"); ``text`` is the sentence under it. Both are plain
+    single-line text: control characters and line breaks are REJECTED, not
+    stripped, because these strings are model output about untrusted mail and the
+    UI renders them as text (never HTML) in a tight list where an injected newline
+    would forge a bullet the agent did not write.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    title: _PlainLineStr = Field(min_length=1, max_length=INTAKE_SUMMARY_TITLE_MAX_CHARS)
+    text: _PlainLineStr = Field(min_length=1, max_length=INTAKE_SUMMARY_TEXT_MAX_CHARS)
+
 
 class RecordIntakeOutcomeInput(BaseModel):
     """Validate one ``record_intake_outcome`` call — the run's structural conclusion.
 
     ``label`` is a short free-form tag of the agent's own choosing (Ruling 5: no fixed
     taxonomy — nothing branches on it); ``note`` is the one-glance explanation the
-    lawyer reads in the intake list. Both are model text: bounded here, stored on the
-    thread, and never written into an audit row or a log line.
+    lawyer reads in the intake list. ``summary`` (INTAKE-5a, ruling 7) is the agent's
+    ≤5-bullet account of the THREAD SO FAR, required on every call and written in
+    full each time — it is what the Inbox opens on instead of the email chain. All
+    three are model text: bounded here, stored on the thread, and never written into
+    an audit row or a log line.
     """
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -292,6 +341,7 @@ class RecordIntakeOutcomeInput(BaseModel):
     outcome: IntakeOutcome
     label: _NulFreeStr = Field(min_length=1, max_length=INTAKE_LABEL_MAX_CHARS)
     note: _NulFreeStr = Field(min_length=1, max_length=INTAKE_NOTE_MAX_CHARS)
+    summary: list[IntakeSummaryItem] = Field(min_length=1, max_length=INTAKE_SUMMARY_MAX_ITEMS)
 
 
 class DraftEmailReplyInput(BaseModel):
@@ -317,3 +367,139 @@ class DraftEmailReplyInput(BaseModel):
     attachment_file_ids: list[uuid.UUID] = Field(
         default_factory=list, max_length=DRAFT_REPLY_MAX_ATTACHMENTS
     )
+
+
+# ---------------------------------------------------------------------------
+# INTAKE-5a (ADR-F086) — the lawyer's Inbox read model.
+#
+# Response shapes for ``GET /intake/threads`` and ``GET /intake/threads/{id}``.
+# These DO carry email content (subject, addresses, bodies) — plan ruling 9: it is
+# the owner's own post, shown to the owner behind the owner fence. What they never
+# do is reach a log line or an audit row, and every string here is rendered as
+# text, never HTML.
+# ---------------------------------------------------------------------------
+
+#: Page-size bounds for the thread list (bounded like every other list here).
+INTAKE_THREAD_LIST_LIMIT_DEFAULT = 50
+INTAKE_THREAD_LIST_LIMIT_MAX = 100
+#: Hard ceiling on the messages returned with one thread. A thread is one email
+#: conversation, so this is generous; a chain longer than this is truncated to its
+#: OLDEST ``INTAKE_THREAD_MESSAGE_MAX`` messages plus nothing — ``messages_truncated``
+#: tells the reader the tail is missing rather than silently showing a partial chain.
+INTAKE_THREAD_MESSAGE_MAX = 200
+
+
+class IntakeThreadProjectRead(BaseModel):
+    """The matter an intake thread landed in (ADR-F086 Amendment A1: always one).
+
+    ``None`` on the parent field only when the project row was hard-deleted
+    (``project_id`` is ``SET NULL``); such a thread is visible to the MAILBOX
+    owner alone.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: uuid.UUID
+    name: str
+    reference: str | None = None
+    archived: bool = False
+
+
+class IntakeLiveAskRead(BaseModel):
+    """The conversation's live HITL ask, when there is one (plan ruling 2).
+
+    Derived from :func:`app.agents.run_service.newest_live_run` — the ONE definition
+    of "what is happening on this conversation right now" — plus the paused run's
+    settled ``hitl_request`` step. The Inbox renders no approval card of its own: it
+    shows "needs your decision" and deep-links into the conversation where
+    ``HitlConfirmCard`` already works. ``allowed_decisions`` is the same gate the
+    resume endpoint applies, so the two can never offer different verbs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: uuid.UUID
+    tool_names: list[str] = Field(default_factory=list)
+    allowed_decisions: list[str] = Field(default_factory=list)
+
+
+class IntakeThreadRead(BaseModel):
+    """One row of the lawyer's Inbox."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: uuid.UUID
+    mailbox_address: str
+    #: Single-line neutralised (``app.agents.intake_prompt``): a sender-controlled
+    #: subject with embedded line breaks or marker-shaped dash runs renders as one
+    #: ordinary line, here as in the agent's prompt.
+    subject: str
+    status: str
+    outcome: str | None = None
+    label: str | None = None
+    outcome_note: str | None = None
+    auth_state: str
+    claimed_reference: str | None = None
+    summary: list[IntakeSummaryItem] = Field(default_factory=list)
+    #: The agent's last run settled without rewriting the summary — see
+    #: ``app.api.intake_threads`` for the exact definition.
+    summary_stale: bool = False
+    message_count: int
+    last_inbound_at: datetime | None = None
+    project: IntakeThreadProjectRead | None = None
+    agent_thread_id: uuid.UUID | None = None
+    live_ask: IntakeLiveAskRead | None = None
+    #: The error CLASS of the newest outbound message that failed to send
+    #: (``timeout``, ``http_502``, …) — never a provider message, body or address.
+    last_send_error: str | None = None
+    #: Server-computed queue position (plan ruling 3), ascending: 0 = a live ask,
+    #: 1 = a failed send, 2 = waiting for a human, 3 = still working, 4 = replied,
+    #: 5 = handled. ``attention=true`` returns ranks 0, 1 and 2 only. Computed here so the
+    #: UI cannot invent a second, disagreeing order.
+    attention_rank: int
+
+
+class IntakeThreadListResponse(BaseModel):
+    """One page of the Inbox, attention-first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[IntakeThreadRead] = Field(default_factory=list)
+    #: Opaque; pass back as ``cursor``. ``None`` on the last page.
+    next_cursor: str | None = None
+
+
+class IntakeMessageRead(BaseModel):
+    """One email on the thread (plan ruling 9 — shown to the owner, never logged)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: uuid.UUID
+    direction: str
+    from_addr: str | None = None
+    to_addrs: list[str] = Field(default_factory=list)
+    subject: str | None = None
+    #: The message text as received/approved. Rendered as plain text with preserved
+    #: line breaks — no HTML, no markdown, no link activation (plan ruling 9).
+    body_text: str | None = None
+    attachment_filenames: list[str] = Field(default_factory=list)
+    #: Parallel to ``attachment_filenames`` (same length, same order): the ``files``
+    #: row this attachment was ingested into, or ``None`` where it could not be
+    #: resolved. There is no stored message→file link — see
+    #: ``app.api.intake_threads`` for the resolution rule and its limits.
+    file_ids: list[uuid.UUID | None] = Field(default_factory=list)
+    provider_timestamp: datetime | None = None
+    run_id: uuid.UUID | None = None
+    send_error: str | None = None
+
+
+class IntakeThreadDetailResponse(BaseModel):
+    """One thread plus its emails, oldest first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    thread: IntakeThreadRead
+    messages: list[IntakeMessageRead] = Field(default_factory=list)
+    #: True when the chain was longer than ``INTAKE_THREAD_MESSAGE_MAX`` and the
+    #: newest messages were dropped — the reader is told, never silently shortchanged.
+    messages_truncated: bool = False

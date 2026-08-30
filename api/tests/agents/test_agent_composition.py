@@ -2396,6 +2396,15 @@ async def test_intake_matter_grants_the_outcome_tool_end_to_end(
                     "outcome": "needs_human",
                     "label": "NDA review",
                     "note": "Counterparty NDA to review; over to you.",
+                    # INTAKE-5a (ADR-F086 ruling 7): the summary is REQUIRED, so the
+                    # scripted call carries one or the tool rejects it and the thread
+                    # row — the proof this test rests on — never changes.
+                    "summary": [
+                        {
+                            "title": "What they want",
+                            "text": "A review of the attached mutual NDA.",
+                        }
+                    ],
                 },
             ),
             final_message("filed for the lawyer"),
@@ -2418,10 +2427,17 @@ async def test_intake_matter_grants_the_outcome_tool_end_to_end(
         assert thread is not None
         assert thread.outcome == "needs_human"
         assert thread.status == "awaiting_human"
+        # INTAKE-5a (ruling 7): the summary lands with the outcome, stamped with
+        # the run that wrote it.
+        assert thread.summary == [
+            {"title": "What they want", "text": "A review of the attached mutual NDA."}
+        ]
+        assert thread.summary_run_id == run_id
     audited = "\n".join(str(r.details) for r in await _tool_audit_rows(comp_env, run_id))
     assert "record_intake_outcome" in audited
-    # The note is model text — the audit contract keeps it out of the row.
+    # The note and the summary are model text — the audit contract keeps both out.
     assert "over to you" not in audited
+    assert "attached mutual NDA" not in audited
 
 
 async def test_ordinary_matter_never_gets_the_intake_tools(

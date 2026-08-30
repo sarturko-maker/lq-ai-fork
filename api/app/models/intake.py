@@ -20,7 +20,9 @@ milestone (`docs/fork/plans/INTAKE-INBOX-plan.md`):
 
 See migrations ``0098_intake_substrate.py`` (the three tables) and
 ``0099_intake_outcome_and_triage_skill.py`` (INTAKE-3: the thread outcome +
-the inbound message's own content) for the DDL these mirror.
+the inbound message's own content) and ``0102_intake_inbox_surface.py``
+(INTAKE-5a: the thread summary + the two read indexes) for the DDL these
+mirror.
 """
 
 from __future__ import annotations
@@ -218,6 +220,26 @@ class IntakeThread(Base):
     # action ladder at summarize + banners the UI when not 'pass'.
     auth_state: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'unknown'"))
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    # INTAKE-5a (ADR-F086, migration 0102): the agent's account of THE THREAD SO FAR
+    # — a JSON array of at most five ``{"title", "text"}`` objects, rewritten IN FULL
+    # by every ``record_intake_outcome`` call so it always describes the whole chain
+    # rather than the last message. This is what the lawyer's Inbox opens on; the raw
+    # emails stay collapsed behind it (plan ruling 7). Model text about UNTRUSTED
+    # mail: bounded at the Pydantic write boundary
+    # (:class:`app.schemas.intake.IntakeSummaryItem` — ≤5 items, title ≤40 chars,
+    # text ≤300 chars, no control characters), rendered as text and never as HTML,
+    # and never written into a log line or an audit row. NULL until a run concludes.
+    summary: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
+    # The run whose ``record_intake_outcome`` last wrote ``summary``; ``SET NULL`` on
+    # run delete keeps the summary (it outlives the run record, like
+    # ``files.summary_run_id``). Comparing it to the newest SETTLED run that
+    # processed one of this thread's inbound messages is what makes the read API's
+    # ``summary_stale`` flag computable — see ``app.api.intake_threads``.
+    summary_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="SET NULL", name="fk_intake_threads_summary_run_id"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,23 @@ _ALLOWED_DECISIONS = ["approve", "reject"]
 # default, and the resume endpoint refuses an ``edit`` for anything outside this set.
 EDITABLE_TOOL_NAMES = frozenset({"draft_email_reply"})
 _EDITABLE_DECISIONS = ["approve", "edit", "reject"]
+
+
+#: The order the cockpit offers the verbs in. A ``frozenset`` from
+#: :func:`decisions_allowed_for_step` has no order, and a read API that hands the UI
+#: a differently-shuffled list on every request would make the card's buttons move.
+DECISION_ORDER = ("approve", "edit", "reject")
+
+
+def order_decisions(decisions: Iterable[str]) -> list[str]:
+    """Sort decision verbs into :data:`DECISION_ORDER`; unknown verbs sort last, by name."""
+    return sorted(
+        decisions,
+        key=lambda d: (
+            DECISION_ORDER.index(d) if d in DECISION_ORDER else len(DECISION_ORDER),
+            d,
+        ),
+    )
 
 
 def allowed_decisions_for(tool_name: str) -> list[str]:
@@ -195,6 +212,36 @@ def decisions_allowed_for_step(step_name: str | None, summary: str | None) -> fr
         # The step's own `name` column disagrees with its digest — trust neither.
         return conservative
     return frozenset(allowed)
+
+
+def tool_names_for_step(step_name: str | None, summary: str | None) -> list[str]:
+    """Which tools the persisted ``hitl_request`` step is asking about (INTAKE-5a).
+
+    Read-only companion to :func:`decisions_allowed_for_step`, over the same digest
+    (``json.dumps([{"tool", "args", "allowed_decisions"}, …])`` — the runner writes it):
+    the Inbox says "needs your decision on draft_email_reply" without loading the
+    checkpoint. Same defensive posture — a truncated, malformed or pre-F087 digest
+    degrades to the step's own ``name`` column (or an empty list), never raises, and
+    never widens anything: this list is display copy, and the resume endpoint's gate
+    is :func:`decisions_allowed_for_step`, not this.
+
+    Order is the digest's own (the order the model asked), de-duplicated.
+    """
+    names: list[str] = []
+    if summary:
+        try:
+            parsed = json.loads(summary)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list):
+            for entry in parsed:
+                if isinstance(entry, dict) and isinstance(entry.get("tool"), str):
+                    tool = entry["tool"]
+                    if tool not in names:
+                        names.append(tool)
+    if not names and step_name is not None:
+        names = [step_name]
+    return names
 
 
 def stamp_subagent_opt_out(

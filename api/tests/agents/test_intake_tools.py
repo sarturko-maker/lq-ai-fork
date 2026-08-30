@@ -186,6 +186,16 @@ def _binding(row: SeededIntake) -> MatterBinding:
     )
 
 
+# INTAKE-5a (ADR-F086 ruling 7): a valid ``summary`` for the calls that are meant to
+# succeed. Shape-checked by RecordIntakeOutcomeInput, so every write-path test has to
+# carry one — that is the point: the arg is REQUIRED, there is no "outcome without an
+# account of the thread".
+_SUMMARY: list[dict[str, str]] = [
+    {"title": "What they want", "text": "The counterparty asks us to review their mutual NDA."},
+    {"title": "Where it stands", "text": "Read and redlined; waiting on the lawyer."},
+]
+
+
 async def _make_run(
     factory: async_sessionmaker[AsyncSession],
     row: SeededIntake,
@@ -262,14 +272,17 @@ def test_grant_set_disjoint_from_every_other_grant() -> None:
 async def test_dealt_with_files_the_thread_and_closes_the_matter(
     commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
 ) -> None:
+    run_id = await _make_run(commit_factory, seeded)
     async with commit_factory() as db:
         out = await _record_intake_outcome(
             db,
             _binding(seeded),
+            run_id=run_id,
             intake_thread_id=seeded.thread_id,
             outcome="dealt_with",
             label="marketing",
             note="Vendor marketing email; nothing needed.",
+            summary=_SUMMARY,
         )
         await db.commit()
     assert "dealt_with" in out
@@ -289,14 +302,17 @@ async def test_dealt_with_files_the_thread_and_closes_the_matter(
 async def test_needs_human_keeps_the_matter_open(
     commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
 ) -> None:
+    run_id = await _make_run(commit_factory, seeded)
     async with commit_factory() as db:
         await _record_intake_outcome(
             db,
             _binding(seeded),
+            run_id=run_id,
             intake_thread_id=seeded.thread_id,
             outcome="needs_human",
             label="NDA review",
             note="Redline drafted.",
+            summary=_SUMMARY,
         )
         await db.commit()
     async with commit_factory() as db:
@@ -329,14 +345,17 @@ async def test_outcome_never_overwrites_a_settled_send_status(
         thread.status = send_status
         await db.commit()
 
+    run_id = await _make_run(commit_factory, seeded)
     async with commit_factory() as db:
         out = await _record_intake_outcome(
             db,
             _binding(seeded),
+            run_id=run_id,
             intake_thread_id=seeded.thread_id,
             outcome=outcome,
             label="NDA review",
             note="n",
+            summary=_SUMMARY,
         )
         await db.commit()
 
@@ -349,24 +368,55 @@ async def test_outcome_never_overwrites_a_settled_send_status(
         assert thread.label == "NDA review"
 
 
+def _bad(**overrides: object) -> dict[str, object]:
+    """A valid proposal with one field spoiled — one failure per case."""
+    base: dict[str, object] = {
+        "outcome": "dealt_with",
+        "label": "x",
+        "note": "y",
+        "summary": _SUMMARY,
+    }
+    base.update(overrides)
+    return base
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"outcome": "filed", "label": "x", "note": "y"},
-        {"outcome": "candidate_matter", "label": "x", "note": "y"},  # retired (ADR-F086 A1)
-        {"outcome": "dealt_with", "label": "", "note": "y"},
-        {"outcome": "dealt_with", "label": "x", "note": ""},
-        {"outcome": "dealt_with", "label": "x" * 201, "note": "y"},
-        {"outcome": "dealt_with", "label": "x", "note": "y" * 2001},
-        {"outcome": "dealt_with", "label": "x\x00y", "note": "y"},
+        _bad(outcome="filed"),
+        _bad(outcome="candidate_matter"),  # retired (ADR-F086 A1)
+        _bad(label=""),
+        _bad(note=""),
+        _bad(label="x" * 201),
+        _bad(note="y" * 2001),
+        _bad(label="x\x00y"),
+        # INTAKE-5a (ruling 7) — the summary's own bounds.
+        {"outcome": "dealt_with", "label": "x", "note": "y"},  # missing entirely
+        _bad(summary=[]),  # zero bullets is not an account of anything
+        _bad(summary=[{"title": "t", "text": "x"}] * 6),  # more than five
+        _bad(summary=[{"title": "t" * 41, "text": "x"}]),  # title over 40
+        _bad(summary=[{"title": "t", "text": "x" * 301}]),  # text over 300
+        _bad(summary=[{"title": "t", "text": "line one\nline two"}]),  # control char
+        _bad(summary=[{"title": "t\x1b[31m", "text": "x"}]),  # ANSI escape
+        _bad(summary=[{"title": "t", "text": "x\x00y"}]),  # NUL
+        _bad(summary=[{"title": "", "text": "x"}]),  # empty title
+        _bad(summary=[{"title": "t"}]),  # missing text
+        _bad(summary=[{"title": "t", "text": "x", "extra": "z"}]),  # extra="forbid"
+        _bad(summary=["not an object"]),
     ],
 )
 async def test_invalid_proposals_are_rejected_and_write_nothing(
-    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake, kwargs: dict[str, str]
+    commit_factory: async_sessionmaker[AsyncSession],
+    seeded: SeededIntake,
+    kwargs: dict[str, object],
 ) -> None:
     async with commit_factory() as db:
         out = await _record_intake_outcome(
-            db, _binding(seeded), intake_thread_id=seeded.thread_id, **kwargs
+            db,
+            _binding(seeded),
+            run_id=uuid.uuid4(),
+            intake_thread_id=seeded.thread_id,
+            **kwargs,  # type: ignore[arg-type]
         )
         await db.commit()
     assert out.startswith("Rejected")
@@ -374,30 +424,147 @@ async def test_invalid_proposals_are_rejected_and_write_nothing(
         thread = await db.get(IntakeThread, seeded.thread_id)
         assert thread is not None
         assert thread.outcome is None
+        assert thread.summary is None
+        assert thread.summary_run_id is None
         assert thread.status == "processing"
+
+
+async def test_summary_is_written_in_full_and_rewritten_wholesale(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """INTAKE-5a (ADR-F086 ruling 7): every call REPLACES the summary outright.
+
+    The summary is "the thread so far", not a log. A second conclusion (a follow-up
+    email, a rerun) must leave exactly the new bullets behind — a merge would produce
+    an account of the thread that no run ever wrote — and must re-stamp
+    ``summary_run_id`` so staleness stays computable.
+    """
+    first_run = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=first_run,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="Redline drafted.",
+            summary=_SUMMARY,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        assert thread.summary == _SUMMARY
+        assert thread.summary_run_id == first_run
+
+    second_run = await _make_run(commit_factory, seeded)
+    rewritten = [{"title": "Where it stands", "text": "They accepted the redline."}]
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=second_run,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="They came back.",
+            summary=rewritten,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        # Wholesale: exactly the new list, not the old one plus the new one.
+        assert thread.summary == rewritten
+        assert thread.summary_run_id == second_run
+
+
+async def test_summary_is_stripped_of_surrounding_whitespace(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """``str_strip_whitespace`` applies to the bullets too — a padded title is
+    stored trimmed, not stored padded and trimmed by every reader."""
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            summary=[{"title": "  What they want  ", "text": "  A review.  "}],
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        assert thread.summary == [{"title": "What they want", "text": "A review."}]
+
+
+async def test_safe_fail_leaves_the_previous_summary_in_place(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """INTAKE-5a: a run that settles WITHOUT concluding parks the thread but must not
+    blank the last run's account of it — replacing something true-as-of-last-time
+    with nothing is strictly worse. The read API flags it stale instead."""
+    outcome_run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=outcome_run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="Redline drafted.",
+            summary=_SUMMARY,
+        )
+        await db.commit()
+    # A LATER run on the thread settles without an outcome.
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        thread.status = "processing"
+        await db.commit()
+    failed_run = await _make_run(commit_factory, seeded, status="failed")
+    assert await safe_fail_intake_thread(commit_factory, failed_run) is True
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        assert thread.status == "awaiting_human"
+        assert thread.summary == _SUMMARY
+        assert thread.summary_run_id == outcome_run_id
 
 
 async def test_second_call_overwrites_last_wins(
     commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
 ) -> None:
+    run_id = await _make_run(commit_factory, seeded)
     async with commit_factory() as db:
         await _record_intake_outcome(
             db,
             _binding(seeded),
+            run_id=run_id,
             intake_thread_id=seeded.thread_id,
             outcome="dealt_with",
             label="spam",
             note="Noise.",
+            summary=_SUMMARY,
         )
         await db.commit()
     async with commit_factory() as db:
         await _record_intake_outcome(
             db,
             _binding(seeded),
+            run_id=run_id,
             intake_thread_id=seeded.thread_id,
             outcome="needs_human",
             note="On reflection the lawyer should see this.",
             label="unclear",
+            summary=[{"title": "Where it stands", "text": "Over to the lawyer after all."}],
         )
         await db.commit()
     async with commit_factory() as db:
@@ -445,10 +612,12 @@ async def test_non_intake_matter_records_nothing(
                 ),
                 # An id that names no thread on THIS matter: the tool re-checks the
                 # composition root's id against its own binding before acting.
+                run_id=uuid.uuid4(),
                 intake_thread_id=uuid.uuid4(),
                 outcome="dealt_with",
                 label="x",
                 note="y",
+                summary=_SUMMARY,
             )
         assert "not an intake thread" in out
     finally:
@@ -1301,14 +1470,17 @@ async def test_safe_fail_parks_a_thread_that_never_concluded(
 async def test_safe_fail_leaves_a_concluded_thread_alone(
     commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
 ) -> None:
+    outcome_run_id = await _make_run(commit_factory, seeded)
     async with commit_factory() as db:
         await _record_intake_outcome(
             db,
             _binding(seeded),
+            run_id=outcome_run_id,
             intake_thread_id=seeded.thread_id,
             outcome="dealt_with",
             label="spam",
             note="Noise.",
+            summary=_SUMMARY,
         )
         await db.commit()
     run_id = await _make_run(commit_factory, seeded, status="completed")

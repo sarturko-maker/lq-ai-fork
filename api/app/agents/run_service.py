@@ -71,7 +71,11 @@ IN_FLIGHT_RUN_STATUSES = (AgentRunStatus.running.value, AgentRunStatus.awaiting_
 #: a resume that settled ``failed`` before driving the graph (enqueue failure, worker
 #: restart) or was ``cancelled`` leaves the ask exactly as live as it was. So neither
 #: may stand as "the newest run" when deciding what happened last on a conversation.
-_NOT_LIVE_RUN_STATUSES = (AgentRunStatus.failed.value, AgentRunStatus.cancelled.value)
+#: PUBLIC because the intake Inbox (INTAKE-5a) computes the same "newest live run"
+#: for a whole PAGE of threads in one lateral join rather than N calls to
+#: :func:`newest_live_run` — the rule stays here, in one place, so the list and the
+#: resume endpoint can never disagree about what is live.
+NOT_LIVE_RUN_STATUSES = (AgentRunStatus.failed.value, AgentRunStatus.cancelled.value)
 
 
 @dataclass(frozen=True)
@@ -107,7 +111,7 @@ async def newest_live_run(db: AsyncSession, thread_id: uuid.UUID) -> Conversatio
             select(AgentRun.id, AgentRun.status)
             .where(
                 AgentRun.thread_id == thread_id,
-                AgentRun.status.not_in(_NOT_LIVE_RUN_STATUSES),
+                AgentRun.status.not_in(NOT_LIVE_RUN_STATUSES),
             )
             .order_by(AgentRun.started_at.desc(), AgentRun.id.desc())
             .limit(1)
@@ -256,4 +260,12 @@ async def start_agent_run(
     return run
 
 
-__all__ = ["TITLE_LIMIT", "AgentThreadBusy", "start_agent_run"]
+__all__ = [
+    "IN_FLIGHT_RUN_STATUSES",
+    "NOT_LIVE_RUN_STATUSES",
+    "TITLE_LIMIT",
+    "AgentThreadBusy",
+    "is_conversation_in_flight",
+    "newest_live_run",
+    "start_agent_run",
+]
