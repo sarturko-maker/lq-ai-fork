@@ -297,11 +297,14 @@ class RecordIntakeOutcomeInput(BaseModel):
 class DraftEmailReplyInput(BaseModel):
     """Validate one ``draft_email_reply`` call — a reply the human must approve.
 
-    v1 SENDS NOTHING (ADR-F086: approval-required only, no auto-send path anywhere).
-    The tool is interrupt-gated unconditionally
+    Since INTAKE-4b (ADR-F087) the tool's execution IS the send. That is not an
+    auto-send path: the tool is interrupt-gated unconditionally
     (``app.agents.hitl.ALWAYS_INTERRUPT_TOOL_NAMES``), so a body validated here has
-    already been approved by the supervising lawyer by the time it executes; the
-    delivery leg (api → mail-bridge ``/send``) lands in INTAKE-4.
+    already been approved — possibly edited — by the supervising lawyer by the time
+    it executes, and delivery goes out through the mail-bridge (``POST /send``) with
+    the approved bytes. These caps are therefore the size of what a counterparty can
+    actually receive; :class:`~app.schemas.agent_runs.EditedEmailReplyArgs` imports
+    them so the human-edit boundary cannot drift from the tool's own.
     """
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")

@@ -77,9 +77,11 @@ class SendReplyRequest(BaseModel):
 
     reply_to_provider_message_id: str = Field(..., min_length=1, max_length=500)
     text: str = Field(..., min_length=1, max_length=MAX_BODY_TEXT_CHARS)
-    # INTAKE-4b: the caller's own key for this send (the api uses the outbound
-    # intake_messages row id). Required — an unkeyed send cannot be told apart
-    # from a repeat, and a repeat is a second letter in someone's inbox.
+    # INTAKE-4b: the caller's own key for this send. The api derives it from the
+    # human-approved ASK (its checkpointed tool-call id), never from a per-attempt
+    # id, so a re-execution presents the SAME key — see ADR-F087. Required: an
+    # unkeyed send cannot be told apart from a repeat, and a repeat is a second
+    # letter in someone's inbox.
     idempotency_key: str = Field(..., min_length=1, max_length=64)
     reply_to_tag: str | None = Field(default=None, pattern=_REPLY_TO_TAG_PATTERN, max_length=40)
     attachments: list[OutboundAttachment] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)

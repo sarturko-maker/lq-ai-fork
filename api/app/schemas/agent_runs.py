@@ -21,6 +21,8 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.intake import DRAFT_REPLY_BODY_MAX_CHARS, DRAFT_REPLY_SUBJECT_MAX_CHARS
+
 
 class AgentRunStatus(StrEnum):
     """Lifecycle of a deep-agent run.
@@ -145,15 +147,18 @@ class EditedEmailReplyArgs(BaseModel):
     A recipient editor would therefore be a control that does nothing; honouring one
     means widening the egress surface, which is its own decision, not a UI detail.
 
-    Bounds mirror :class:`~app.schemas.intake.DraftEmailReplyInput` exactly — this
-    is the API boundary; the tool re-validates the merged args against that schema
-    when it executes (code disposes twice, ADR-F018).
+    Bounds are IMPORTED from :class:`~app.schemas.intake.DraftEmailReplyInput`'s own
+    constants rather than restated, so the boundary and the tool can never drift
+    apart. This is the API boundary; the tool re-validates the merged args against
+    that schema when it executes (code disposes twice, ADR-F018).
     """
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    subject: _CleanText | None = Field(default=None, min_length=1, max_length=998)
-    body: _CleanText = Field(min_length=1, max_length=50_000)
+    subject: _CleanText | None = Field(
+        default=None, min_length=1, max_length=DRAFT_REPLY_SUBJECT_MAX_CHARS
+    )
+    body: _CleanText = Field(min_length=1, max_length=DRAFT_REPLY_BODY_MAX_CHARS)
 
 
 class ResumeDecision(BaseModel):

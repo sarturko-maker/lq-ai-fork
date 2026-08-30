@@ -161,10 +161,26 @@
 	}
 
 	/**
+	 * Is this draft sendable as it stands? The server rejects an empty subject or
+	 * body with a 422 the lawyer cannot read; catching it here keeps "Approve &
+	 * send" honestly disabled instead of failing after the click. NOT a validation
+	 * layer — the server still decides (reject-don't-sanitize); this is only the
+	 * case a human can obviously see.
+	 */
+	export function isSendable(draft: DraftFields | null): boolean {
+		return !!draft && draft.subject.trim().length > 0 && draft.body.trim().length > 0;
+	}
+
+	/**
 	 * "Respond" = reject + message (ADR-F087): the note reaches the model as this
 	 * tool's result and it redrafts. An empty note is a plain refusal, never a
-	 * reject carrying an empty string.
+	 * reject carrying an empty string — and the button that sends one is disabled
+	 * (:func:`canRespond`), so an empty note is never how a lawyer lands there.
 	 */
+	export function canRespond(message: string): boolean {
+		return message.trim().length > 0;
+	}
+
 	export function respondDecision(message: string): ResumeDecision {
 		const trimmed = message.trim();
 		return trimmed ? { type: 'reject', message: trimmed } : { type: 'reject' };
@@ -251,12 +267,18 @@
 		     approve is what is sent. Read-only until they press Edit, so the
 		     default gesture stays "read, then decide". -->
 		<div class="ag-hitl__draft" data-testid="lq-ai-agents-hitl-draft">
-			<!-- Context, never an input: the reply goes back on the original email
-			     thread and the bridge derives the recipient (ADR-F086/F087). -->
+			<!-- Context, never an input, and labelled for what it actually is: the
+			     agent's STATED addressee. The reply is delivered back on the original
+			     email thread and the mail service derives the real recipient from the
+			     message being answered (ADR-F086/F087) — so this line must not read
+			     as "we will send it here". -->
 			<div class="ag-hitl__field">
-				<span class="lq-text-caption">Replying to</span>
+				<span class="lq-text-caption">The agent addressed this to</span>
 				<span class="lq-text-body-sm ag-hitl__value" data-testid="lq-ai-agents-hitl-to">
 					{shown.to}
+				</span>
+				<span class="lq-text-caption ag-hitl__hint">
+					Sent as a reply on the original email thread.
 				</span>
 			</div>
 			<label class="ag-hitl__field">
@@ -343,7 +365,7 @@
 			<button
 				type="button"
 				class="ag-hitl__btn ag-hitl__btn--approve"
-				disabled={pending || responding}
+				disabled={pending || responding || !isSendable(shown)}
 				data-testid="lq-ai-agents-hitl-approve"
 				onclick={() => draft && shown && onDecide(approvalDecision(draft, shown))}
 			>
@@ -353,7 +375,7 @@
 				<button
 					type="button"
 					class="ag-hitl__btn ag-hitl__btn--refuse"
-					disabled={pending}
+					disabled={pending || !canRespond(responseText)}
 					data-testid="lq-ai-agents-hitl-respond-send"
 					onclick={() => onDecide(respondDecision(responseText))}
 				>
@@ -508,7 +530,8 @@
 		min-width: 0;
 	}
 
-	.ag-hitl__field > span:first-child {
+	.ag-hitl__field > span:first-child,
+	.ag-hitl__hint {
 		color: var(--color-muted-foreground);
 	}
 

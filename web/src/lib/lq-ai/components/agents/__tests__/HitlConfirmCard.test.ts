@@ -15,7 +15,9 @@ import {
 	formatHitlArgs,
 	editableDraft,
 	approvalDecision,
-	respondDecision
+	respondDecision,
+	isSendable,
+	canRespond
 } from '../HitlConfirmCard.svelte';
 
 /** One `draft_email_reply` pause digest, as the runner writes it (sort_keys). */
@@ -201,6 +203,24 @@ describe('approvalDecision', () => {
 			type: 'edit',
 			edited_args: { body: 'Thanks.\n\nBest,\n' }
 		});
+	});
+});
+
+describe('isSendable', () => {
+	it('blocks a draft the server would 422 (empty subject or body)', () => {
+		const ok = { to: 'a@x.test', subject: 'Re: NDA', body: 'Thanks.' };
+		expect(isSendable(ok)).toBe(true);
+		expect(isSendable({ ...ok, subject: '   ' })).toBe(false);
+		expect(isSendable({ ...ok, body: '\n\t ' })).toBe(false);
+		expect(isSendable(null)).toBe(false);
+	});
+});
+
+describe('canRespond', () => {
+	it('is false for an empty/whitespace note — Respond must not degrade to a refusal', () => {
+		expect(canRespond('say we need the DPA first')).toBe(true);
+		expect(canRespond('')).toBe(false);
+		expect(canRespond('   \n ')).toBe(false);
 	});
 });
 

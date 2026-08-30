@@ -58,11 +58,15 @@ C. **Approve / edit / refuse / respond, all four native decisions, for every gat
 
 ### The tool's execution IS the send
 
-`draft_email_reply` now (a) inserts the `intake_messages` `direction='out'` row with
-`tag_subject(subject, project.reference)` and flushes so the row id exists, (b) calls the
-mail-bridge `POST /send` through an injected client with `idempotency_key` = that row id,
-(c) stores the provider-assigned `provider_message_id` on the row, (d) moves the thread to
-`replied`.
+`draft_email_reply` now (a) writes the `intake_messages` `direction='out'` row with
+`tag_subject(subject, project.reference)` and commits it before any network call, (b) calls
+the mail-bridge `POST /send` through an injected client with a per-ask `idempotency_key`
+(see **Idempotency, precisely** below), (c) stores the provider-assigned
+`provider_message_id` on the row — the id an inbound `References` header will name, so
+layer 2 can thread the counterparty's answer home (ADR-F088) — and (d) moves the thread to
+`replied`. It replies to the newest inbound the agent has actually PROCESSED, not simply
+the newest one: a pause can last days, and a follow-up that lands meanwhile is text the
+lawyer never read and a sender they never approved replying to.
 
 Option 2 was tempting (a second human click is a second safety net) but it splits the
 authorisation: the lawyer would approve a tool call and then separately authorise a
@@ -80,10 +84,33 @@ the thread to `error`, and returns a failure string to the model so it records
 letter three times; the idempotency key exists to make the *client's* one attempt safe, not
 to license a second one.
 
-Idempotency has two independent guards: the bridge rejects a repeated
-`idempotency_key` with 409 (in-memory bounded LRU, documented limit), and the same key is
-handed to AgentMail's own `idempotency_key` parameter. A `reject` never reaches the bridge
-at all — the tool body does not run.
+**Idempotency, precisely.** The hazard is not a retry (there are none) — it is
+*re-execution*: a worker killed between a successful send and the checkpoint write settles
+the run `failed`, a `failed` successor deliberately does not supersede the pause (so a
+resume that never consumed the interrupt stays re-approvable), and the card is still live.
+Approve then runs the tool body a second time on the same checkpointed call. So the key
+must be a property of the ASK, not of the attempt: it is
+`sha256(thread_id + tool-call id)` — the checkpointed `tool_call["id"]`, which the HITL
+middleware preserves when it rebuilds an edited call and which a re-approval resumes
+unchanged. (Verified: an `InjectedToolCallId` parameter is populated through this
+codebase's real `build_deep_agent` wiring, and stays out of the schema the model sees.)
+A freshly minted row id — the first cut — would have minted a *new* key on the second
+attempt and bought nothing.
+
+Three guards, in order, none of them a retry:
+
+1. a delivered outbound row newer than the newest inbound short-circuits before the bridge
+   is touched at all ("a reply already went out on this thread");
+2. the outbound row is keyed by the same per-ask value while it is undelivered, so a
+   second execution updates that row instead of inserting a twin;
+3. the bridge refuses a repeated `idempotency_key` with 409 from a bounded in-process LRU
+   (documented limit: per process, forgotten on restart), and hands the same key to
+   AgentMail's own `idempotency_key`, whose guarantee survives a bridge restart.
+
+Consequence, accepted: re-approving an ask whose send failed ambiguously (a timeout) does
+NOT get a second attempt — it gets `duplicate`. That is the intended direction. The lawyer
+is told delivery is unconfirmed and can check the mailbox; a second letter cannot be
+withdrawn. A `reject` never reaches the bridge at all — the tool body does not run.
 
 **Attachments are not delivered in 4b.** `draft_email_reply` still accepts
 `attachment_file_ids` (they are recorded on the row), but a call that names any is

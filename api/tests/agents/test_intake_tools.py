@@ -36,6 +36,7 @@ from app.agents.intake_tools import (
     NO_OUTCOME_NOTE,
     _draft_email_reply,
     _record_intake_outcome,
+    _send_key,
     build_intake_tools,
     requeue_pending_intake_message,
     safe_fail_intake_thread,
@@ -304,6 +305,41 @@ async def test_needs_human_keeps_the_matter_open(
 
 
 @pytest.mark.parametrize(
+    ("send_status", "outcome"),
+    [("replied", "dealt_with"), ("replied", "needs_human"), ("error", "needs_human")],
+)
+async def test_outcome_never_overwrites_a_settled_send_status(
+    commit_factory: async_sessionmaker[AsyncSession],
+    seeded: SeededIntake,
+    send_status: str,
+    outcome: str,
+) -> None:
+    """INTAKE-4b (ADR-F087): `replied` (a letter went out) and `error` (one was
+    approved and did not go) are later, stronger facts than the outcome's own
+    bookkeeping — and `error` is the ONLY place a failed delivery is visible to the
+    lawyer. Recording the outcome out of order must not erase either."""
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        thread.status = send_status
+        await db.commit()
+
+    async with commit_factory() as db:
+        out = await _record_intake_outcome(
+            db, _binding(seeded), outcome=outcome, label="NDA review", note="n"
+        )
+        await db.commit()
+
+    assert send_status in out  # the tool reports the status the thread actually has
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        assert thread.status == send_status
+        assert thread.outcome == outcome  # the outcome itself IS recorded
+        assert thread.label == "NDA review"
+
+
+@pytest.mark.parametrize(
     "kwargs",
     [
         {"outcome": "filed", "label": "x", "note": "y"},
@@ -494,6 +530,7 @@ async def test_approved_reply_is_stamped_sent_and_recorded(
     run_id = await _make_run(commit_factory, seeded)
     await _set_reference(commit_factory, seeded.project_id, "NWT-COM-0011")
     bridge = _FakeBridge()
+    call_id = "call_approved_ask"
     async with commit_factory() as db:
         out = await _draft_email_reply(
             db,
@@ -503,6 +540,7 @@ async def test_approved_reply_is_stamped_sent_and_recorded(
             subject="Re: Please review the attached NDA",
             body="Thanks — we have it and will come back to you this week.",
             attachment_file_ids=[],
+            tool_call_id=call_id,
             bridge=bridge,
         )
         await db.commit()
@@ -521,9 +559,11 @@ async def test_approved_reply_is_stamped_sent_and_recorded(
     assert row.send_error is None
     assert len(bridge.calls) == 1
     call = bridge.calls[0]
-    # Keyed on the thread's newest INBOUND message; idempotency key = the row id;
-    # the bridge gets the TAG, never an address.
-    assert call["idempotency_key"] == str(row.id)
+    # Keyed on the thread's newest INBOUND message; the idempotency key is the
+    # per-ASK key (ADR-F087 — deliberately NOT this row's id, which is minted fresh
+    # on every execution); the bridge gets the matter TAG, never an address.
+    assert call["idempotency_key"] == _send_key(seeded.thread_id, call_id)
+    assert call["idempotency_key"] != str(row.id)
     assert call["reply_to_tag"] == "NWT-COM-0011"
     assert call["text"] == "Thanks — we have it and will come back to you this week."
     async with commit_factory() as db:
@@ -549,6 +589,7 @@ async def test_a_matter_without_a_reference_still_sends_unstamped(
             subject="Re: NDA",
             body="Noted.",
             attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
             bridge=bridge,
         )
         await db.commit()
@@ -575,6 +616,7 @@ async def test_a_failed_send_keeps_the_reply_and_errors_the_thread(
             subject="Re: NDA",
             body="Noted.",
             attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
             bridge=bridge,
         )
         await db.commit()
@@ -605,6 +647,7 @@ async def test_no_bridge_configured_is_an_honest_failure(
             subject="Re: NDA",
             body="Noted.",
             attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
             bridge=None,
         )
         await db.commit()
@@ -631,6 +674,7 @@ async def test_a_thread_with_no_inbound_message_is_never_sent_into(
             subject="Re: NDA",
             body="Noted.",
             attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
             bridge=bridge,
         )
         await db.commit()
@@ -655,6 +699,7 @@ async def test_attachments_are_refused_before_anything_is_written(
             subject="Re: NDA",
             body="See attached.",
             attachment_file_ids=[str(seeded.file_id)],
+            tool_call_id=uuid.uuid4().hex,
             bridge=bridge,
         )
         await db.commit()
@@ -684,6 +729,7 @@ async def test_a_non_intake_matter_sends_nothing(
             subject="Re: NDA",
             body="Noted.",
             attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
             bridge=bridge,
         )
         await db.commit()
@@ -707,7 +753,12 @@ async def test_invalid_drafts_are_rejected_and_write_nothing(
 ) -> None:
     async with commit_factory() as db:
         out = await _draft_email_reply(
-            db, _binding(seeded), run_id=uuid.uuid4(), attachment_file_ids=[], **kwargs
+            db,
+            _binding(seeded),
+            run_id=uuid.uuid4(),
+            attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
+            **kwargs,
         )
         await db.commit()
     assert out.startswith("Rejected")
@@ -720,6 +771,187 @@ async def test_invalid_drafts_are_rejected_and_write_nothing(
             )
         ).scalars()
         assert list(rows) == []
+
+
+# --------------------------------------------------------------------------- #
+# Double-send safety (ADR-F087) — the re-execution hazard, not a retry
+# --------------------------------------------------------------------------- #
+
+
+def test_draft_email_reply_takes_an_injected_tool_call_id() -> None:
+    """The whole double-send fix rests on this wiring: langchain injects the
+    CHECKPOINTED tool-call id, and the model can neither see it in the schema nor
+    set it. If a langchain/deepagents bump ever drops the injection, the key would
+    silently become "" for every ask — so pin the contract here."""
+    from langchain_core.tools import StructuredTool
+
+    tools = build_intake_tools(
+        async_sessionmaker(),
+        run_id=uuid.uuid4(),
+        binding=MatterBinding(
+            project_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            name="m",
+            privileged=False,
+            minimum_inference_tier=None,
+            practice_area_id=None,
+        ),
+    )
+    draft = next(t for t in tools if t.__name__ == "draft_email_reply")
+    schema = StructuredTool.from_function(
+        coroutine=draft, name="draft_email_reply", description="d"
+    ).args
+    assert "tool_call_id" not in schema
+    assert {"to", "subject", "body", "attachment_file_ids"} <= set(schema)
+
+
+async def test_re_executing_the_same_ask_sends_once_and_writes_one_row(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """A worker killed between a successful send and the checkpoint write settles
+    the run ``failed``; a failed successor does NOT supersede the pause, so the card
+    stays live and Approve can run this body again on the SAME checkpointed call.
+    The counterparty must still receive exactly one letter."""
+    run_id = await _make_run(commit_factory, seeded)
+    bridge = _FakeBridge()
+    call_id = "call_the_same_checkpointed_ask"
+
+    async def approve() -> str:
+        async with commit_factory() as db:
+            out = await _draft_email_reply(
+                db,
+                _binding(seeded),
+                run_id=run_id,
+                to=["counterparty@example.net"],
+                subject="Re: NDA",
+                body="Thanks — we have it.",
+                attachment_file_ids=[],
+                tool_call_id=call_id,
+                bridge=bridge,
+            )
+            await db.commit()
+            return out
+
+    first, second = await approve(), await approve()
+
+    assert first.startswith("Sent.")
+    assert "already been sent" in second
+    assert len(bridge.calls) == 1  # the bridge is not touched a second time
+    rows = await _outbound_rows(commit_factory, seeded.thread_id)
+    assert len(rows) == 1  # and no twin row was inserted
+    assert rows[0].provider_message_id == "<reply-1@email.amazonses.com>"
+
+
+async def test_the_idempotency_key_is_the_ask_not_the_row(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """The key must be derived from the CHECKPOINTED tool-call id: a freshly minted
+    row id would present a NEW key on a second attempt and the bridge would accept
+    it. Two executions of the same ask ⇒ the same key; a different ask ⇒ a different
+    one (and both are within the bridge's 64-char cap)."""
+    bridge = _FakeBridge(error="transport")  # fail, so the row stays undelivered
+
+    async def approve(call_id: str) -> None:
+        async with commit_factory() as db:
+            await _draft_email_reply(
+                db,
+                _binding(seeded),
+                run_id=await _make_run(commit_factory, seeded),
+                to=["counterparty@example.net"],
+                subject="Re: NDA",
+                body="Noted.",
+                attachment_file_ids=[],
+                tool_call_id=call_id,
+                bridge=bridge,
+            )
+            await db.commit()
+
+    await approve("call_a")
+    await approve("call_a")
+    await approve("call_b")
+
+    keys = [c["idempotency_key"] for c in bridge.calls]
+    assert keys[0] == keys[1] != keys[2]
+    assert all(isinstance(k, str) and 1 <= len(k) <= 64 for k in keys)
+    # The failed attempt reused its own row; only the second ask made a new one.
+    rows = await _outbound_rows(commit_factory, seeded.thread_id)
+    assert len(rows) == 2
+    assert {r.send_error for r in rows} == {"transport"}
+
+
+async def test_reply_targets_the_newest_inbound_the_agent_actually_read(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """A pause can last days. A follow-up that lands meanwhile is unread text whose
+    sender the lawyer never approved replying to — and the bridge derives the
+    recipient from whichever message we key the reply on."""
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        processed = await db.get(IntakeMessage, seeded.message_id)
+        assert processed is not None
+        processed.run_id = run_id
+        db.add(
+            IntakeMessage(
+                thread_id=seeded.thread_id,
+                provider_message_id="msg-arrived-during-the-pause",
+                direction="in",
+                from_addr="a-stranger@example.org",
+                to_addrs=["legal-intake@example.com"],
+                subject="Re: NDA",
+                body_text="me too",
+                provider_timestamp=datetime(2026, 8, 25, 9, 0, tzinfo=UTC),
+            )
+        )
+        await db.commit()
+
+    bridge = _FakeBridge()
+    async with commit_factory() as db:
+        out = await _draft_email_reply(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            to=["counterparty@example.net"],
+            subject="Re: NDA",
+            body="Noted.",
+            attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
+            bridge=bridge,
+        )
+        await db.commit()
+
+    assert out.startswith("Sent.")
+    async with commit_factory() as db:
+        read = await db.get(IntakeMessage, seeded.message_id)
+        assert read is not None
+        assert bridge.calls[0]["reply_to_provider_message_id"] == read.provider_message_id
+
+
+async def test_a_delivered_reply_blocks_a_second_one_until_new_mail_arrives(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """The DB-side guard, independent of the tool-call id: a reply already out since
+    the newest inbound short-circuits before the bridge is touched."""
+    bridge = _FakeBridge()
+
+    async def approve() -> str:
+        async with commit_factory() as db:
+            out = await _draft_email_reply(
+                db,
+                _binding(seeded),
+                run_id=await _make_run(commit_factory, seeded),
+                to=["counterparty@example.net"],
+                subject="Re: NDA",
+                body="Noted.",
+                attachment_file_ids=[],
+                tool_call_id=uuid.uuid4().hex,  # a DIFFERENT ask each time
+                bridge=bridge,
+            )
+            await db.commit()
+            return out
+
+    assert (await approve()).startswith("Sent.")
+    assert "already been sent" in await approve()
+    assert len(bridge.calls) == 1
 
 
 # --------------------------------------------------------------------------- #

@@ -12,9 +12,11 @@ Design notes:
 * **No retries, anywhere.** A retry loop around an email send is how a
   counterparty receives the same letter three times. One attempt; a failure is
   reported honestly to the caller, which records it and stops (ADR-F087).
-* **Idempotency key = the outbound ``intake_messages`` row id.** The bridge
-  rejects a repeat with 409, which surfaces here as
-  :class:`BridgeSendError` with reason ``duplicate`` — never as a second send.
+* **Idempotency key = the ASK, not the attempt.** The caller derives it from the
+  human-approved call's checkpointed tool-call id (``intake_tools._send_key``), so
+  a re-execution of the same ask presents the same key. The bridge rejects a repeat
+  with 409, which surfaces here as :class:`BridgeSendError` with reason
+  ``duplicate`` — never as a second send.
 * **Errors carry a CLASS, never a body.** ``reason`` is one of a closed set of
   short tokens (``http_502``, ``timeout``, ``transport``, ``duplicate``,
   ``unexpected``); a provider error string can quote the message, the address or

@@ -44,12 +44,14 @@ Zero model calls; pure DB writes.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
+from langchain_core.tools import InjectedToolCallId
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -77,6 +79,35 @@ _OUTCOME_THREAD_STATUS: dict[str, str] = {
 # R7 — the safe-fail note. FORK-AUTHORED and fixed: a run that ended without
 # concluding must never have model text put in its place.
 NO_OUTCOME_NOTE = "run ended without a recorded outcome"
+
+# INTAKE-4b (ADR-F087): the marker on an outbound row that has NOT been delivered.
+# ``provider_message_id`` is NOT NULL (it is half the idempotency unique key), so an
+# undelivered reply carries this prefix plus its per-ask send key until the provider
+# assigns the real id. "Starts with this" is therefore exactly "never went out".
+_DRAFT_ID_PREFIX = "draft:"
+
+# Thread statuses a settled SEND put on the thread. ``record_intake_outcome`` must not
+# overwrite them: "we replied" / "the send failed" is a stronger, later fact about the
+# thread than the outcome's own bookkeeping, and losing `error` loses the only place a
+# failed delivery is visible to the lawyer.
+_SEND_TERMINAL_THREAD_STATUSES = frozenset({"replied", "error"})
+
+
+def _send_key(thread_id: uuid.UUID, tool_call_id: str) -> str:
+    """The idempotency key for ONE approved ask (INTAKE-4b, ADR-F087).
+
+    Derived from the CHECKPOINTED tool-call id, which is the only identifier that is
+    stable across everything that can make this tool run twice: the HITL middleware
+    rebuilds an EDITED call with the same id, and a re-approval after a crashed run
+    resumes the same checkpointed call. A freshly minted row id is not — that was the
+    double-send hole.
+
+    sha256 (not the raw id) for two reasons: provider tool-call ids have no length
+    contract and the bridge caps the key at 64 chars, and hashing keeps a
+    provider-supplied string out of another service's key space entirely. Salted with
+    the thread id so the same id under two threads can never collide.
+    """
+    return hashlib.sha256(f"{thread_id}:{tool_call_id}".encode()).hexdigest()
 
 
 def build_intake_tools(
@@ -135,7 +166,11 @@ def build_intake_tools(
         )
 
     async def draft_email_reply(
-        to: list[str], subject: str, body: str, attachment_file_ids: list[str] | None = None
+        to: list[str],
+        subject: str,
+        body: str,
+        tool_call_id: Annotated[str, InjectedToolCallId],
+        attachment_file_ids: list[str] | None = None,
     ) -> str:
         """Propose a reply to this intake email. Nothing is sent until a lawyer approves.
 
@@ -159,6 +194,11 @@ def build_intake_tools(
         call this with no attachment ids, and say in the body what the lawyer should
         attach if a document really has to travel with the reply.
         """
+        # `tool_call_id` is INJECTED by langchain (InjectedToolCallId) — it is not in
+        # the schema the model sees and the model cannot set it. It is the identity of
+        # THIS ask: the HITL middleware rebuilds an edited call with the same id, and a
+        # re-approval after a crash resumes the same checkpointed call, so it is the
+        # only stable per-ask key there is (ADR-F087 double-send fix).
         return await guarded_dispatch(
             "draft_email_reply",
             lambda db: _draft_email_reply(
@@ -169,6 +209,7 @@ def build_intake_tools(
                 subject=subject,
                 body=body,
                 attachment_file_ids=attachment_file_ids or [],
+                tool_call_id=tool_call_id,
                 bridge=bridge,
             ),
             ctx,
@@ -262,7 +303,14 @@ async def _record_intake_outcome(
     thread.outcome = proposal.outcome
     thread.label = proposal.label
     thread.outcome_note = proposal.note
-    thread.status = _OUTCOME_THREAD_STATUS[proposal.outcome]
+    # INTAKE-4b (ADR-F087): a SEND already settled this thread — `replied` (a letter
+    # went to the counterparty) or `error` (one was approved and did not go). Both are
+    # later, stronger facts than the outcome's bookkeeping, and `error` is the only
+    # place a failed delivery is visible to the lawyer, so the outcome records itself
+    # WITHOUT touching the status. The doctrine asks for the outcome first, so this is
+    # the out-of-order case, not the normal one.
+    if thread.status not in _SEND_TERMINAL_THREAD_STATUSES:
+        thread.status = _OUTCOME_THREAD_STATUS[proposal.outcome]
 
     project_note = "the matter stays open for the lawyer"
     if proposal.outcome != "dealt_with" and prior_outcome == "dealt_with":
@@ -312,6 +360,7 @@ async def _draft_email_reply(
     subject: str,
     body: str,
     attachment_file_ids: list[str],
+    tool_call_id: str,
     bridge: BridgeClient | None = None,
 ) -> str:
     """Validate → record the outbound row → SEND it (INTAKE-4b, ADR-F087).
@@ -324,6 +373,22 @@ async def _draft_email_reply(
     Order matters: the row is inserted and COMMITTED before the bridge is called,
     so a crash mid-send leaves a record of what we tried rather than a delivered
     email nobody has. Exactly one attempt is ever made — no retries (ADR-F087).
+
+    **Re-execution is the hazard this function is shaped around.** A worker killed
+    (or wall-clock cancelled) between a successful send and the checkpoint write
+    settles the run ``failed``; a failed successor does not supersede the pause
+    (``agent_runs.py`` — deliberately, so a resume that never consumed the interrupt
+    stays re-approvable), so the card is still live and Approve can run this body a
+    SECOND time on the same checkpointed call. Three things make that safe, and none
+    of them is a retry:
+
+    * the idempotency key is derived from the CHECKPOINTED tool-call id
+      (:func:`_send_key`), not from a freshly minted row id, so the second attempt
+      presents the key the first one used and the bridge (and the provider) refuse it;
+    * the outbound row is keyed by that same value while it is a draft, so a second
+      execution REUSES it instead of inserting a twin;
+    * and a delivered outbound row newer than the newest inbound short-circuits the
+      whole thing before the bridge is touched at all.
     """
     try:
         proposal = DraftEmailReplyInput(
@@ -366,41 +431,101 @@ async def _draft_email_reply(
     ).scalar_one_or_none()
     stamped_subject = tag_subject(proposal.subject, reference) if reference else proposal.subject
 
-    # The message we are replying TO: the thread's newest INBOUND provider id. The
-    # bridge is reply-only by construction (it derives the recipients from this
-    # message), which is exactly why no address of ours ever reaches it.
+    # The message we are replying TO. The bridge is reply-only by construction (it
+    # derives the recipients from THIS message), which is exactly why no address of
+    # ours ever reaches it — and exactly why picking the right one matters. Prefer
+    # the newest inbound the agent has actually processed (``run_id`` set): a pause
+    # can last days, and a follow-up that landed meanwhile is unread text the lawyer
+    # never saw and whose sender they never approved replying to. Fall back to the
+    # newest inbound only when the thread has none processed at all.
     reply_to_message_id = (
         await db.execute(
             select(IntakeMessage.provider_message_id)
-            .where(IntakeMessage.thread_id == thread.id, IntakeMessage.direction == "in")
+            .where(
+                IntakeMessage.thread_id == thread.id,
+                IntakeMessage.direction == "in",
+                IntakeMessage.run_id.is_not(None),
+            )
             .order_by(IntakeMessage.created_at.desc(), IntakeMessage.id.desc())
             .limit(1)
         )
     ).scalar_one_or_none()
+    newest_inbound = (
+        await db.execute(
+            select(IntakeMessage.provider_message_id, IntakeMessage.created_at)
+            .where(IntakeMessage.thread_id == thread.id, IntakeMessage.direction == "in")
+            .order_by(IntakeMessage.created_at.desc(), IntakeMessage.id.desc())
+            .limit(1)
+        )
+    ).first()
+    if reply_to_message_id is None and newest_inbound is not None:
+        reply_to_message_id = newest_inbound[0]
 
-    outbound = IntakeMessage(
-        thread_id=thread.id,
-        # A local, clearly-marked placeholder until the provider assigns the real
-        # id (the unique key (thread_id, provider_message_id) needs a value). On a
-        # successful send it is REPLACED by the provider's id — the one an inbound
-        # References header will name, which is what layer 2 matches on (ADR-F088).
-        provider_message_id=f"draft:{uuid.uuid4()}",
-        direction="out",
-        run_id=run_id,
-        # What the agent said it was answering, recorded for the matter file. It is
-        # NOT what addresses the send: the bridge derives the recipients from the
-        # message being replied to and is never handed an address (ADR-F086), which
-        # is also why `to` is not one of the human-editable fields (ADR-F087).
-        to_addrs=list(proposal.to),
-        subject=stamped_subject,
-        body_text=proposal.body,
-        attachment_filenames=[],
-    )
-    db.add(outbound)
+    # Guard 1 (ADR-F087): has a reply ALREADY gone out since the newest inbound? Then
+    # this execution is a repeat — a re-approved card after a crash, or a second draft
+    # nobody asked for — and the counterparty must not receive a second letter. Answer
+    # from the DB; the bridge is never touched.
+    delivered_since = (
+        await db.execute(
+            select(IntakeMessage.id)
+            .where(
+                IntakeMessage.thread_id == thread.id,
+                IntakeMessage.direction == "out",
+                IntakeMessage.send_error.is_(None),
+                IntakeMessage.provider_message_id.not_like(f"{_DRAFT_ID_PREFIX}%"),
+                *(
+                    [IntakeMessage.created_at >= newest_inbound[1]]
+                    if newest_inbound is not None
+                    else []
+                ),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if delivered_since is not None:
+        return (
+            "A reply has already been sent on this email thread since the last message "
+            "came in, so nothing was sent again. Do not draft another reply unless a "
+            "new message arrives; tell the lawyer the reply already went out."
+        )
+
+    # Guard 2: the row for THIS ask. Keyed by the checkpointed tool-call id, so a
+    # second execution of the same call updates the row it already made instead of
+    # inserting a twin (and presents the same idempotency key below).
+    send_key = _send_key(thread.id, tool_call_id)
+    draft_id = f"{_DRAFT_ID_PREFIX}{send_key}"
+    outbound = (
+        await db.execute(
+            select(IntakeMessage).where(
+                IntakeMessage.thread_id == thread.id,
+                IntakeMessage.provider_message_id == draft_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if outbound is None:
+        outbound = IntakeMessage(
+            thread_id=thread.id,
+            # A local, clearly-marked placeholder until the provider assigns the real
+            # id (the unique key (thread_id, provider_message_id) needs a value). On a
+            # successful send it is REPLACED by the provider's id — the one an inbound
+            # References header will name, which is what layer 2 matches on (ADR-F088).
+            provider_message_id=draft_id,
+            direction="out",
+            attachment_filenames=[],
+        )
+        db.add(outbound)
+    outbound.run_id = run_id
+    # What the agent said it was answering, recorded for the matter file. It is
+    # NOT what addresses the send: the bridge derives the recipients from the
+    # message being replied to and is never handed an address (ADR-F086), which
+    # is also why `to` is not one of the human-editable fields (ADR-F087).
+    outbound.to_addrs = list(proposal.to)
+    outbound.subject = stamped_subject
+    outbound.body_text = proposal.body
+    outbound.send_error = None
     await db.flush()
-    # Durable BEFORE the network call: the idempotency key IS this row id, and a
-    # process that dies mid-send must leave the attempt visible (the R7 safe-fail
-    # hook then parks the thread for the lawyer).
+    # Durable BEFORE the network call: a process that dies mid-send must leave the
+    # attempt visible (the R7 safe-fail hook then parks the thread for the lawyer).
     await db.commit()
 
     failure: str | None = None
@@ -412,7 +537,10 @@ async def _draft_email_reply(
         try:
             sent = await bridge.send_reply(
                 reply_to_provider_message_id=reply_to_message_id,
-                idempotency_key=str(outbound.id),
+                # Derived from the CHECKPOINTED tool-call id, never from this row's
+                # freshly minted id: a re-execution of the same ask must present the
+                # SAME key so the bridge and the provider can refuse it (ADR-F087).
+                idempotency_key=send_key,
                 text=proposal.body,
                 reply_to_tag=reference,
             )
@@ -442,6 +570,11 @@ async def _draft_email_reply(
                     "stamped": reference is not None,
                 },
             )
+            # Commit HERE, not at the dispatch boundary: guarded_dispatch's audit
+            # helper rolls the session back if the audit write fails, and that would
+            # discard the provider id of an email that has ALREADY been delivered —
+            # taking layer-2 threading (ADR-F088) down with it.
+            await db.commit()
             return (
                 "Sent. The lawyer's approved reply has gone out on this email thread"
                 + (f" stamped {reference}" if reference else "")
@@ -462,6 +595,9 @@ async def _draft_email_reply(
             "reason": failure,
         },
     )
+    # Same reason as the success path: the failure record must survive an audit-write
+    # rollback, or the thread reports `processing` with no explanation.
+    await db.commit()
     return (
         # Deliberately NOT "nothing left the building": a timeout or a duplicate-key
         # refusal cannot prove that. Treat delivery as unconfirmed and hand it to the
