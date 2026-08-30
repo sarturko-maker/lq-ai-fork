@@ -1,0 +1,23 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-tagged-reply-unknown-reference",
+    "subject": "Re: Renewal of the Meridian MSA [NWT-COM-0311]"
+  },
+  "message": {
+    "provider_message_id": "24-tagged-reply@fixture.northwindtrading.co.uk",
+    "from_addr": "legal@meridian-supply-group.com",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-30T11:40:00+00:00",
+    "text": "Further to our exchange, we are content with the renewal term but not with the indexation mechanic in clause 12.3. We propose CPI capped at 4% per annum rather than the uncapped RPI figure.\n\nPlease confirm whether Northwind can accept that, and we will countersign this week.\n\nRegards,\nMeridian Supply Group — Legal",
+    "headers": {
+      "References": "<not-a-message-we-ever-sent@meridian-supply-group.com>"
+    },
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

@@ -18,7 +18,11 @@ made idempotency claim-first and leak-free):
    one races against a concurrent delivery of the FIRST message on the same
    thread: on a flush-time ``IntegrityError`` (``uq_intake_threads_*``), we
    roll back and re-select — the concurrent winner's row is what we
-   continue with.
+   continue with. A NEW thread first runs the INTAKE-4a resolver
+   (:func:`resolve_inbound_attachment`, ADR-F088): a reply or forward that
+   names a message we already hold, or carries a matter reference whose
+   sender is on that matter's roster, lands on the EXISTING matter (and
+   inherits its agent conversation) instead of opening a second one.
 3. **Claim**: insert the :class:`~app.models.intake.IntakeMessage` row and
    flush IMMEDIATELY — before any project creation or attachment upload.
    This is the atomic idempotency anchor (``uq_intake_messages_*``): a
@@ -50,6 +54,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -63,8 +68,15 @@ from app.config import Settings, get_settings
 from app.db.session import get_db
 from app.errors import Conflict, NotFound
 from app.ingest import ingest_bytes
+from app.matters.reference import allocate_reference
+from app.matters.stamping import (
+    normalise_address,
+    parse_plus_tags,
+    parse_reference_tags,
+    parse_threading_headers,
+)
 from app.models.intake import IntakeMailbox, IntakeMessage, IntakeThread
-from app.models.project import Project
+from app.models.project import MatterParticipant, Project
 from app.schemas.intake import InboundEmailEnvelope, IntakeEmailIngestResponse
 from app.storage import delete_object
 
@@ -100,6 +112,198 @@ async def _select_thread(
             )
         )
     ).scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# INTAKE-4a (ADR-F088) — the inbound resolver: which matter does this belong to?
+#
+# The trust ladder, strongest first. Only layer 1 and layer 2 may attach on
+# their own; layer 3 is sender-controlled text and attaches ONLY when the sender
+# is already on the matter's roster. Everything weaker leaves a note and opens a
+# new matter — email content never merges itself into a matter that may hold
+# privileged material.
+#
+#   1  same (mailbox, provider_thread_id)   — the provider's own threading
+#   2  References/In-Reply-To names a message we hold on this mailbox
+#   3  [ORG-AREA-NNNN] subject tag or a plus-tagged recipient, Roster-gated
+#
+# Cross-owner is silence, not an error: a reference belonging to someone else's
+# matter behaves EXACTLY like a reference that resolves to nothing (a new matter
+# plus the same note), so nothing in the response, the prompt or the logs can be
+# used to probe whether a given reference exists.
+# ---------------------------------------------------------------------------
+
+#: How many claimed references we are willing to look up for one message.
+_MAX_CLAIM_LOOKUPS = 3
+
+
+@dataclass(frozen=True)
+class ResolvedAttachment:
+    """Where an inbound message on a NEW provider thread belongs.
+
+    ``project_id``/``agent_thread_id`` set ⇒ attach: a new ``intake_threads``
+    row is created on that existing matter and carries its agent conversation
+    forward. ``claimed_reference`` set ⇒ the sender named a matter we did NOT
+    honour; the note reaches the agent through the intake prompt.
+    """
+
+    project_id: uuid.UUID | None = None
+    agent_thread_id: uuid.UUID | None = None
+    claimed_reference: str | None = None
+    layer: str = "none"
+
+
+async def _agent_thread_for_project(db: AsyncSession, project_id: uuid.UUID) -> uuid.UUID | None:
+    """The agent conversation this matter's intake threads already run on.
+
+    INTAKE-3 reuses one ``agent_thread_id`` per intake thread so follow-ups
+    continue the same conversation; carrying it onto a NEW thread row on the
+    same matter extends that property to a reply that arrived out of band.
+    """
+
+    return (
+        await db.execute(
+            select(IntakeThread.agent_thread_id)
+            .where(
+                IntakeThread.project_id == project_id,
+                IntakeThread.agent_thread_id.is_not(None),
+            )
+            .order_by(IntakeThread.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def _resolve_by_threading_headers(
+    db: AsyncSession,
+    *,
+    mailbox_id: uuid.UUID,
+    owner_user_id: uuid.UUID,
+    headers: dict[str, str],
+) -> uuid.UUID | None:
+    """Layer 2 — a message id we already hold, in this mailbox, with a matter.
+
+    Matches inbound AND outbound rows: the strong signal is simply that the id
+    is one WE know, which means the sender was actually in a conversation with
+    this inbox. Doubly fenced — ``mailbox_id`` (this queue's own threads) AND the
+    matter's owner (this queue's owner). The second is belt and braces for the
+    case where a mailbox was re-bound to a different owner after producing
+    matters: an attach must never file new mail into someone else's matter.
+    """
+
+    candidates = parse_threading_headers(headers.get("In-Reply-To"), headers.get("References"))
+    if not candidates:
+        return None
+    return (
+        await db.execute(
+            select(IntakeThread.project_id)
+            .join(IntakeMessage, IntakeMessage.thread_id == IntakeThread.id)
+            .join(Project, Project.id == IntakeThread.project_id)
+            .where(
+                IntakeMessage.provider_message_id.in_(candidates),
+                IntakeThread.mailbox_id == mailbox_id,
+                Project.owner_id == owner_user_id,
+            )
+            .order_by(IntakeMessage.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def _sender_on_roster(db: AsyncSession, *, project_id: uuid.UUID, from_addr: str) -> bool:
+    """Whether the sender's address is an ACTIVE roster alias on this matter.
+
+    Matched in Python over the JSONB alias lists (ADR-F048: aliases are
+    untrusted text and never reach a SQL predicate), case- and display-name-
+    insensitively on both sides.
+    """
+
+    sender = normalise_address(from_addr)
+    if not sender:
+        return False
+    alias_lists = (
+        await db.execute(
+            select(MatterParticipant.aliases).where(
+                MatterParticipant.project_id == project_id,
+                MatterParticipant.superseded_at.is_(None),
+            )
+        )
+    ).scalars()
+    for aliases in alias_lists:
+        for alias in aliases or []:
+            if isinstance(alias, str) and normalise_address(alias) == sender:
+                return True
+    return False
+
+
+async def _resolve_by_claimed_reference(
+    db: AsyncSession, *, owner_user_id: uuid.UUID, envelope: InboundEmailEnvelope
+) -> tuple[uuid.UUID | None, str | None, str]:
+    """Layer 3 — a subject tag or plus-tagged recipient, gated on the Roster.
+
+    Returns ``(project_id, claimed_reference, layer)``. A claim that resolves to
+    nothing THIS queue owns, and a claim whose sender is not on the roster, are
+    treated identically: no attach, and the claim is recorded for the agent to
+    raise with the lawyer. That sameness is the anti-probe property.
+    """
+
+    tags = parse_reference_tags(envelope.thread.subject)
+    layer = "subject_tag" if tags else ""
+    for tag in parse_plus_tags(list(envelope.message.to) + list(envelope.message.cc)):
+        if tag not in tags:
+            tags.append(tag)
+            layer = layer or "plus_tag"
+    if not tags:
+        return None, None, "none"
+
+    for tag in tags[:_MAX_CLAIM_LOOKUPS]:
+        project_id = (
+            await db.execute(
+                select(Project.id).where(
+                    Project.reference == tag,
+                    Project.owner_id == owner_user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if project_id is None:
+            continue
+        if await _sender_on_roster(db, project_id=project_id, from_addr=envelope.message.from_addr):
+            return project_id, None, layer or "subject_tag"
+    return None, tags[0], layer or "subject_tag"
+
+
+async def resolve_inbound_attachment(
+    db: AsyncSession,
+    *,
+    mailbox_id: uuid.UUID,
+    owner_user_id: uuid.UUID,
+    envelope: InboundEmailEnvelope,
+) -> ResolvedAttachment:
+    """Run the layer-2/layer-3 ladder for a message on a NEW provider thread."""
+
+    project_id = await _resolve_by_threading_headers(
+        db,
+        mailbox_id=mailbox_id,
+        owner_user_id=owner_user_id,
+        headers=envelope.message.headers,
+    )
+    if project_id is not None:
+        return ResolvedAttachment(
+            project_id=project_id,
+            agent_thread_id=await _agent_thread_for_project(db, project_id),
+            layer="threading_headers",
+        )
+
+    project_id, claimed, layer = await _resolve_by_claimed_reference(
+        db, owner_user_id=owner_user_id, envelope=envelope
+    )
+    if project_id is not None:
+        return ResolvedAttachment(
+            project_id=project_id,
+            agent_thread_id=await _agent_thread_for_project(db, project_id),
+            layer=layer,
+        )
+    return ResolvedAttachment(claimed_reference=claimed, layer=layer)
 
 
 async def _cleanup_uploaded(storage_paths: list[str]) -> None:
@@ -164,13 +368,34 @@ async def ingest_email(
     )
 
     if thread is None:
+        # INTAKE-4a (ADR-F088): this message opens a NEW provider thread — run the
+        # trust ladder before deciding it is a new matter. Layers 2/3 may land it
+        # on an EXISTING matter (a reply from a fresh compose, a forward carrying
+        # the tag), in which case the new thread row also inherits that matter's
+        # agent conversation so the same run history continues.
+        resolved = await resolve_inbound_attachment(
+            db, mailbox_id=mailbox_id, owner_user_id=owner_user_id, envelope=envelope
+        )
         thread = IntakeThread(
             mailbox_id=mailbox_id,
             provider_thread_id=envelope.thread.provider_thread_id,
             subject=envelope.thread.subject,
             message_count=0,
+            project_id=resolved.project_id,
+            agent_thread_id=resolved.agent_thread_id,
+            claimed_reference=resolved.claimed_reference,
         )
         db.add(thread)
+        log.info(
+            "intake email thread resolution",
+            extra={
+                "event": "intake_email_resolved",
+                "mailbox_id": str(mailbox_id),
+                "layer": resolved.layer,
+                "attached": resolved.project_id is not None,
+                "claim_recorded": resolved.claimed_reference is not None,
+            },
+        )
         try:
             await db.flush()
         except IntegrityError:
@@ -205,6 +430,11 @@ async def ingest_email(
         to_addrs=list(envelope.message.to),
         subject=envelope.thread.subject,
         body_text=envelope.message.text,
+        # INTAKE-4a (ADR-F088): the two allowlisted threading headers, persisted so
+        # a LATER message that lands on a new provider thread can be matched back
+        # to this one (layer 2). Opaque strings — compared, never interpreted.
+        in_reply_to=envelope.message.headers.get("In-Reply-To"),
+        references_header=envelope.message.headers.get("References"),
         provider_timestamp=envelope.message.timestamp,
     )
     db.add(message_row)
@@ -255,12 +485,16 @@ async def ingest_email(
             final_slug = await _resolve_unique_slug(
                 db, owner_id=owner_user_id, desired=desired_slug
             )
+            # INTAKE-4a (ADR-F088): an intake-born matter gets its reference the
+            # same way a cockpit-created one does — one allocator, one series.
+            reference = await allocate_reference(db, practice_area_id=practice_area_id)
             project = Project(
                 owner_id=owner_user_id,
                 practice_area_id=practice_area_id,
                 name=project_name,
                 slug=final_slug,
                 intake_state="candidate",
+                reference=reference,
             )
             db.add(project)
             try:
