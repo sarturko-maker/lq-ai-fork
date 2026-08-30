@@ -72,6 +72,8 @@ from app.schemas.intake import DraftEmailReplyInput, RecordIntakeOutcomeInput
 logger = logging.getLogger(__name__)
 
 INTAKE_TOOL_NAMES = frozenset({"record_intake_outcome", "draft_email_reply"})
+# INTAKE-5a.1: the human-asked "Summarise now" pass gets the conclusion tool alone.
+_SUMMARISE_TOOL_NAMES = frozenset({"record_intake_outcome"})
 
 # outcome -> the thread status it settles on. The matter-side effect (closing the
 # matter on 'dealt_with') is applied beside this map in _record_intake_outcome.
@@ -126,6 +128,7 @@ def build_intake_tools(
     binding: MatterBinding,
     intake_thread_id: uuid.UUID,
     bridge: BridgeClient | None = None,
+    summarise_only: bool = False,
 ) -> list[Callable[..., Any]]:
     """Build the two intake tools for one run on an intake-born matter.
 
@@ -144,13 +147,20 @@ def build_intake_tools(
     the deployment has not configured a bridge: an approved reply is then kept as a
     draft with ``send_error='not_configured'`` and the tool says plainly that nothing
     was delivered.
+
+    ``summarise_only`` (INTAKE-5a.1) is the human-asked "Summarise now" pass: the run
+    exists to write an account of a thread that never got one. It gets
+    ``record_intake_outcome`` and NOTHING ELSE — no reply tool is built, so the grant
+    set is narrowed to match (R6 fails closed on a tool that is not in it), and the
+    outcome it records leaves the thread's status exactly where it was.
     """
+    granted = _SUMMARISE_TOOL_NAMES if summarise_only else INTAKE_TOOL_NAMES
     ctx = GuardContext(
         session_factory=session_factory,
         run_id=run_id,
         user_id=binding.user_id,
         project_id=binding.project_id,
-        granted=INTAKE_TOOL_NAMES,
+        granted=granted,
         practice_area_id=binding.practice_area_id,
     )
 
@@ -215,6 +225,7 @@ def build_intake_tools(
                 note=note,
                 matter_title=matter_title,
                 summary=summary,
+                summarise_only=summarise_only,
             ),
             ctx,
         )
@@ -270,6 +281,10 @@ def build_intake_tools(
             ctx,
         )
 
+    if summarise_only:
+        # Nothing this run does can reach a counterparty: the tool is not built, so
+        # there is no interrupt to approve and no send path to reach.
+        return [record_intake_outcome]
     return [record_intake_outcome, draft_email_reply]
 
 
@@ -300,6 +315,9 @@ async def load_intake_thread_for_run(
     ``received``). A ``LIMIT 1`` would only have replaced a crash with a coin flip, so
     the run is bound to its thread EXPLICITLY, in three deterministic steps:
 
+    0. **A human-asked summarise pass** (INTAKE-5a.1) names its thread on the row
+       itself (``intake_threads.summarise_pass_run_id``): it claims no inbound
+       message, so no later layer could find it.
     1. **This run's own work.** The worker stamps an inbound message's ``run_id`` at
        the moment it starts a run for it (``intake_worker``), so the message carrying
        this ``run_id`` names the thread the run was started for.
@@ -331,6 +349,12 @@ async def load_intake_thread_for_run(
     candidates = await load_conversation_intake_threads(
         db, project_id=project_id, agent_thread_id=agent_thread_id
     )
+    if run_id is not None:
+        # Layer 0 (INTAKE-5a.1): a human-asked "Summarise now" pass names its thread
+        # outright — it claims no inbound message, so nothing below could find it.
+        for candidate in candidates:
+            if candidate.summarise_pass_run_id == run_id:
+                return candidate
     if len(candidates) <= 1:
         return candidates[0] if candidates else None
 
@@ -475,8 +499,17 @@ async def _record_intake_outcome(
     note: str,
     matter_title: str,
     summary: list[dict[str, str]],
+    summarise_only: bool = False,
 ) -> str:
-    """Validate → write the outcome + summary onto the thread → apply the project effect."""
+    """Validate → write the outcome + summary onto the thread → apply the project effect.
+
+    ``summarise_only`` (INTAKE-5a.1) is the human-asked backfill pass. It writes the
+    ACCOUNT of the thread — outcome, label, note, title, summary — and touches nothing
+    else: the thread's status and the matter's open/closed state are facts a real run
+    established, and a pass whose only purpose is to describe them must not restate
+    them as decisions. Concretely, it can never downgrade a ``replied`` or ``handled``
+    thread back to ``awaiting_human``, and it can never re-open (or close) the matter.
+    """
     try:
         proposal = RecordIntakeOutcomeInput(
             outcome=outcome,  # type: ignore[arg-type]  # Pydantic validates the closed set
@@ -526,8 +559,15 @@ async def _record_intake_outcome(
     # place a failed delivery is visible to the lawyer, so the outcome records itself
     # WITHOUT touching the status. The doctrine asks for the outcome first, so this is
     # the out-of-order case, not the normal one.
-    if thread.status not in _SEND_TERMINAL_THREAD_STATUSES:
-        thread.status = _OUTCOME_THREAD_STATUS[proposal.outcome]
+    if summarise_only:
+        # The lawyer asked for an account of a settled thread, not for a new decision
+        # about it. Leaving the status alone is what makes `replied`/`handled` sticky
+        # here — there is no "stronger status" comparison to get wrong.
+        status_note = f"the thread stays {thread.status}"
+    else:
+        if thread.status not in _SEND_TERMINAL_THREAD_STATUSES:
+            thread.status = _OUTCOME_THREAD_STATUS[proposal.outcome]
+        status_note = f"the thread is now {thread.status}"
 
     # ONE owner-scoped load for every matter-side effect below (the name, the close,
     # the re-open) — the same row, in the same transaction, read once.
@@ -558,6 +598,13 @@ async def _record_intake_outcome(
         project.name = proposal.matter_title
         project.name_source = "agent"
 
+    if summarise_only:
+        return (
+            f"Summary recorded for this thread ({proposal.outcome}, label: "
+            f"{proposal.label}). Nothing else changed: {status_note} and the matter's "
+            "state is exactly as the earlier run left it."
+        )
+
     project_note = "the matter stays open for the lawyer"
     # Last-wins must win WHOLE (adversarial review B4): an earlier dealt_with in this
     # same run closed the matter, so changing our mind has to re-open it or the thread
@@ -577,7 +624,7 @@ async def _record_intake_outcome(
 
     return (
         f"Intake outcome recorded: {proposal.outcome} (label: {proposal.label}). "
-        f"The thread is now {thread.status} and {project_note}. "
+        f"{status_note[0].upper()}{status_note[1:]} and {project_note}. "
         "This thread stays visible to the lawyer with your label and note."
     )
 

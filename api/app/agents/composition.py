@@ -349,6 +349,24 @@ INTAKE_DOCTRINE = (
     "stop for them again."
 )
 
+# INTAKE-5a.1: the doctrine for a human-asked "Summarise now" pass. It replaces
+# INTAKE_DOCTRINE (never adds to it): this run has ONE tool, no way to reach anyone,
+# and nothing to decide — the thread is already settled and the lawyer only wants the
+# account of it that an earlier run never wrote.
+INTAKE_SUMMARISE_DOCTRINE = (
+    "\n\nThis matter came in through the company's legal-intake mailbox, and the "
+    "supervising lawyer has asked you for ONE thing: an account of this email thread "
+    "that they can read in their Inbox. The thread is already settled and everything "
+    "you need is in this conversation — you have read it before. Do not open documents "
+    "again, do not start new work, and do not propose a reply: you have no reply tool "
+    "on this run and nothing you do here reaches anyone outside the system. "
+    "Call record_intake_outcome exactly once, restating the outcome, label, note and "
+    "matter title that already describe this thread (or the honest ones, if it was "
+    "never concluded), with a summary of the thread so far — at most five short titled "
+    "bullets. Recording it changes nothing about the thread's state: it is filed "
+    "exactly as it was. Then say, in one line, that you have written the summary."
+)
+
 # VM2-B (#526): skills every practice area gets regardless of its practice_area_skills
 # bindings — the composition-seam mirror of the area-agnostic matter-memory TOOL grant
 # (the matter-memory tools are built for every matter-bound run in the `if binding is not
@@ -610,6 +628,7 @@ def system_prompt_for(
     documents: str | None = None,
     tabular_enabled: bool = False,
     intake_enabled: bool = False,
+    intake_summarise_only: bool = False,
 ) -> str:
     """The run's full system prompt — base + matter + client + matter memory + area.
 
@@ -657,7 +676,9 @@ def system_prompt_for(
         # INTAKE-3 (ADR-F086): unconditional for a run granted the intake tools —
         # never fence-gated prose (VM2-B lesson).
         if intake_enabled:
-            prompt += INTAKE_DOCTRINE
+            # INTAKE-5a.1: the summarise pass has no reply tool, so it must not be
+            # told to draft one — it gets its own, smaller doctrine.
+            prompt += INTAKE_SUMMARISE_DOCTRINE if intake_summarise_only else INTAKE_DOCTRINE
     prompt += render_memory_tiers(
         client_context=client_context,
         practice_playbook=practice_playbook,
@@ -768,6 +789,7 @@ async def compose_and_execute_run(
         # policy onto it. The intake run is the one whose conversation IS the thread's
         # ``agent_thread_id`` — so the gate is provenance AND identity.
         is_intake_run = False
+        intake_summarise_only = False
         # INTAKE-4b (ADR-F087/F088): the ONE intake thread this run is working on,
         # resolved in the project block below. None for every non-intake run — and
         # also when the binding is genuinely ambiguous, which fails CLOSED (no intake
@@ -828,6 +850,15 @@ async def compose_and_execute_run(
                         )
                         intake_thread_id = intake_thread.id if intake_thread else None
                         is_intake_run = intake_thread_id is not None
+                        # INTAKE-5a.1: the human's "Summarise now" pass — a READ-ONLY
+                        # conclude over the conversation the agent already has. Its
+                        # identity is a DB fact written before the run was queued
+                        # (migration 0104), never anything the payload or the model
+                        # says; it narrows the tools and swaps the doctrine below.
+                        intake_summarise_only = (
+                            intake_thread is not None
+                            and intake_thread.summarise_pass_run_id == run_id
+                        )
                     binding = MatterBinding(
                         project_id=project.id,
                         user_id=run.user_id,
@@ -1196,6 +1227,7 @@ async def compose_and_execute_run(
                     binding=binding,
                     intake_thread_id=intake_thread_id,
                     bridge=mail_bridge_client_provider(),
+                    summarise_only=intake_summarise_only,
                 )
         # SETUP-4a (ADR-F062, supersedes ADR-F054 D1): the area's domain tool GROUPS are
         # now built by a data-driven REGISTRY LOOP, not a hardcoded per-area branch.
@@ -1383,6 +1415,7 @@ async def compose_and_execute_run(
                     area_spec,
                     tabular_enabled=tabular_enabled,
                     intake_enabled=is_intake_run,
+                    intake_summarise_only=intake_summarise_only,
                 ),
                 subagents=wiring.subagents or None,
                 skills=wiring.main_sources,

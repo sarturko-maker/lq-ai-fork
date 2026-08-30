@@ -438,6 +438,32 @@ class IntakeLiveAskRead(BaseModel):
     allowed_decisions: list[str] = Field(default_factory=list)
 
 
+class IntakeWaitingOnRead(BaseModel):
+    """Why this thread has not been read yet (INTAKE-5a.1).
+
+    A conversation runs ONE run at a time (``is_conversation_in_flight``), so a thread
+    whose sibling is paused on the lawyer's approval is not "in progress" — it is
+    waiting for them, and the Inbox used to say "Agent is reading the thread", which
+    was not true. This names the sibling that holds the live ask so the row can say
+    what is actually blocking it, and link to it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: uuid.UUID
+    #: Single-line neutralised, like every other subject on this surface.
+    subject: str
+
+
+class IntakeSummariseResponse(BaseModel):
+    """``POST /intake/threads/{id}/summarise`` — IDs and a flag, never content."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: uuid.UUID
+    queued: bool
+
+
 class IntakeThreadRead(BaseModel):
     """One row of the lawyer's Inbox."""
 
@@ -467,6 +493,10 @@ class IntakeThreadRead(BaseModel):
     #: The error CLASS of the newest outbound message that failed to send
     #: (``timeout``, ``http_502``, …) — never a provider message, body or address.
     last_send_error: str | None = None
+    #: INTAKE-5a.1: set only when this thread is unread BECAUSE a sibling thread on the
+    #: same conversation is paused on the lawyer's decision. ``None`` otherwise — and
+    #: never set when the live ask is on THIS thread (that is what ``live_ask`` says).
+    waiting_on: IntakeWaitingOnRead | None = None
     #: Server-computed queue position (plan ruling 3), ascending: 0 = a live ask,
     #: 1 = a failed send, 2 = waiting for a human, 3 = still working, 4 = replied,
     #: 5 = handled. ``attention=true`` returns ranks 0, 1 and 2 only. Computed here so the

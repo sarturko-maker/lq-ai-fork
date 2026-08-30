@@ -2309,6 +2309,52 @@ def test_intake_doctrine_rides_the_prompt_only_for_an_intake_run() -> None:
     assert "NEW draft with draft_email_reply" in INTAKE_DOCTRINE
 
 
+def test_a_summarise_pass_gets_its_own_doctrine_and_never_the_drafting_one() -> None:
+    """INTAKE-5a.1: the summarise pass has no reply tool, so telling it to draft one
+    would coach it into a tool it cannot call. The two doctrines are exclusive."""
+    from app.agents.composition import INTAKE_DOCTRINE, INTAKE_SUMMARISE_DOCTRINE
+
+    binding = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Intake — NDA",
+        privileged=False,
+        minimum_inference_tier=None,
+        practice_area_id=None,
+    )
+    prompt = system_prompt_for(binding, intake_enabled=True, intake_summarise_only=True)
+    assert INTAKE_SUMMARISE_DOCTRINE in prompt
+    assert INTAKE_DOCTRINE not in prompt
+    assert "draft_email_reply" not in INTAKE_SUMMARISE_DOCTRINE
+    assert "record_intake_outcome" in INTAKE_SUMMARISE_DOCTRINE
+    # And it is never injected into an ordinary intake run.
+    assert INTAKE_SUMMARISE_DOCTRINE not in system_prompt_for(binding, intake_enabled=True)
+
+
+def test_the_matter_addendum_names_the_reference_beside_the_name() -> None:
+    """INTAKE-5a.1: "ORG-COM-0013 · Contoso hosting renewal" — the agent and the
+    lawyer read the same handle. A matter with no reference degrades to its name."""
+    binding = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Contoso hosting renewal",
+        privileged=False,
+        minimum_inference_tier=None,
+        practice_area_id=None,
+        reference="ORG-COM-0013",
+    )
+    assert 'the matter "ORG-COM-0013 · Contoso hosting renewal"' in system_prompt_for(binding)
+    plain = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Contoso hosting renewal",
+        privileged=False,
+        minimum_inference_tier=None,
+        practice_area_id=None,
+    )
+    assert 'the matter "Contoso hosting renewal"' in system_prompt_for(plain)
+
+
 @pytest_asyncio.fixture
 async def intake_thread_id(comp_env: CompositionEnv) -> AsyncIterator[uuid.UUID]:
     """Turn the composition matter into an intake candidate with a bound thread.

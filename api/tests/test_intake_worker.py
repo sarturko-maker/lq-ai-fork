@@ -39,13 +39,19 @@ from app.security import hash_password
 from app.workers.arq_setup import WorkerSettings
 from app.workers.intake_worker import (
     DEFAULT_INTAKE_MAX_STEPS,
+    DEFAULT_SUMMARISE_MAX_STEPS,
     INTAKE_EMAIL_JOB_NAME,
+    INTAKE_SUMMARISE_JOB_NAME,
     INTAKE_THREAD_TITLE,
     OWNER_MISMATCH_NOTE,
     intake_email_job,
+    process_intake_summarise,
     process_intake_thread,
 )
-from app.workers.queue import INTAKE_EMAIL_JOB_NAME as QUEUE_SIDE_JOB_NAME
+from app.workers.queue import (
+    INTAKE_EMAIL_JOB_NAME as QUEUE_SIDE_JOB_NAME,
+    INTAKE_SUMMARISE_JOB_NAME as QUEUE_SIDE_SUMMARISE_JOB_NAME,
+)
 
 
 @pytest.mark.unit
@@ -696,3 +702,122 @@ async def test_newest_live_run_is_one_rule_for_both_call_sites(
     async with commit_factory() as db:
         assert await newest_live_run(db, uuid.uuid4()) is None
         assert await is_conversation_in_flight(db, uuid.uuid4()) is False
+
+
+# --------------------------------------------------------------------------- #
+# INTAKE-5a.1 — the human-asked summarise pass
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.unit
+def test_intake_summarise_job_registered_on_worker_settings() -> None:
+    """Same drift guard as the intake job: the endpoint enqueues a name the worker
+    must actually register, or the lawyer's request sits on the queue forever."""
+    registered = [
+        getattr(f, "name", getattr(f, "__name__", None)) for f in WorkerSettings.functions
+    ]
+    assert INTAKE_SUMMARISE_JOB_NAME in registered
+    assert INTAKE_SUMMARISE_JOB_NAME == QUEUE_SIDE_SUMMARISE_JOB_NAME
+
+
+async def _ran_once(factory: async_sessionmaker[AsyncSession], row: Seeded) -> AgentThread:
+    """Give the thread a settled first run, so it has a conversation to summarise."""
+    await process_intake_thread(factory, get_settings(), row.thread_id, enqueue=_ok)
+    async with factory() as db:
+        thread = await db.get(IntakeThread, row.thread_id)
+        assert thread is not None and thread.agent_thread_id is not None
+        run = (
+            (await db.execute(select(AgentRun).where(AgentRun.thread_id == thread.agent_thread_id)))
+            .scalars()
+            .one()
+        )
+        run.status = "completed"
+        thread.status = "replied"
+        agent_thread = await db.get(AgentThread, thread.agent_thread_id)
+        assert agent_thread is not None
+        await db.commit()
+        return agent_thread
+
+
+@pytest.mark.integration
+async def test_summarise_starts_a_marked_run_on_the_existing_conversation(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
+) -> None:
+    """The pass runs on the conversation that already holds the chain, and marks
+    itself on the thread BEFORE it is queued — that marker is what makes composition
+    build it without a reply tool and bind it to this thread."""
+    agent_thread = await _ran_once(commit_factory, seeded)
+    out = await process_intake_summarise(
+        commit_factory, get_settings(), seeded.thread_id, enqueue=_ok
+    )
+    assert out["status"] == "started"
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        run = await db.get(AgentRun, uuid.UUID(out["run_id"]))
+        assert thread is not None and run is not None
+        assert run.thread_id == agent_thread.id
+        assert run.user_id == seeded.user_id
+        assert run.max_steps == DEFAULT_SUMMARISE_MAX_STEPS
+        assert thread.summarise_pass_run_id == run.id
+        # It claims no email and moves nothing: the thread is exactly as it was.
+        assert thread.status == "replied"
+        assert thread.summary is None
+        # The turn carries no email content at all — there is nothing to fence.
+        assert "----- BEGIN INTAKE EMAIL " not in run.prompt
+        assert "NDA" not in run.prompt
+
+
+@pytest.mark.integration
+async def test_summarise_defers_while_the_conversation_is_in_flight(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
+) -> None:
+    """A live run will write the summary itself; a second run would fork the thread."""
+    await process_intake_thread(commit_factory, get_settings(), seeded.thread_id, enqueue=_ok)
+    out = await process_intake_summarise(
+        commit_factory, get_settings(), seeded.thread_id, enqueue=_ok
+    )
+    assert out["status"] == "deferred"
+
+
+@pytest.mark.integration
+async def test_summarise_refuses_a_closed_matter_without_touching_the_thread(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
+) -> None:
+    """Composition binds no archived matter, so the run would compose without the
+    intake tools and write nothing. An honest no-op beats a wasted run."""
+    await _ran_once(commit_factory, seeded)
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        assert project is not None
+        project.archived_at = datetime.now(tz=UTC)
+        await db.commit()
+    out = await process_intake_summarise(
+        commit_factory, get_settings(), seeded.thread_id, enqueue=_ok
+    )
+    assert out["status"] == "noop"
+    assert out["reason"] == "not_composable"
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        assert thread.status == "replied"
+        assert thread.summarise_pass_run_id is None
+
+
+@pytest.mark.integration
+async def test_summarise_is_a_noop_once_a_summary_exists(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
+) -> None:
+    await _ran_once(commit_factory, seeded)
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        thread.summary = [{"title": "What they want", "text": "A review."}]
+        await db.commit()
+    out = await process_intake_summarise(
+        commit_factory, get_settings(), seeded.thread_id, enqueue=_ok
+    )
+    assert out == {
+        "status": "noop",
+        "reason": "summary_exists",
+        "thread_id": str(seeded.thread_id),
+    }

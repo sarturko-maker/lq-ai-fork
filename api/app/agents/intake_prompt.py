@@ -182,6 +182,35 @@ def _render_body(text: str) -> str:
     return _neutralise(stripped)
 
 
+# INTAKE-5a.1 — the human-asked "Summarise now" pass. Fork-authored and FIXED: it
+# carries no email content at all (the thread is already in the conversation the run
+# resumes), so there is nothing untrusted to fence here. The obligations it states are
+# the ones the composition-root doctrine (INTAKE_SUMMARISE_DOCTRINE) also states; this
+# is the turn that asks for the work.
+_SUMMARISE_INSTRUCTION = (
+    "The supervising lawyer has asked you to summarise this intake email thread "
+    "({thread_ref}) for their Inbox. It is already settled — this is not new work.\n\n"
+    "You have read this thread before in this same conversation, so everything you "
+    "need is above. Do not read documents again, do not start new work, and do not "
+    "propose a reply (you have no reply tool on this run).\n\n"
+    "Call record_intake_outcome exactly once: the outcome, label, note and matter "
+    "title that already describe this thread — restate them as they stand — and the "
+    "summary, at most five short titled bullets describing the thread so far for "
+    "someone who has never seen it. Nothing about the thread's state changes. Then "
+    "say in one line that the summary is written."
+)
+
+
+def build_summarise_prompt(thread_ref: str) -> str:
+    """The user turn for a summarise-only pass (INTAKE-5a.1).
+
+    ``thread_ref`` is the intake thread's uuid — an internal identifier, never the
+    subject and never the provider's id, so nothing sender-controlled enters this
+    turn at all.
+    """
+    return _SUMMARISE_INSTRUCTION.format(thread_ref=thread_ref)
+
+
 def build_intake_prompt(view: IntakeEmailView, *, nonce: str | None = None) -> str:
     """The run's user turn: fork instruction + the email fenced as untrusted DATA.
 
@@ -240,5 +269,6 @@ __all__ = [
     "MAX_RENDERED_RECIPIENTS",
     "IntakeEmailView",
     "build_intake_prompt",
+    "build_summarise_prompt",
     "single_line_neutralised",
 ]

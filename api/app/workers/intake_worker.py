@@ -51,7 +51,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.intake_prompt import IntakeEmailView, build_intake_prompt
+from app.agents.intake_prompt import (
+    IntakeEmailView,
+    build_intake_prompt,
+    build_summarise_prompt,
+)
 from app.agents.run_service import (
     AgentThreadBusy,
     is_conversation_in_flight,
@@ -319,6 +323,150 @@ async def process_intake_thread(
             "thread_id": str(thread_id),
             "run_id": str(run.id),
         }
+
+
+# INTAKE-5a.1: the human-asked "Summarise now" pass. Registered on the worker beside
+# the intake job — must match the constant in :mod:`app.workers.queue`.
+INTAKE_SUMMARISE_JOB_NAME = "intake_summarise_job"
+
+# A summarise pass reads nothing and writes one tool call. Eight steps is generous for
+# "call record_intake_outcome and stop"; it is a cap, not a target.
+DEFAULT_SUMMARISE_MAX_STEPS = 8
+
+
+async def process_intake_summarise(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    thread_id: uuid.UUID,
+    *,
+    enqueue: Callable[[uuid.UUID], Awaitable[bool]] = enqueue_agent_run_job,
+) -> dict[str, Any]:
+    """Start ONE read-only summarise run for a settled, summary-less thread.
+
+    The lawyer asked for an account of a thread whose runs never wrote one (they
+    predate INTAKE-5a, or they safe-failed). This starts an ordinary agent run on the
+    thread's EXISTING conversation — where the whole chain already is — composed as a
+    summarise pass: no ``draft_email_reply`` tool, the summarise doctrine, and an
+    outcome write that leaves the thread's status and the matter's state untouched.
+
+    Every refusal is an honest no-op, never an error stamped on the thread: this is a
+    convenience the human asked for, and it must not be able to damage a settled
+    thread. The endpoint (``POST /intake/threads/{id}/summarise``) has already checked
+    the same conditions against the same rows; re-checking here is the race guard, not
+    a duplicate policy.
+    """
+    async with session_factory() as db:
+        thread = (
+            await db.execute(
+                select(IntakeThread).where(IntakeThread.id == thread_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if thread is None:
+            return {"status": "noop", "reason": "thread_missing", "thread_id": str(thread_id)}
+        if thread.summary:
+            # Somebody's run wrote one between the request and this job.
+            return {"status": "noop", "reason": "summary_exists", "thread_id": str(thread_id)}
+        if thread.agent_thread_id is None or thread.project_id is None:
+            return {"status": "noop", "reason": "no_conversation", "thread_id": str(thread_id)}
+
+        mailbox = await db.get(IntakeMailbox, thread.mailbox_id)
+        if mailbox is None:
+            return {"status": "noop", "reason": "binding_missing", "thread_id": str(thread_id)}
+        if await is_conversation_in_flight(db, thread.agent_thread_id):
+            # A real run is working this conversation; it may write the summary itself,
+            # and a second run would fork the thread.
+            return {"status": "deferred", "thread_id": str(thread_id)}
+
+        project = await db.get(Project, thread.project_id)
+        if (
+            project is None
+            or project.archived_at is not None
+            or project.owner_id != mailbox.owner_user_id
+        ):
+            # Composition refuses to bind an archived matter (the memory fence) or one
+            # the mailbox owner does not own, and a run with no binding gets no intake
+            # tools — it would burn a run and write nothing. Refuse here instead.
+            log.info(
+                "intake_summarise_job: matter is closed or not the mailbox owner's",
+                extra={"event": "intake_summarise_not_composable", "thread_id": str(thread_id)},
+            )
+            return {"status": "noop", "reason": "not_composable", "thread_id": str(thread_id)}
+
+        prompt = build_summarise_prompt(str(thread.id))
+        agent_thread_id = thread.agent_thread_id
+
+        async def _mark_then_enqueue(run_id: uuid.UUID) -> bool:
+            """Write the run's summarise MARKER, then queue it — in that order.
+
+            The marker (``intake_threads.summarise_pass_run_id``, migration 0104) is
+            what composition reads to build this run without a reply tool and to bind
+            it to THIS thread. Queueing first would open a window in which the worker
+            could compose the run as an ordinary intake run. ``start_agent_run``
+            commits (releasing the row lock taken above) before it calls this, so the
+            second session cannot deadlock against the first.
+            """
+            async with session_factory() as mark_db:
+                marked = await mark_db.get(IntakeThread, thread_id)
+                if marked is None:
+                    return False
+                marked.summarise_pass_run_id = run_id
+                await mark_db.commit()
+            return await enqueue(run_id)
+
+        try:
+            run = await start_agent_run(
+                db,
+                user_id=mailbox.owner_user_id,
+                project_id=thread.project_id,
+                thread_id=agent_thread_id,
+                prompt=prompt,
+                budget_profile=DEFAULT_INTAKE_BUDGET_PROFILE,
+                max_steps=DEFAULT_SUMMARISE_MAX_STEPS,
+                title=INTAKE_THREAD_TITLE,
+                settings=settings,
+                enqueue=_mark_then_enqueue,
+            )
+        except AgentThreadBusy:
+            await db.rollback()
+            return {"status": "deferred", "thread_id": str(thread_id)}
+        except Exception:
+            await db.rollback()
+            log.exception(
+                "intake_summarise_job: could not start the summarise run",
+                extra={"event": "intake_summarise_run_failed", "thread_id": str(thread_id)},
+            )
+            return {"status": "error", "reason": "run_start_failed", "thread_id": str(thread_id)}
+
+        if run.status != AgentRunStatus.running.value:
+            # start_agent_run already settled it failed (ADR-F009: never a zombie).
+            # The thread is untouched — the lawyer can ask again.
+            log.warning(
+                "intake_summarise_job: the summarise run could not be queued",
+                extra={
+                    "event": "intake_summarise_enqueue_failed",
+                    "thread_id": str(thread_id),
+                    "run_id": str(run.id),
+                },
+            )
+            return {"status": "error", "reason": "enqueue_failed", "thread_id": str(thread_id)}
+
+        log.info(
+            "intake_summarise_job: run started",
+            extra={
+                "event": "intake_summarise_run_started",
+                "thread_id": str(thread_id),
+                "run_id": str(run.id),
+            },
+        )
+        return {"status": "started", "thread_id": str(thread_id), "run_id": str(run.id)}
+
+
+async def intake_summarise_job(ctx: dict[str, Any], thread_id_str: str) -> dict[str, Any]:
+    """arq wrapper around :func:`process_intake_summarise` (process globals)."""
+
+    return await process_intake_summarise(
+        get_session_factory(), get_settings(), uuid.UUID(thread_id_str)
+    )
 
 
 async def intake_email_job(ctx: dict[str, Any], thread_id_str: str) -> dict[str, Any]:
