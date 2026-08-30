@@ -1,6 +1,8 @@
 # INTAKE-5 — the inbox surface: see every email thread, act on the paused ones, attach to the right matter
 
-Status: DRAFT for maintainer edit (written 2026-08-30 at the close of INTAKE-4b, PR #297).
+Status: DRAFT for maintainer edit (written 2026-08-30 at the close of INTAKE-4b, PR #297;
+revised same day after the maintainer reviewed the wireframe — ruling 7 summary-over-chain).
+Wireframe: https://claude.ai/code/artifact/4b8923fa-3bb6-45cc-bcc8-3661c146c37f
 Parent: `docs/fork/plans/INTAKE-INBOX-plan.md` (ACCEPTED) § Ruling 2 (native Svelte inbox) +
 § Amendment A1 (every thread is a matter); ADR-F086 + § A1; ADR-F087/F088 (shipped).
 Tasks: #542 (INTAKE-5). New ADR drafted in the PR: **F089** (human attach — what moves with a
@@ -14,9 +16,12 @@ opening a conversation they already know about. INTAKE-5 gives them the front do
 1. **An Inbox in the cockpit** — every email thread the intake mailbox has handled, the ones
    that need a human first ("needs your decision", "needs a human", "send failed"), each one
    saying which matter it landed in and what the agent concluded.
-2. **The thread itself** — the emails as received and as sent, the agent's label and note, and
-   one click into the conversation where the existing Approve / Edit / Respond card already
-   lives. No second approval surface.
+2. **The thread, summarised** — the agent has read the whole chain; the human should not have
+   to. What is always visible is the agent's summary: **at most 5 bullets, each with a bold
+   inline title** ("What they want.", "Where it stands.", "Proposed next step."). The raw email
+   chain — often long — is hidden behind one click. Plus the label and note, and one click into
+   the conversation where the existing Approve / Edit / Respond card already lives. No second
+   approval surface.
 3. **"This belongs to Matter X"** — the human operation A1 promised: move a thread (and its
    conversation) onto an existing matter when the agent opened a stub it shouldn't have, or
    when a stranger's email honestly claimed a reference (the `claimed_reference` note). The
@@ -24,7 +29,7 @@ opening a conversation they already know about. INTAKE-5 gives them the front do
 4. **The admin can bind the mailbox in the UI** — the API exists since INTAKE-1; the page never
    did.
 
-Nothing here changes what the agent does; it changes what the lawyer can see and decide.
+The one change to what the agent does: it now writes that summary every time it finishes reading a thread.
 
 ## What the code says today (ground truth, 2026-08-30)
 
@@ -91,9 +96,23 @@ Nothing here changes what the agent does; it changes what the lawyer can see and
    such a proposal would resolve into. One line in the backlog.
 6. **Retire the dead enum values now**: migration 0102 narrows the `projects.intake_state`
    CHECK to `NULL|candidate` (assert no rows carry `promoted|dismissed`; fail loud otherwise),
-   and adds the read indexes (`ix_intake_threads_project_id`,
-   `ix_intake_threads_status_last_inbound` on `(status, last_inbound_at desc)`).
-7. **Bodies are shown to the owner, never logged.** The thread detail returns `body_text`
+   adds the read indexes (`ix_intake_threads_project_id`,
+   `ix_intake_threads_status_last_inbound` on `(status, last_inbound_at desc)`), and adds
+   `intake_threads.summary` JSONB nullable + `summary_run_id` (ruling 7).
+7. **Summary over chain (maintainer ruling 2026-08-30).** The thread detail opens on the
+   agent's summary — `intake_threads.summary` JSONB, a list of ≤5 `{title, text}` items
+   (title ≤40 chars, text ≤300 chars, plain text, control chars rejected) — with the email chain
+   collapsed (`<details>`), "Show the N emails". The summary is written by
+   `record_intake_outcome` gaining a required `summary` arg (the same call that already ends
+   every intake run) and is REWRITTEN in full on every run so it always describes "the thread
+   so far"; the doctrine skill coaches the bullet shape (what they want / what we did / where
+   it stands / open points / proposed next step). Safe-fail (run ended without an outcome)
+   leaves the previous summary in place and shows "Summary not updated — the agent's last run
+   did not finish"; a thread that never had one shows the chain expanded instead. The summary
+   is agent-written text about untrusted mail: rendered as text, never HTML; the human corrects
+   nothing here (the conversation is where they steer). Row `meta` in the list = the FIRST
+   bullet's text, so the inbox itself reads as a digest.
+8. **Bodies are shown to the owner, never logged.** The thread detail returns `body_text`
    (their own mail; untrusted for the model, ordinary for the human). Rendered as plain text
    with preserved line breaks — no HTML, no link auto-activation of anything but bare `https`
    URLs shown as text. Attachments appear as filenames linking to the file already in the
@@ -105,7 +124,8 @@ deleted are visible to the mailbox `owner_user_id` only)
 - `GET /intake/threads?project_id=&status=&attention=true&limit=&cursor=` →
   `IntakeThreadListResponse{items:[IntakeThreadRead], next_cursor}`. `IntakeThreadRead`:
   id, mailbox address, subject (single-line neutralised), status, outcome, label, outcome_note,
-  auth_state, claimed_reference, message_count, last_inbound_at, `project{id, name, reference,
+  auth_state, claimed_reference, `summary[]`, `summary_stale` (last run settled without
+  rewriting it), message_count, last_inbound_at, `project{id, name, reference,
   archived}`, `agent_thread_id`, `live_ask{run_id, tool_names, allowed_decisions}|null`
   (from `newest_live_run` via one window-function query, not N+1), `last_send_error`.
 - `GET /intake/threads/{id}` → thread + `messages:[IntakeMessageRead]` (direction, from, to,
@@ -135,13 +155,17 @@ All under the `_active` user deps; `MutatingUser` on attach; cross-user 404.
 
 ## Slices (one PR each, full ADR-F005 gate)
 
-- **INTAKE-5a — read surface (2 days).** Migration 0102 (indexes + enum narrowing); list +
-  detail endpoints; cockpit Inbox view + matter Inbox tab + detail; admin mailbox page. Tests:
+- **INTAKE-5a — read surface (2–3 days).** Migration 0102 (indexes + enum narrowing + summary
+  columns); `record_intake_outcome` `summary` arg + doctrine coaching + safe-fail stale flag;
+  list + detail endpoints; cockpit Inbox view + matter Inbox tab + summary-first detail with
+  collapsed chain; admin mailbox page. Tests:
   ownership (cross-user 404, deleted-project fallback to mailbox owner), attention ordering
-  table-driven, `live_ask` derived from `newest_live_run` (paused run present / superseded /
+  table-driven, summary schema rejects >5 / oversize / control chars, safe-fail keeps the
+  previous summary and flags stale, `live_ask` derived from `newest_live_run` (paused run present / superseded /
   failed), body never in logs/audit (log-capture test), helpers vitest. Live: dev inbox shows
   the 4b threads with `ORG-COM-0011`; the replied thread's messages in order; the paused ask
-  deep-links to the card; screenshots in `docs/fork/evidence/intake-5a/`.
+  deep-links to the card; a rerun on the NDA thread rewrites the summary to ≤5 titled bullets
+  that a fresh reader can act on; screenshots in `docs/fork/evidence/intake-5a/`.
 - **INTAKE-5b — human attach (1 day).** ADR-F089; endpoint + dialog; stub archive rule;
   audit row. Tests: moves thread+conversation+files; clears claim; busy → 409; cross-owner
   target → 404; archived target → 404; stub archived only when empty; non-stub source
