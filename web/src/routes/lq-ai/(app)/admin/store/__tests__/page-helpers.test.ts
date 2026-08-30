@@ -34,6 +34,7 @@ function area(over: Partial<PracticeArea> = {}): PracticeArea {
 		id: 'id',
 		key: 'commercial',
 		name: 'Commercial',
+		area_code: 'COM',
 		unit_label: 'Matter',
 		configured: true,
 		position: 0,

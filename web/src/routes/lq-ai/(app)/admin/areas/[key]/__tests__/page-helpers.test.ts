@@ -39,6 +39,7 @@ function area(over: Partial<PracticeArea> = {}): PracticeArea {
 		id: '00000000-0000-0000-0000-000000000001',
 		key: 'commercial',
 		name: 'Commercial',
+		area_code: 'COM',
 		unit_label: 'Matter',
 		configured: true,
 		position: 0,
@@ -73,6 +74,7 @@ describe('findAreaByKey', () => {
 describe('diffPatch', () => {
 	const original = area({
 		name: 'Commercial',
+		area_code: 'COM',
 		unit_label: 'Matter',
 		profile_md: '# doctrine',
 		default_tier_floor: 2
@@ -82,6 +84,7 @@ describe('diffPatch', () => {
 		expect(
 			diffPatch(original, {
 				name: 'Commercial',
+				area_code: 'COM',
 				unit_label: 'Matter',
 				profile_md: '# doctrine',
 				default_tier_floor: '2',
@@ -94,6 +97,7 @@ describe('diffPatch', () => {
 		expect(
 			diffPatch(original, {
 				name: 'Commercial Contracts',
+				area_code: 'COM',
 				unit_label: 'Matter',
 				profile_md: '# doctrine',
 				default_tier_floor: '2',
@@ -106,6 +110,7 @@ describe('diffPatch', () => {
 		expect(
 			diffPatch(original, {
 				name: '  Commercial  ',
+				area_code: ' COM ',
 				unit_label: ' Matter ',
 				profile_md: '# doctrine',
 				default_tier_floor: '2',
@@ -114,10 +119,28 @@ describe('diffPatch', () => {
 		).toEqual({});
 	});
 
+	it('sends a changed area code and never clears one — INTAKE-4a (ADR-F088)', () => {
+		const base = {
+			name: 'Commercial',
+			unit_label: 'Matter',
+			profile_md: '# doctrine',
+			default_tier_floor: '2',
+			default_budget_profile: ''
+		};
+		expect(diffPatch(original, { ...base, area_code: 'CML' })).toEqual({ area_code: 'CML' });
+		// An emptied field means "leave it as it is": clearing a code would strand
+		// the references already minted under it, so the field is simply omitted.
+		expect(diffPatch(original, { ...base, area_code: '' })).toEqual({});
+		expect(diffPatch(area({ ...original, area_code: null }), { ...base, area_code: '' })).toEqual(
+			{}
+		);
+	});
+
 	it('normalizes an emptied doctrine textarea to null', () => {
 		expect(
 			diffPatch(original, {
 				name: 'Commercial',
+				area_code: 'COM',
 				unit_label: 'Matter',
 				profile_md: '   ',
 				default_tier_floor: '2',
@@ -130,6 +153,7 @@ describe('diffPatch', () => {
 		expect(
 			diffPatch(original, {
 				name: 'Commercial',
+				area_code: 'COM',
 				unit_label: 'Matter',
 				profile_md: '# doctrine',
 				default_tier_floor: '',
@@ -142,6 +166,7 @@ describe('diffPatch', () => {
 		expect(
 			diffPatch(original, {
 				name: 'Commercial',
+				area_code: 'COM',
 				unit_label: 'Matter',
 				profile_md: '# doctrine',
 				default_tier_floor: '4',
@@ -155,6 +180,7 @@ describe('diffPatch', () => {
 		expect(
 			diffPatch(noProfile, {
 				name: noProfile.name,
+				area_code: noProfile.area_code ?? '',
 				unit_label: noProfile.unit_label,
 				profile_md: '',
 				default_tier_floor: '',
@@ -169,6 +195,7 @@ describe('diffPatch', () => {
 		expect(
 			diffPatch(original, {
 				name: 'Commercial',
+				area_code: 'COM',
 				unit_label: 'Matter',
 				profile_md: '# doctrine',
 				default_tier_floor: '2',
@@ -182,6 +209,7 @@ describe('diffPatch', () => {
 		expect(
 			diffPatch(withDefault, {
 				name: withDefault.name,
+				area_code: withDefault.area_code ?? '',
 				unit_label: withDefault.unit_label,
 				profile_md: withDefault.profile_md ?? '',
 				default_tier_floor: '2',
@@ -195,6 +223,7 @@ describe('diffPatch', () => {
 		expect(
 			diffPatch(withDefault, {
 				name: withDefault.name,
+				area_code: withDefault.area_code ?? '',
 				unit_label: withDefault.unit_label,
 				profile_md: withDefault.profile_md ?? '',
 				default_tier_floor: '2',

@@ -15,6 +15,10 @@ import { apiRequest } from './client';
 export interface OrganizationProfileResponse {
 	/** Empty string ⇒ no House Brief set yet (fresh org). */
 	content_md: string;
+	/** INTAKE-4a (ADR-F088): the org's short code — the first segment of every
+	 *  matter reference (`NWT` → `NWT-COM-0042`). `null` until an admin sets one,
+	 *  in which case references read `ORG-…` until they do. */
+	org_code: string | null;
 	updated_at: string | null;
 	/** Stringified id of the admin who last saved it, or null if never set. */
 	updated_by: string | null;
@@ -24,6 +28,10 @@ export interface OrganizationProfileUpdateBody {
 	/** Full Markdown body. Server enforces 0..32,000 chars — over the cap
 	 *  is a 422, matched client-side by {@link HOUSE_BRIEF_MAX_CHARS}. */
 	content_md: string;
+	/** INTAKE-4a (ADR-F088): `^[A-Z0-9]{2,6}$`. Key ABSENT leaves the stored code
+	 *  unchanged; key present with `null` clears it; a malformed value is a 422
+	 *  (rejected, never up-cased server-side). */
+	org_code?: string | null;
 }
 
 export async function getOrganizationProfile(): Promise<OrganizationProfileResponse> {

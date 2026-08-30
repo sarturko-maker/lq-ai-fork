@@ -19,6 +19,10 @@ export function findAreaByKey(areas: PracticeArea[], key: string): PracticeArea 
 
 export interface AreaEditDraft {
 	name: string;
+	/** INTAKE-4a (ADR-F088): the area's matter-reference code. '' means "leave it
+	 *  as it is" — the column is never cleared (that would strand the references
+	 *  already minted under it), so an empty draft simply omits the field. */
+	area_code: string;
 	unit_label: string;
 	/** '' means "no doctrine" in the UI; normalized to `null` on diff. */
 	profile_md: string;
@@ -39,7 +43,12 @@ export interface AreaEditDraft {
 export function diffPatch(
 	original: Pick<
 		PracticeArea,
-		'name' | 'unit_label' | 'profile_md' | 'default_tier_floor' | 'default_budget_profile'
+		| 'name'
+		| 'area_code'
+		| 'unit_label'
+		| 'profile_md'
+		| 'default_tier_floor'
+		| 'default_budget_profile'
 	>,
 	draft: AreaEditDraft
 ): PracticeAreaUpdateBody {
@@ -47,6 +56,9 @@ export function diffPatch(
 
 	const name = draft.name.trim();
 	if (name !== original.name) patch.name = name;
+
+	const areaCode = draft.area_code.trim();
+	if (areaCode !== '' && areaCode !== (original.area_code ?? '')) patch.area_code = areaCode;
 
 	const unitLabel = draft.unit_label.trim();
 	if (unitLabel !== original.unit_label) patch.unit_label = unitLabel;

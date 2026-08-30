@@ -15,6 +15,15 @@ import type {
 	ProfileSummary
 } from '$lib/lq-ai/api/profiles';
 import type { StepDef } from '$lib/lq-ai/components/primitives/StepRail.svelte';
+// INTAKE-4a (ADR-F088): one definition of the org-code rules, shared with the
+// House Brief admin page — the wizard must not drift from it.
+import {
+	exampleReference,
+	normalizeOrgCodeInput,
+	validateOrgCode
+} from '../house-brief/page-helpers';
+
+export { exampleReference, normalizeOrgCodeInput, validateOrgCode };
 
 /** localStorage flag: the admin completed OR skipped the wizard on this browser,
  *  so it no longer auto-launches on the cockpit landing. */
@@ -32,7 +41,7 @@ export function isValidSlug(key: string): boolean {
 	return SLUG_RE.test(key);
 }
 
-export type WizardStepKey = 'profile' | 'name' | 'brief' | 'review' | 'done';
+export type WizardStepKey = 'profile' | 'name' | 'code' | 'brief' | 'review' | 'done';
 
 /**
  * The ordered steps for a chosen profile kind. The `name` step exists only for
@@ -43,6 +52,10 @@ export function wizardSteps(kind: 'area' | 'blank' | null): StepDef[] {
 	const steps: StepDef[] = [{ key: 'profile', label: 'Choose a profile' }];
 	if (kind === 'blank') steps.push({ key: 'name', label: 'Name the area' });
 	steps.push(
+		// INTAKE-4a (ADR-F088): the org code shapes every matter reference this
+		// deployment ever mints, so it belongs in the one-time setup, before the
+		// admin creates their first matter.
+		{ key: 'code', label: 'Matter references' },
 		{ key: 'brief', label: 'House Brief' },
 		{ key: 'review', label: 'Review & activate' },
 		{ key: 'done', label: 'Done' }
@@ -82,6 +95,8 @@ export function buildApplyBody(kind: 'area' | 'blank', id: BlankIdentity): Profi
 export interface WizardGateState {
 	selectedProfile: ProfileSummary | null;
 	identity: BlankIdentity;
+	/** INTAKE-4a (ADR-F088): the org code as typed on the `code` step. */
+	orgCode: string;
 }
 
 /**
@@ -96,6 +111,10 @@ export function canProceed(step: WizardStepKey, state: WizardGateState): boolean
 			return state.selectedProfile !== null;
 		case 'name':
 			return blankIdentityComplete(state.identity);
+		case 'code':
+			// The code is optional (references read `ORG-…` until one is set), but a
+			// MALFORMED one must not travel to a 422 — the server rejects, never coerces.
+			return validateOrgCode(state.orgCode) === null;
 		case 'brief':
 		case 'review':
 		case 'done':

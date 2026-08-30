@@ -132,6 +132,19 @@
     <!-- View mode -->
     <p class="lq-text-caption mrm-slug" title="Matter ID">/{matter.slug}</p>
 
+    <!-- INTAKE-4a (ADR-F088): the matter reference, read-only. Allocated once at
+         creation and never editable — it is what a counterparty quotes back in a
+         subject line, so it must not drift. -->
+    {#if matter.reference}
+      <p
+        class="lq-text-caption mrm-reference"
+        title="Matter reference — quote this in correspondence"
+        data-testid="matter-rail-reference"
+      >
+        {matter.reference}
+      </p>
+    {/if}
+
     <p class="lq-text-body mrm-description">
       {matter.description ?? '(no description)'}
     </p>
@@ -307,6 +320,13 @@
 
   .mrm-slug {
     color: var(--lq-text-tertiary);
+    margin: 0;
+  }
+
+  .mrm-reference {
+    color: var(--lq-text-tertiary);
+    font-family: var(--lq-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    letter-spacing: 0.02em;
     margin: 0;
   }
 

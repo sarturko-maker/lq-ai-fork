@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	HOUSE_BRIEF_MAX_CHARS,
+	exampleReference,
 	formatDateTime,
 	formatLastUpdated,
 	isContentEmpty,
-	validateContentLength
+	normalizeOrgCodeInput,
+	validateContentLength,
+	validateOrgCode
 } from '../page-helpers';
 
 describe('validateContentLength', () => {
@@ -63,5 +66,51 @@ describe('formatLastUpdated', () => {
 		const result = formatLastUpdated('2026-07-01T12:00:00Z', null);
 		expect(result).toContain('Last updated');
 		expect(result).not.toContain(' by ');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// INTAKE-4a (ADR-F088) — the org code, first segment of every matter reference
+// ---------------------------------------------------------------------------
+
+describe('normalizeOrgCodeInput', () => {
+	it('up-cases and drops everything outside [A-Z0-9]', () => {
+		expect(normalizeOrgCodeInput('nwt')).toBe('NWT');
+		expect(normalizeOrgCodeInput('n-w t.')).toBe('NWT');
+		expect(normalizeOrgCodeInput('  a1  ')).toBe('A1');
+	});
+
+	it('caps the value at six characters', () => {
+		expect(normalizeOrgCodeInput('abcdefghij')).toBe('ABCDEF');
+	});
+
+	it('drops non-ASCII letters rather than transliterating them', () => {
+		expect(normalizeOrgCodeInput('éé')).toBe('');
+	});
+});
+
+describe('validateOrgCode', () => {
+	it('accepts an empty code (not set yet) and a well-formed one', () => {
+		expect(validateOrgCode('')).toBeNull();
+		expect(validateOrgCode('NW')).toBeNull();
+		expect(validateOrgCode('NWT')).toBeNull();
+		expect(validateOrgCode('A1B2C3')).toBeNull();
+	});
+
+	it('rejects exactly the shapes the server rejects', () => {
+		expect(validateOrgCode('nwt')).not.toBeNull();
+		expect(validateOrgCode('N')).not.toBeNull();
+		expect(validateOrgCode('ABCDEFG')).not.toBeNull();
+		expect(validateOrgCode('NW-T')).not.toBeNull();
+	});
+});
+
+describe('exampleReference', () => {
+	it('shows the placeholder org segment until a code is set', () => {
+		expect(exampleReference('')).toBe('ORG-COM-0042');
+	});
+
+	it('shows the admin own code once set', () => {
+		expect(exampleReference('NWT')).toBe('NWT-COM-0042');
 	});
 });
