@@ -130,7 +130,7 @@ def build_intake_tools(
     bridge: BridgeClient | None = None,
     summarise_only: bool = False,
 ) -> list[Callable[..., Any]]:
-    """Build the two intake tools for one run on an intake-born matter.
+    """Build the intake tools for one run on an intake-born matter (one, or two).
 
     The guard context grants exactly :data:`INTAKE_TOOL_NAMES`; ``binding.project_id``
     scopes every write, so the blast radius is this one matter and the one
@@ -313,7 +313,7 @@ async def load_intake_thread_for_run(
     ``scalar_one_or_none()`` here raised ``MultipleResultsFound`` — which killed the
     resume of the first live approval (three rows: one ``awaiting_human``, two still
     ``received``). A ``LIMIT 1`` would only have replaced a crash with a coin flip, so
-    the run is bound to its thread EXPLICITLY, in three deterministic steps:
+    the run is bound to its thread EXPLICITLY, in four deterministic steps:
 
     0. **A human-asked summarise pass** (INTAKE-5a.1) names its thread on the row
        itself (``intake_threads.summarise_pass_run_id``): it claims no inbound
