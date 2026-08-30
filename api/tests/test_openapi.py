@@ -232,6 +232,7 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # INTAKE-5a (ADR-F086) — the lawyer's Inbox: owner-fenced thread reads
         "/api/v1/intake/threads",
         "/api/v1/intake/threads/{thread_id}",
+        "/api/v1/intake/threads/{thread_id}/summarise",
         # M4-A4-i — Autonomous sessions read/halt API (per-user)
         "/api/v1/autonomous/sessions",
         "/api/v1/autonomous/sessions/{session_id}",
@@ -465,6 +466,7 @@ async def test_openapi_paths_match_sketch() -> None:
     #   /admin/intake-mailboxes/{mailbox_id} share one path) (197 -> 200).
     # +2: INTAKE-5a (ADR-F086) — the lawyer's Inbox reads: GET /intake/threads +
     #   GET /intake/threads/{thread_id} (200 -> 202).
+    # +1: INTAKE-5a.1 — POST /intake/threads/{thread_id}/summarise (202 -> 203).
     assert len(actual) == 202  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).

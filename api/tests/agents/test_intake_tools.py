@@ -28,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.commercial_tools import COMMERCIAL_TOOL_NAMES
@@ -914,7 +914,7 @@ async def test_guarded_dispatch_audits_counts_only_never_the_note(
     )
     record = next(t for t in tools if t.__name__ == "record_intake_outcome")
     secret_note = "the counterparty offered a side letter nobody should see in an audit row"
-    out = await record("needs_human", "NDA review", secret_note, _SUMMARY)
+    out = await record("needs_human", "NDA review", secret_note, _TITLE, _SUMMARY)
     assert "recorded" in out
     async with commit_factory() as db:
         rows = (
@@ -1582,6 +1582,17 @@ async def _make_resume(
     """A resume run on the SAME conversation: no messages of its own, optionally
     carrying the parent link the resume endpoint now writes (fix D)."""
     async with factory() as db:
+        # Only one running run may exist per thread (uq_agent_runs_thread_running);
+        # in production the parent is paused (awaiting_input) before its resume
+        # starts, so mirror that here for the parent AND any earlier chain link.
+        await db.execute(
+            sa_update(AgentRun)
+            .where(
+                AgentRun.thread_id == conversation.agent_thread_id,
+                AgentRun.status == "running",
+            )
+            .values(status="awaiting_input")
+        )
         resume = AgentRun(
             user_id=conversation.seeded.user_id,
             thread_id=conversation.agent_thread_id,
