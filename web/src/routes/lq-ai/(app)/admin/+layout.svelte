@@ -30,6 +30,9 @@
 		...($auth.user?.role === 'operator' ? [{ href: '/lq-ai/admin/models', label: 'Models' }] : []),
 		{ href: '/lq-ai/admin/word-addin', label: 'Word add-in' },
 		{ href: '/lq-ai/admin/intake-bridges', label: 'Intake bridges' },
+		// INTAKE-5a (ADR-F086) — the mailbox → practice-area → owner binding
+		// admin surface; the API has existed since INTAKE-1, this is its page.
+		{ href: '/lq-ai/admin/intake-mailboxes', label: 'Intake mailboxes' },
 		{ href: '/lq-ai/admin/developer', label: 'Developer Support' }
 	];
 </script>
