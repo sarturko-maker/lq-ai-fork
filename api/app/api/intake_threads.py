@@ -146,9 +146,11 @@ def _thread_page_select(user_id: uuid.UUID) -> tuple[Any, ColumnElement[int]]:
         the run that wrote the summary, for its ``started_at``.
 
     The fence is the WHERE clause, not a post-filter: a thread the caller cannot see
-    never leaves the database. The rank expression is returned alongside so
-    ``attention=true`` filters on the SAME expression the page is ordered by — a
-    post-filter in Python would silently shrink pages and break the cursor.
+    never leaves the database. The rank expression is returned UNLABELLED alongside
+    the statement so ``attention=true`` can filter on the SAME expression the page is
+    ordered by (a post-filter in Python would silently shrink pages and break the
+    cursor) — unlabelled because a label is only addressable in the columns and
+    ORDER BY clauses, never in a WHERE.
     """
     live = (
         select(AgentRun.id.label("run_id"), AgentRun.status.label("run_status"))
@@ -192,7 +194,7 @@ def _thread_page_select(user_id: uuid.UUID) -> tuple[Any, ColumnElement[int]]:
         (IntakeThread.status.in_(("processing", "received")), _ATTENTION_WORKING),
         (IntakeThread.status == "replied", _ATTENTION_REPLIED),
         else_=_ATTENTION_HANDLED,
-    ).label("attention_rank")
+    )
 
     stmt = (
         select(
@@ -207,7 +209,7 @@ def _thread_page_select(user_id: uuid.UUID) -> tuple[Any, ColumnElement[int]]:
             last_err.c.send_error,
             settled.c.started_at.label("newest_settled_started_at"),
             summary_run.started_at.label("summary_run_started_at"),
-            attention_rank,
+            attention_rank.label("attention_rank"),
         )
         .select_from(IntakeThread)
         .join(IntakeMailbox, IntakeMailbox.id == IntakeThread.mailbox_id)
@@ -407,7 +409,7 @@ async def list_intake_threads(
     stmt = (
         stmt.order_by(
             attention_rank,
-            IntakeThread.last_inbound_at.desc().nullslast(),
+            IntakeThread.last_inbound_at.desc().nulls_last(),
             IntakeThread.id.desc(),
         )
         .limit(limit + 1)
@@ -452,7 +454,7 @@ async def get_intake_thread(
                 select(IntakeMessage)
                 .where(IntakeMessage.thread_id == thread_id)
                 .order_by(
-                    IntakeMessage.provider_timestamp.asc().nullslast(),
+                    IntakeMessage.provider_timestamp.asc().nulls_last(),
                     IntakeMessage.created_at.asc(),
                     IntakeMessage.id.asc(),
                 )

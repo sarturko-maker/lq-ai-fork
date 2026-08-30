@@ -202,7 +202,8 @@ CREATE TABLE projects (
     minimum_inference_tier   SMALLINT,
     is_sandbox               BOOLEAN NOT NULL DEFAULT FALSE,  -- 0022: system-managed try-it sandbox
     practice_area_id         UUID REFERENCES practice_areas(id) ON DELETE SET NULL,  -- 0054 (F1-S3)
-    intake_state             TEXT,  -- 0098 (ADR-F086): NULL = normal matter; else born from email
+    intake_state             TEXT,  -- 0098/0102 (ADR-F086 A1): CHECK NULL | 'candidate' —
+                                    -- provenance (born from email), never a lifecycle
     reference                TEXT,  -- 0100 (ADR-F088): the matter reference 'ORG-AREA-NNNN', immutable
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2020,13 +2021,15 @@ CREATE INDEX idx_agent_run_steps_parent ON agent_run_steps(parent_step_id)
 ## Fork: email legal intake (INTAKE, ADR-F086/F088)
 
 Migrations `0098` (the three tables + `projects.intake_state`), `0099` (the thread
-outcome + the inbound message's own content) and `0100` (the matter reference +
-stamping substrate). The mail-bridge microservice is the sole holder of mailbox
+outcome + the inbound message's own content), `0100` (the matter reference +
+stamping substrate), `0101` (`intake_messages.send_error`) and `0102` (the thread
+summary + the Inbox read indexes + narrowing `projects.intake_state` to
+`NULL | 'candidate'`). The mail-bridge microservice is the sole holder of mailbox
 credentials; `api` never sees them. Everything a sender controls in here is
 UNTRUSTED: boundary-validated at `app/schemas/intake.py`, fenced as DATA in the
 agent prompt, never logged or audited.
 
-### `intake_mailboxes` / `intake_threads` / `intake_messages` (0098–0101)
+### `intake_mailboxes` / `intake_threads` / `intake_messages` (0098–0102)
 
 ```sql
 -- One admin-bound mailbox → one practice area → one owner user (the queue owner,
@@ -2068,10 +2071,25 @@ CREATE TABLE intake_threads (
     last_inbound_at    TIMESTAMPTZ,
     auth_state         TEXT NOT NULL DEFAULT 'unknown',
     message_count      INTEGER NOT NULL DEFAULT 0,
+    -- 0102 (INTAKE-5a, ADR-F086 ruling 7): the agent's account of THE THREAD SO FAR
+    -- — a JSON array of at most five {"title","text"} objects (title <= 40 chars,
+    -- text <= 300 chars, plain single-line text) that the lawyer's Inbox opens on
+    -- instead of the email chain. REWRITTEN IN FULL by every record_intake_outcome
+    -- call; the safe-fail path leaves it alone and the read API flags it stale.
+    -- Bounded at the Pydantic write boundary (app/schemas/intake.py), NOT by a DB
+    -- CHECK: a CHECK over JSONB shape would be a second, drifting copy of the schema.
+    summary            JSONB,
+    summary_run_id     UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT uq_intake_threads_mailbox_provider_thread UNIQUE (mailbox_id, provider_thread_id)
 );
+
+-- 0102: the Inbox's two read paths — "this matter's threads" and "the attention
+-- queue, newest inbound first". Both were sequential scans before INTAKE-5a.
+CREATE INDEX ix_intake_threads_project_id ON intake_threads (project_id);
+CREATE INDEX ix_intake_threads_status_last_inbound
+    ON intake_threads (status, last_inbound_at DESC);
 
 -- One inbound/outbound message. The UNIQUE below is the idempotency anchor:
 -- duplicate webhook/websocket delivery is a no-op.
