@@ -1196,3 +1196,44 @@ async def test_the_read_indexes_exist(db_session: AsyncSession) -> None:
     names = set(rows)
     assert "ix_intake_threads_project_id" in names
     assert "ix_intake_threads_status_last_inbound" in names
+
+
+async def test_detail_orders_a_sent_reply_without_provider_timestamp_by_insert_time(
+    client: AsyncClient, db_session: AsyncSession, owner: User
+) -> None:
+    """A sent reply carries no provider timestamp (the bridge returns only the id); it
+    must still sit between the emails it answers and the ones that follow, not after
+    every inbound row (found live on the INTAKE-4b NDA thread)."""
+    mailbox = await _mailbox(db_session, owner)
+    project = await _matter(db_session, owner)
+    seeded = await _seed_thread(db_session, owner, mailbox=mailbox, project=project)
+    first_in = await _message(
+        db_session,
+        seeded.thread,
+        provider_timestamp=_BASE_TIME,
+        created_at=_BASE_TIME + timedelta(seconds=10),
+    )
+    reply = await _message(
+        db_session,
+        seeded.thread,
+        direction="out",
+        body_text="Before we review we need the signed DPA.",
+        subject="Re: Please review the attached NDA",
+        from_addr="legal-intake@example.com",
+        provider_timestamp=None,
+        created_at=_BASE_TIME + timedelta(hours=1),
+    )
+    second_in = await _message(
+        db_session,
+        seeded.thread,
+        provider_timestamp=_BASE_TIME + timedelta(hours=2),
+        created_at=_BASE_TIME + timedelta(hours=2, seconds=5),
+    )
+
+    resp = await client.get(f"{_LIST}/{seeded.thread.id}", headers=_bearer(owner))
+    assert resp.status_code == 200, resp.text
+    assert [m["id"] for m in resp.json()["messages"]] == [
+        str(first_in.id),
+        str(reply.id),
+        str(second_in.id),
+    ]

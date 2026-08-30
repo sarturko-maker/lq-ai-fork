@@ -40,7 +40,7 @@ from collections import defaultdict, deque
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import ColumnElement, Row, case, select, true
+from sqlalchemy import ColumnElement, Row, case, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -451,9 +451,10 @@ async def get_intake_thread(
     """GET /api/v1/intake/threads/{thread_id}
 
     The thread row exactly as the list renders it, plus every email on it in
-    ``provider_timestamp`` order (the provider's claimed send time is untrusted for
-    lifecycle decisions but is the right thing to READ a chain by; ties break on our
-    own insert order). A thread the caller cannot see is a 404 — the same answer a
+    ``provider_timestamp`` order, falling back to our insert time for rows without one
+    (sent replies — the bridge returns no timestamp). The provider's claimed send time
+    is untrusted for lifecycle decisions but is the right thing to READ a chain by; ties
+    break on our own insert order. A thread the caller cannot see is a 404 — the same answer a
     non-existent id gets.
 
     A chain longer than ``INTAKE_THREAD_MESSAGE_MAX`` keeps its NEWEST messages: the
@@ -478,7 +479,13 @@ async def get_intake_thread(
                 select(IntakeMessage)
                 .where(IntakeMessage.thread_id == thread_id)
                 .order_by(
-                    IntakeMessage.provider_timestamp.desc().nulls_first(),
+                    # Sent rows carry no provider timestamp (the bridge returns only the
+                    # id), so the chain reads by the provider's time where we have it and
+                    # by our own insert time where we don't — otherwise every reply would
+                    # sort after every inbound email.
+                    func.coalesce(
+                        IntakeMessage.provider_timestamp, IntakeMessage.created_at
+                    ).desc(),
                     IntakeMessage.created_at.desc(),
                     IntakeMessage.id.desc(),
                 )
