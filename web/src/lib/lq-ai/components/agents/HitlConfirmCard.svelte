@@ -4,9 +4,11 @@
 	 * stop-and-ask policy it settles `awaiting_input` with a `hitl_request` step
 	 * whose `name` is the gated tool and `summary` is a bounded JSON digest of
 	 * the gated call(s). This card renders that SETTLED step (ADR-F004 — durable
-	 * truth, survives reload / no live stream) and offers the lawyer two
-	 * first-class choices: Approve (proceed) or Refuse (don't). Both drive
-	 * `resumeRun` up in the parent.
+	 * truth, survives reload / no live stream) and offers the lawyer the verbs the
+	 * SERVER said this pause admits: Approve and Refuse everywhere, plus — for a
+	 * `draft_email_reply` (INTAKE-4b, ADR-F087) — reading the draft, rewriting it
+	 * in place, and "Respond", which is a reject carrying a note the agent
+	 * redrafts from. Every choice drives `resumeRun` up in the parent.
 	 *
 	 * The digest is untrusted model/tool output, so parsing is DEFENSIVE (mirrors
 	 * `subagentTypeOf` in helpers) and every value renders as ESCAPED text — never
@@ -14,18 +16,41 @@
 	 * it without a DOM (the RefusalMessageBubble pattern; NO @testing-library/svelte).
 	 */
 
+	import type { EditedEmailReplyArgs, ResumeDecision } from '$lib/lq-ai/api/agents';
+
 	/** One gated tool call awaiting a human go-ahead. */
 	export interface HitlAction {
 		tool: string;
 		args: Record<string, unknown>;
+		/**
+		 * The verbs the SERVER will accept for this call (INTAKE-4b, ADR-F087).
+		 * Empty when the pause predates F087 or the digest didn't carry them — the
+		 * card then offers approve/refuse only, which the server always accepts.
+		 */
+		allowedDecisions: string[];
+	}
+
+	/** The tool whose arguments a lawyer may rewrite (mirrors api `EDITABLE_TOOL_NAMES`). */
+	export const EDITABLE_TOOL = 'draft_email_reply';
+
+	/**
+	 * The email draft the card renders. `to` is CONTEXT, never an input: the
+	 * mail-bridge is reply-only (it derives recipients from the message being
+	 * answered and is never handed an address — ADR-F086), so a recipient editor
+	 * would be a control that does nothing. Subject and body are the artefact.
+	 */
+	export interface DraftFields {
+		readonly to: string;
+		subject: string;
+		body: string;
 	}
 
 	/**
 	 * Parse the `hitl_request` step's bounded digest into its gated calls. The
-	 * runner writes `json.dumps([{tool, args}, …], sort_keys=True)`
-	 * (api/app/agents/runner.py). DEFENSIVE: a missing / non-JSON / truncated
-	 * (over-2000-char) / odd-shaped summary yields `[]`, so the card degrades to
-	 * the step's `name` rather than throwing on untrusted input.
+	 * runner writes `json.dumps([{tool, args, allowed_decisions}, …], sort_keys=True)`
+	 * (api/app/agents/runner.py). DEFENSIVE: a missing / non-JSON / truncated /
+	 * odd-shaped summary yields `[]`, so the card degrades to the step's `name`
+	 * (approve/refuse only) rather than throwing on untrusted input.
 	 */
 	export function parseHitlActions(summary: string | null): HitlAction[] {
 		if (!summary) return [];
@@ -49,7 +74,12 @@
 					args:
 						rec.args && typeof rec.args === 'object' && !Array.isArray(rec.args)
 							? (rec.args as Record<string, unknown>)
-							: {}
+							: {},
+					allowedDecisions: Array.isArray(rec.allowed_decisions)
+						? (rec.allowed_decisions as unknown[]).filter(
+								(d): d is string => typeof d === 'string'
+							)
+						: []
 				});
 			}
 		}
@@ -84,6 +114,61 @@
 			return '';
 		}
 	}
+
+	// ---------------------------------------------------------------------
+	// INTAKE-4b (ADR-F087): the email-reply review surface.
+	//
+	// A pause is "editable" only when it is exactly ONE `draft_email_reply`
+	// call AND the server said `edit` is allowed for it. Both halves matter: a
+	// single decision is fanned across every gated call in the turn, so
+	// offering an editor for one of several calls would silently apply one
+	// draft's text to all of them; and the verbs come from the server, so the
+	// card can never offer a button the resume endpoint would 422.
+	// ---------------------------------------------------------------------
+
+	/** The one editable email draft in this pause, or `null`. */
+	export function editableDraft(actions: HitlAction[]): DraftFields | null {
+		if (actions.length !== 1) return null;
+		const action = actions[0];
+		if (action.tool !== EDITABLE_TOOL) return null;
+		if (!action.allowedDecisions.includes('edit')) return null;
+		const to = action.args.to;
+		return {
+			to: Array.isArray(to)
+				? to.filter((a): a is string => typeof a === 'string').join(', ')
+				: typeof to === 'string'
+					? to
+					: '',
+			subject: typeof action.args.subject === 'string' ? action.args.subject : '',
+			body: typeof action.args.body === 'string' ? action.args.body : ''
+		};
+	}
+
+	/**
+	 * The decision the "Approve & send" button sends: a plain `approve` when the
+	 * lawyer changed nothing (the checkpointed call runs untouched — no edit
+	 * round-trip, no re-validation surface), otherwise an `edit` carrying ONLY
+	 * the fields that actually differ, so an untouched field keeps the agent's
+	 * original value server-side.
+	 */
+	export function approvalDecision(original: DraftFields, edited: DraftFields): ResumeDecision {
+		const changed: Partial<EditedEmailReplyArgs> = {};
+		if (edited.subject.trim() !== original.subject.trim()) changed.subject = edited.subject.trim();
+		if (edited.body !== original.body) changed.body = edited.body;
+		if (Object.keys(changed).length === 0) return { type: 'approve' };
+		// `body` is required on the wire even when only the subject moved.
+		return { type: 'edit', edited_args: { ...changed, body: edited.body } };
+	}
+
+	/**
+	 * "Respond" = reject + message (ADR-F087): the note reaches the model as this
+	 * tool's result and it redrafts. An empty note is a plain refusal, never a
+	 * reject carrying an empty string.
+	 */
+	export function respondDecision(message: string): ResumeDecision {
+		const trimmed = message.trim();
+		return trimmed ? { type: 'reject', message: trimmed } : { type: 'reject' };
+	}
 </script>
 
 <script lang="ts">
@@ -94,21 +179,57 @@
 		step,
 		pending = false,
 		error = null,
-		onApprove,
-		onRefuse
+		onDecide
 	}: {
 		step: AgentRunStep;
-		/** A resume round-trip is in flight — both buttons disable. */
+		/** A resume round-trip is in flight — every button disables. */
 		pending?: boolean;
 		/** Last resume attempt's error, shown inline (never blocks re-trying). */
 		error?: string | null;
-		onApprove: () => void;
-		onRefuse: () => void;
+		/** Send one decision to POST /runs/{id}/resume. */
+		onDecide: (decision: ResumeDecision) => void;
 	} = $props();
 
 	const actions = $derived(parseHitlActions(step.summary));
 	const tools = $derived(hitlToolNames(actions, step.name));
 	const askLine = $derived(hitlAskLine(tools));
+	// INTAKE-4b (ADR-F087): non-null only for a single editable email draft.
+	const draft = $derived(editableDraft(actions));
+
+	let editing = $state(false);
+	let responding = $state(false);
+	let responseText = $state('');
+	/** The lawyer's in-progress rewrite; empty until they press Edit. */
+	let overrides = $state<{ subject?: string; body?: string }>({});
+
+	/** What the card SHOWS: the agent's draft with the lawyer's edits laid over it. */
+	const shown = $derived(
+		draft
+			? {
+					to: draft.to,
+					subject: overrides.subject ?? draft.subject,
+					body: overrides.body ?? draft.body
+				}
+			: null
+	);
+
+	// A redraft after "Respond" replaces this card with a NEW step. Drop the
+	// working copy when that happens: carrying it over would let the lawyer
+	// approve text they last read against a DIFFERENT draft.
+	$effect(() => {
+		step.id;
+		overrides = {};
+		editing = false;
+		responding = false;
+		responseText = '';
+	});
+
+	function startEditing(): void {
+		if (!shown) return;
+		// Seed from what is on screen, so the inputs open with the draft in them.
+		overrides = { subject: shown.subject, body: shown.body };
+		editing = true;
+	}
 </script>
 
 <div
@@ -124,7 +245,61 @@
 
 	<p class="lq-text-body-sm ag-hitl__ask">{askLine}</p>
 
-	<ul class="ag-hitl__actions">
+	{#if shown}
+		<!-- INTAKE-4b (ADR-F087): the email-reply review surface. The lawyer reads
+		     the draft, optionally rewrites it in place, and approves — what they
+		     approve is what is sent. Read-only until they press Edit, so the
+		     default gesture stays "read, then decide". -->
+		<div class="ag-hitl__draft" data-testid="lq-ai-agents-hitl-draft">
+			<!-- Context, never an input: the reply goes back on the original email
+			     thread and the bridge derives the recipient (ADR-F086/F087). -->
+			<div class="ag-hitl__field">
+				<span class="lq-text-caption">Replying to</span>
+				<span class="lq-text-body-sm ag-hitl__value" data-testid="lq-ai-agents-hitl-to">
+					{shown.to}
+				</span>
+			</div>
+			<label class="ag-hitl__field">
+				<span class="lq-text-caption">Subject</span>
+				{#if editing}
+					<input
+						class="ag-hitl__input"
+						type="text"
+						bind:value={overrides.subject}
+						disabled={pending}
+						data-testid="lq-ai-agents-hitl-subject"
+					/>
+				{:else}
+					<span class="lq-text-body-sm ag-hitl__value">{shown.subject}</span>
+				{/if}
+			</label>
+			<label class="ag-hitl__field">
+				<span class="lq-text-caption">Message</span>
+				{#if editing}
+					<textarea
+						class="ag-hitl__input ag-hitl__textarea"
+						rows="8"
+						bind:value={overrides.body}
+						disabled={pending}
+						data-testid="lq-ai-agents-hitl-body"
+					></textarea>
+				{:else}
+					<span class="lq-text-body-sm ag-hitl__value ag-hitl__value--body">{shown.body}</span>
+				{/if}
+			</label>
+			<button
+				type="button"
+				class="ag-hitl__link"
+				disabled={pending}
+				data-testid="lq-ai-agents-hitl-edit-toggle"
+				onclick={() => (editing ? (editing = false) : startEditing())}
+			>
+				{editing ? 'Done editing' : 'Edit'}
+			</button>
+		</div>
+	{/if}
+
+	<ul class="ag-hitl__actions" class:ag-hitl__actions--quiet={!!draft}>
 		{#if actions.length > 0}
 			{#each actions as action, idx (idx)}
 				{@const argsBody = formatHitlArgs(action.args)}
@@ -145,25 +320,85 @@
 		{/if}
 	</ul>
 
+	{#if responding}
+		<!-- "Respond" is a reject carrying the lawyer's note (ADR-F087): the agent
+		     sees it as this tool's result and writes a new draft. -->
+		<div class="ag-hitl__respond">
+			<label class="ag-hitl__field">
+				<span class="lq-text-caption">Tell the agent what to change</span>
+				<textarea
+					class="ag-hitl__input ag-hitl__textarea"
+					rows="3"
+					maxlength="2000"
+					bind:value={responseText}
+					disabled={pending}
+					data-testid="lq-ai-agents-hitl-response"
+				></textarea>
+			</label>
+		</div>
+	{/if}
+
 	<div class="ag-hitl__buttons">
-		<button
-			type="button"
-			class="ag-hitl__btn ag-hitl__btn--approve"
-			disabled={pending}
-			data-testid="lq-ai-agents-hitl-approve"
-			onclick={() => onApprove()}
-		>
-			{pending ? 'Sending…' : 'Approve'}
-		</button>
-		<button
-			type="button"
-			class="ag-hitl__btn ag-hitl__btn--refuse"
-			disabled={pending}
-			data-testid="lq-ai-agents-hitl-refuse"
-			onclick={() => onRefuse()}
-		>
-			Refuse
-		</button>
+		{#if draft && shown}
+			<button
+				type="button"
+				class="ag-hitl__btn ag-hitl__btn--approve"
+				disabled={pending || responding}
+				data-testid="lq-ai-agents-hitl-approve"
+				onclick={() => draft && shown && onDecide(approvalDecision(draft, shown))}
+			>
+				{pending ? 'Sending…' : 'Approve & send'}
+			</button>
+			{#if responding}
+				<button
+					type="button"
+					class="ag-hitl__btn ag-hitl__btn--refuse"
+					disabled={pending}
+					data-testid="lq-ai-agents-hitl-respond-send"
+					onclick={() => onDecide(respondDecision(responseText))}
+				>
+					Send back to the agent
+				</button>
+			{:else}
+				<button
+					type="button"
+					class="ag-hitl__btn ag-hitl__btn--refuse"
+					disabled={pending}
+					data-testid="lq-ai-agents-hitl-respond"
+					onclick={() => (responding = true)}
+				>
+					Respond
+				</button>
+			{/if}
+			<button
+				type="button"
+				class="ag-hitl__btn ag-hitl__btn--refuse"
+				disabled={pending}
+				data-testid="lq-ai-agents-hitl-refuse"
+				onclick={() => onDecide({ type: 'reject' })}
+			>
+				Refuse
+			</button>
+		{:else}
+			<button
+				type="button"
+				class="ag-hitl__btn ag-hitl__btn--approve"
+				disabled={pending}
+				data-testid="lq-ai-agents-hitl-approve"
+				onclick={() => onDecide({ type: 'approve' })}
+			>
+				{pending ? 'Sending…' : 'Approve'}
+			</button>
+			<button
+				type="button"
+				class="ag-hitl__btn ag-hitl__btn--refuse"
+				disabled={pending}
+				data-testid="lq-ai-agents-hitl-refuse"
+				onclick={() => onDecide({ type: 'reject' })}
+			>
+				Refuse
+			</button>
+		{/if}
 	</div>
 
 	{#if error}
@@ -251,6 +486,80 @@
 		overflow-wrap: anywhere;
 		overflow-x: auto;
 		margin: var(--lq-space-1) 0 0;
+	}
+
+	/* INTAKE-4b (ADR-F087): the draft under review. Card-on-card, one step in,
+	   so the reply reads as the artefact and the tool digest below it as detail. */
+	.ag-hitl__draft,
+	.ag-hitl__respond {
+		display: flex;
+		flex-direction: column;
+		gap: var(--lq-space-2);
+		background: var(--color-card);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		padding: var(--lq-space-3);
+	}
+
+	.ag-hitl__field {
+		display: flex;
+		flex-direction: column;
+		gap: var(--lq-space-1);
+		min-width: 0;
+	}
+
+	.ag-hitl__field > span:first-child {
+		color: var(--color-muted-foreground);
+	}
+
+	.ag-hitl__value {
+		color: var(--color-foreground);
+		overflow-wrap: anywhere;
+	}
+
+	.ag-hitl__value--body {
+		white-space: pre-wrap;
+	}
+
+	.ag-hitl__input {
+		width: 100%;
+		font: inherit;
+		color: var(--color-foreground);
+		background: var(--color-background);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		padding: var(--lq-space-1) var(--lq-space-2);
+	}
+
+	.ag-hitl__input:focus-visible {
+		outline: 2px solid var(--color-status-attention);
+		outline-offset: 1px;
+	}
+
+	.ag-hitl__textarea {
+		resize: vertical;
+		min-height: 4rem;
+	}
+
+	.ag-hitl__link {
+		align-self: flex-start;
+		background: none;
+		border: none;
+		padding: 0;
+		font-size: 13px;
+		color: var(--color-muted-foreground);
+		text-decoration: underline;
+		cursor: pointer;
+	}
+
+	.ag-hitl__link:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+
+	/* With the draft rendered above, the raw tool digest is secondary detail. */
+	.ag-hitl__actions--quiet {
+		opacity: 0.75;
 	}
 
 	.ag-hitl__buttons {

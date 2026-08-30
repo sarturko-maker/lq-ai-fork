@@ -1219,8 +1219,7 @@
 						step={hitlStep}
 						pending={resuming}
 						error={resumeError}
-						onApprove={() => resumeCurrentRun(turn.run.id, { type: 'approve' })}
-						onRefuse={() => resumeCurrentRun(turn.run.id, { type: 'reject' })}
+						onDecide={(decision) => resumeCurrentRun(turn.run.id, decision)}
 					/>
 				{/if}
 
