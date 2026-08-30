@@ -198,7 +198,7 @@ def test_api_v1_path_count_pinned() -> None:
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 200
+    assert len(paths) == 202
 
 
 @pytest.mark.unit

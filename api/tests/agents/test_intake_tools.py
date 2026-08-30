@@ -391,7 +391,6 @@ def _bad(**overrides: object) -> dict[str, object]:
         _bad(note="y" * 2001),
         _bad(label="x\x00y"),
         # INTAKE-5a (ruling 7) — the summary's own bounds.
-        {"outcome": "dealt_with", "label": "x", "note": "y"},  # missing entirely
         _bad(summary=[]),  # zero bullets is not an account of anything
         _bad(summary=[{"title": "t", "text": "x"}] * 6),  # more than five
         _bad(summary=[{"title": "t" * 41, "text": "x"}]),  # title over 40
@@ -639,7 +638,7 @@ async def test_guarded_dispatch_audits_counts_only_never_the_note(
     )
     record = next(t for t in tools if t.__name__ == "record_intake_outcome")
     secret_note = "the counterparty offered a side letter nobody should see in an audit row"
-    out = await record("needs_human", "NDA review", secret_note)
+    out = await record("needs_human", "NDA review", secret_note, _SUMMARY)
     assert "recorded" in out
     async with commit_factory() as db:
         rows = (
@@ -1636,3 +1635,14 @@ async def test_requeue_ignores_an_ordinary_cockpit_run(
     assert (
         await requeue_pending_intake_message(commit_factory, run_id, enqueue=fail_enqueue) is False
     )
+
+
+def test_summary_is_required_at_the_tool_schema() -> None:
+    """INTAKE-5a (ruling 7): a proposal without ``summary`` never reaches the writer —
+    the tool's own input schema refuses it, which is the boundary the model hits."""
+    from pydantic import ValidationError
+
+    from app.schemas.intake import RecordIntakeOutcomeInput
+
+    with pytest.raises(ValidationError):
+        RecordIntakeOutcomeInput(outcome="dealt_with", label="x", note="y")  # type: ignore[call-arg]
