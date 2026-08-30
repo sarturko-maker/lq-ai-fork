@@ -862,8 +862,16 @@ IS a matter — promote removed, plan § Amendment A1) · **4a matter reference 
 every creation path + backfill; the inbound trust ladder in the landing endpoint — References/
 In-Reply-To attaches, a subject tag or plus-addressed recipient attaches ONLY for a Roster sender,
 everything weaker opens a new matter and leaves the claim as a note; org code on the House Brief
-page + a setup-wizard step, area code on the area page + profile manifests) · 4b HITL edit/respond
-(ADR-F087) + approved send · 5 cockpit Intake view · 6 E2E acceptance.
+page + a setup-wizard step, area code on the area page + profile manifests) · **4b HITL
+edit/respond + the approved send** (migration 0101, ADR-F087 amending F071: `edit` becomes a
+per-tool verb — `draft_email_reply` only, `allowed_decisions` compiled per tool and carried through
+the pause digest so the cockpit renders exactly what the endpoint accepts; "Respond" is `reject` +
+message, no new runner path; the tool's execution IS the send — out row first, then mail-bridge
+`POST /send` with the row id as the idempotency key, provider id stored, thread `replied`; one
+attempt, no retries, a failure keeps the reply with an error CLASS and errors the thread; the
+bridge composes the Reply-To plus-address from its OWN inbox and refuses a repeated key with 409;
+`HitlConfirmCard` becomes the first user-visible intake surface) · 5 cockpit Intake view ·
+6 E2E acceptance.
 Research: `docs/fork/plans/research/INTAKE-*.md`; plan: `docs/fork/plans/INTAKE-4-plan.md`.
 
 ## CUSTODIAN — contract custodian-of-record (PLANNED 2026-07-11; plan: `docs/fork/plans/CUSTODIAN-milestone.md`)
