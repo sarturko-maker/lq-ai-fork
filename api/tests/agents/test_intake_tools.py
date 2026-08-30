@@ -39,6 +39,7 @@ from app.agents.intake_tools import (
     _record_intake_outcome,
     _send_key,
     build_intake_tools,
+    is_summarise_pass_run,
     load_intake_thread_for_run,
     requeue_pending_intake_message,
     safe_fail_intake_thread,
@@ -659,6 +660,13 @@ def _bad(**overrides: object) -> dict[str, object]:
         _bad(matter_title="Contoso NDA\nsecond line"),
         _bad(matter_title="Contoso\u2028NDA"),
         _bad(matter_title="Contoso\x00NDA"),
+        # INTAKE-5a.1 (N9) — bidi formatting characters. Not "control characters" by
+        # category, but they re-order the glyphs around them, so a stored string and
+        # the line the lawyer reads can say different things ("Trojan Source" applied
+        # to an Inbox row). Refused in all three plain-line fields.
+        _bad(matter_title="Contoso NDA \u202egnidnep tidua"),
+        _bad(summary=[{"title": "What they \u202dwant", "text": "x"}]),
+        _bad(summary=[{"title": "t", "text": "Approved \u2066 by counsel \u2069"}]),
         _bad(summary=[{"title": "", "text": "x"}]),  # empty title
         _bad(summary=[{"title": "t"}]),  # missing text
         _bad(summary=[{"title": "t", "text": "x", "extra": "z"}]),  # extra="forbid"
@@ -2056,3 +2064,194 @@ def test_summary_is_required_at_the_tool_schema() -> None:
 
     with pytest.raises(ValidationError):
         RecordIntakeOutcomeInput(outcome="dealt_with", label="x", note="y")  # type: ignore[call-arg]
+
+
+# --------------------------------------------------------------------------- #
+# INTAKE-5a.1 review fixes — the summarise pass survives a resume (B1/S3),
+# and the rename cannot lose a human's pin (S4/S5)
+# --------------------------------------------------------------------------- #
+
+
+async def _resume_of(
+    factory: async_sessionmaker[AsyncSession],
+    parent_run_id: uuid.UUID,
+    *,
+    status: str = "running",
+) -> uuid.UUID:
+    """The row the resume endpoint writes: a NEW run on the SAME conversation,
+    carrying the parent link (migration 0103)."""
+    async with factory() as db:
+        parent = await db.get(AgentRun, parent_run_id)
+        assert parent is not None
+        resume = AgentRun(
+            user_id=parent.user_id,
+            thread_id=parent.thread_id,
+            project_id=parent.project_id,
+            status=status,
+            prompt="[resume: approve]",
+            max_steps=8,
+            resumed_from_run_id=parent.id,
+        )
+        db.add(resume)
+        await db.commit()
+        return resume.id
+
+
+async def test_a_resumed_summarise_pass_still_binds_to_the_thread_it_names(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """B1: the marker names the run the ENDPOINT queued. A pass that stopped for a
+    human and was resumed runs under a new agent_runs row, so layer 0 matches the whole
+    resume lineage — otherwise the resumed pass falls through to the legacy layer-2
+    heuristic and binds to whichever sibling the conversation last worked."""
+    queued_run_id = await _make_resume(commit_factory, conversation, parent_run_id=None)
+    async with commit_factory() as db:
+        sibling = await db.get(IntakeThread, conversation.pending_b_id)
+        assert sibling is not None
+        sibling.summarise_pass_run_id = queued_run_id
+        await db.commit()
+    resume_run_id = await _resume_of(commit_factory, queued_run_id)
+
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=resume_run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.pending_b_id
+        assert bound.id != conversation.worked_thread_id  # what layer 2 would have said
+        # ...and it is still the READ-ONLY pass, so composition builds no reply tool.
+        assert await is_summarise_pass_run(db, bound, resume_run_id) is True
+
+
+async def test_an_ordinary_run_is_not_a_summarise_pass(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """The identity test is a DB fact about this run's lineage — an unrelated run on
+    the same thread is an ordinary intake run with the full tool set."""
+    marked_run_id = await _make_run(commit_factory, seeded)
+    other_run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        thread.summarise_pass_run_id = marked_run_id
+        await db.commit()
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert await is_summarise_pass_run(db, thread, other_run_id) is False
+        assert await is_summarise_pass_run(db, thread, marked_run_id) is True
+        assert await is_summarise_pass_run(db, None, marked_run_id) is False
+
+
+@pytest.mark.parametrize("resumed", [False, True])
+async def test_safe_fail_never_parks_a_summarise_pass_thread(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake, resumed: bool
+) -> None:
+    """S3: a summarise pass describes a thread, it never decides about one. Ending
+    without an outcome says nothing about whose decision the thread waits for, so R7
+    must leave the status (and the fixed note) alone — for the resumed pass too."""
+    queued_run_id = await _make_run(commit_factory, seeded, status="awaiting_input")
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        thread.summarise_pass_run_id = queued_run_id
+        thread.status = "processing"
+        await db.commit()
+    settled_run_id = queued_run_id
+    if resumed:
+        settled_run_id = await _resume_of(commit_factory, queued_run_id, status="failed")
+    else:
+        async with commit_factory() as db:
+            run = await db.get(AgentRun, queued_run_id)
+            assert run is not None
+            run.status = "failed"
+            await db.commit()
+
+    assert await safe_fail_intake_thread(commit_factory, settled_run_id) is False
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        assert thread.status == "processing"
+        assert thread.outcome_note is None
+
+
+async def test_a_human_rename_that_commits_mid_run_survives(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """S4: the rename is a CONDITIONAL UPDATE evaluated by the database, not a
+    read-then-assign. The run's session holds the pre-rename row (the ordinary
+    identity-map read); a human PATCH commits underneath it; the pin must still win —
+    both the name AND its ``name_source``, which the old path reset to 'agent'."""
+    await _set_name(
+        commit_factory, seeded.project_id, name="RE: FW: quick question", source="subject"
+    )
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        stale = await db.get(Project, seeded.project_id)  # the read the race is against
+        assert stale is not None and stale.name_source == "subject"
+
+        async with commit_factory() as human_session:
+            renamed = await human_session.get(Project, seeded.project_id)
+            assert renamed is not None
+            renamed.name = "Project Atlas"
+            renamed.name_source = "human"
+            await human_session.commit()
+
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+        )
+        await db.commit()
+
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert project is not None and thread is not None
+        assert project.name == "Project Atlas"
+        assert project.name_source == "human"
+        # The rest of the conclusion still landed — only the name was refused.
+        assert thread.summary == _SUMMARY
+
+
+async def test_a_summarise_pass_never_renames_the_matter(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """S5: the pass said "nothing changed" while the matter's name moved under the
+    lawyer. The arg stays REQUIRED (the model still has to say what this is), but the
+    title is not applied and the tool's own result says so."""
+    await _set_name(
+        commit_factory, seeded.project_id, name="RE: FW: quick question", source="subject"
+    )
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        out = await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+            summarise_only=True,
+        )
+        await db.commit()
+
+    assert "noted but NOT applied" in out
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert project is not None and thread is not None
+        assert project.name == "RE: FW: quick question"
+        assert project.name_source == "subject"
+        assert thread.summary == _SUMMARY  # the account itself still lands

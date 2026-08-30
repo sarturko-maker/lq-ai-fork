@@ -1805,6 +1805,18 @@ async def test_agent_runs_resumed_from_run_id_is_a_self_fk(db_session: AsyncSess
     ).scalar_one()
     assert "REFERENCES agent_runs(id)" in clause
     assert "ON DELETE SET NULL" in clause
+    # S6 review fix: the binder walks this link on every intake run's composition (and
+    # the safe-fail hook walks it again). A self-referential FK gets no index for free.
+    indexed = (
+        await db_session.execute(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE tablename = 'agent_runs' "
+                "AND indexname = 'ix_agent_runs_resumed_from_run_id'"
+            )
+        )
+    ).scalar_one()
+    assert "resumed_from_run_id" in indexed
 
 
 @pytest.mark.integration

@@ -77,7 +77,12 @@ def upgrade() -> None:
     )
     # The intake-born rows were named from the email subject at ingest — that is
     # their provenance, and it is what makes them replaceable by the agent's own
-    # title. Everything else stays 'human' (see the module docstring).
+    # title. Everything else stays 'human' (see the module docstring). Known and
+    # accepted (N10): an intake-born matter a human renamed BEFORE this column
+    # existed is indistinguishable from one still carrying its subject, so it is
+    # marked 'subject' and the thread's next run may overwrite that name once. There
+    # is no record anywhere of who typed those names; a later human rename re-pins
+    # it permanently.
     op.execute("UPDATE projects SET name_source = 'subject' WHERE intake_state = 'candidate'")
     op.create_check_constraint(
         "chk_projects_name_source",
@@ -98,9 +103,14 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
+    # The binder walks this link on EVERY intake run's composition (and the safe-fail
+    # hook walks it again), and a self-referential FK gets no index for free. Small
+    # and mostly NULL, so it costs nothing to keep.
+    op.create_index("ix_agent_runs_resumed_from_run_id", "agent_runs", ["resumed_from_run_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_agent_runs_resumed_from_run_id", table_name="agent_runs")
     op.drop_constraint("fk_agent_runs_resumed_from_run_id", "agent_runs", type_="foreignkey")
     op.drop_column("agent_runs", "resumed_from_run_id")
     op.drop_constraint("chk_projects_name_source", "projects", type_="check")

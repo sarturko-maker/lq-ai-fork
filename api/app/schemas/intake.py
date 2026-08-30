@@ -95,22 +95,38 @@ def _reject_nul_bytes(value: str) -> str:
     return value
 
 
+#: Bidirectional formatting characters (INTAKE-5a.1, N9). They are not "control
+#: characters" by Unicode's category, but they do the same job on a rendered line:
+#: LRE/RLE/PDF/LRO/RLO (U+202A-U+202E) and the isolates LRI/RLI/FSI/PDI
+#: (U+2066-U+2069) re-order the glyphs AROUND them, so a bullet can display text in
+#: an order the stored string does not have ("Trojan Source" applied to a summary the
+#: lawyer acts on). A one-line plain-text summary never needs one.
+_BIDI_CONTROLS = frozenset(range(0x202A, 0x202F)) | frozenset(range(0x2066, 0x206A))
+
+
 def _reject_control_chars(value: str) -> str:
-    """Reject (never strip) ANY control character — INTAKE-5a, ADR-F086.
+    """Reject (never strip) ANY control or bidi-formatting character — ADR-F086.
 
     Stricter than :func:`_reject_nul_bytes`, and deliberately so: this guards the
-    agent-written ``intake_threads.summary`` bullets, which are model text ABOUT
-    untrusted mail rendered straight into the lawyer's Inbox. A summary bullet is
-    one short plain-text line, so a newline, a tab, an ANSI escape, a bidi
-    override or a line/paragraph separator is never legitimate content — it is
-    someone trying to make the rendered list read as something it is not. C0
-    (``\x00``-``\x1f``), DEL, C1 (``\x80``-``\x9f``) and U+2028/U+2029 are all
-    refused; the model is told which character class it must fix and retries.
+    agent-written ``intake_threads.summary`` bullets and matter title, which are
+    model text ABOUT untrusted mail rendered straight into the lawyer's Inbox (and,
+    for the title, into the matter list). Such a value is one short plain-text line,
+    so a newline, a tab, an ANSI escape, a line/paragraph separator or a bidi
+    override is never legitimate content — it is someone trying to make the rendered
+    line read as something it is not. C0 (``\x00``-``\x1f``), DEL, C1
+    (``\x80``-``\x9f``), U+2028/U+2029 and :data:`_BIDI_CONTROLS` are all refused;
+    the model is told which character class it must fix and retries.
     """
 
     for ch in value:
         code = ord(ch)
-        if code < 0x20 or code == 0x7F or 0x80 <= code <= 0x9F or code in (0x2028, 0x2029):
+        if (
+            code < 0x20
+            or code == 0x7F
+            or 0x80 <= code <= 0x9F
+            or code in (0x2028, 0x2029)
+            or code in _BIDI_CONTROLS
+        ):
             raise ValueError("must not contain control characters or line breaks")
     return value
 

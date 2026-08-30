@@ -57,7 +57,7 @@ from typing import Annotated, Any
 
 from langchain_core.tools import InjectedToolCallId
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.guard import GuardContext, guarded_dispatch
@@ -73,7 +73,9 @@ logger = logging.getLogger(__name__)
 
 INTAKE_TOOL_NAMES = frozenset({"record_intake_outcome", "draft_email_reply"})
 # INTAKE-5a.1: the human-asked "Summarise now" pass gets the conclusion tool alone.
-_SUMMARISE_TOOL_NAMES = frozenset({"record_intake_outcome"})
+# Public because composition pins the whole read-only tool set of such a pass
+# against it (S2 review fix) — the grant sets live in the builder modules.
+SUMMARISE_INTAKE_TOOL_NAMES = frozenset({"record_intake_outcome"})
 
 # outcome -> the thread status it settles on. The matter-side effect (closing the
 # matter on 'dealt_with') is applied beside this map in _record_intake_outcome.
@@ -154,7 +156,7 @@ def build_intake_tools(
     set is narrowed to match (R6 fails closed on a tool that is not in it), and the
     outcome it records leaves the thread's status exactly where it was.
     """
-    granted = _SUMMARISE_TOOL_NAMES if summarise_only else INTAKE_TOOL_NAMES
+    granted = SUMMARISE_INTAKE_TOOL_NAMES if summarise_only else INTAKE_TOOL_NAMES
     ctx = GuardContext(
         session_factory=session_factory,
         run_id=run_id,
@@ -317,7 +319,9 @@ async def load_intake_thread_for_run(
 
     0. **A human-asked summarise pass** (INTAKE-5a.1) names its thread on the row
        itself (``intake_threads.summarise_pass_run_id``): it claims no inbound
-       message, so no later layer could find it.
+       message, so no later layer could find it. Matched against this run AND the
+       runs it resumes (below), so a pass that paused and resumed keeps its binding
+       instead of falling through to the legacy layer 2.
     1. **This run's own work.** The worker stamps an inbound message's ``run_id`` at
        the moment it starts a run for it (``intake_worker``), so the message carrying
        this ``run_id`` names the thread the run was started for.
@@ -349,11 +353,19 @@ async def load_intake_thread_for_run(
     candidates = await load_conversation_intake_threads(
         db, project_id=project_id, agent_thread_id=agent_thread_id
     )
-    if run_id is not None:
+    # The run's own id plus the runs it resumes, resolved at most once per call and
+    # only when a layer actually needs it (B1/fix D).
+    lineage: list[uuid.UUID] | None = None
+    if run_id is not None and any(c.summarise_pass_run_id is not None for c in candidates):
         # Layer 0 (INTAKE-5a.1): a human-asked "Summarise now" pass names its thread
         # outright — it claims no inbound message, so nothing below could find it.
+        # The marker names the run the endpoint QUEUED; a pass that paused and was
+        # resumed runs under a NEW agent_runs row, so the whole resume lineage counts
+        # (B1 review fix) or the resumed pass would fall through to the legacy layer 2
+        # and bind to a sibling thread — the very P1 fix D closed.
+        lineage = [run_id, *await resume_ancestor_run_ids(db, run_id)]
         for candidate in candidates:
-            if candidate.summarise_pass_run_id == run_id:
+            if candidate.summarise_pass_run_id in lineage:
                 return candidate
     if len(candidates) <= 1:
         return candidates[0] if candidates else None
@@ -380,7 +392,9 @@ async def load_intake_thread_for_run(
         ).scalar_one_or_none()
     if bound is None and run_id is not None:
         # Layer 1b: follow the resume's own parent link (fix D).
-        ancestors = await _resume_ancestor_run_ids(db, run_id)
+        ancestors = (
+            lineage[1:] if lineage is not None else await resume_ancestor_run_ids(db, run_id)
+        )
         if ancestors:
             bound = (
                 await db.execute(_newest_processed(IntakeMessage.run_id.in_(ancestors)))
@@ -421,12 +435,31 @@ async def load_intake_thread_for_run(
 _RESUME_CHAIN_MAX_HOPS = 10
 
 
-async def _resume_ancestor_run_ids(db: AsyncSession, run_id: uuid.UUID) -> list[uuid.UUID]:
+async def is_summarise_pass_run(
+    db: AsyncSession, thread: IntakeThread | None, run_id: uuid.UUID
+) -> bool:
+    """Is THIS run the thread's human-asked "Summarise now" pass? (INTAKE-5a.1)
+
+    The marker (``intake_threads.summarise_pass_run_id``, migration 0104) names the
+    run the endpoint queued. A pass that stopped for a human and was resumed executes
+    under a NEW ``agent_runs`` row, so the question is asked of the whole resume
+    lineage — otherwise the resumed pass would compose as a FULL intake run (the reply
+    tool back, the drafting doctrine back) and its safe-fail would restate the status
+    of a thread it was only ever meant to describe (B1/S3 review fix).
+    """
+    if thread is None or thread.summarise_pass_run_id is None:
+        return False
+    if thread.summarise_pass_run_id == run_id:
+        return True
+    return thread.summarise_pass_run_id in await resume_ancestor_run_ids(db, run_id)
+
+
+async def resume_ancestor_run_ids(db: AsyncSession, run_id: uuid.UUID) -> list[uuid.UUID]:
     """The runs THIS run resumes, nearest ancestor first (INTAKE-5a.1 fix D).
 
     Empty for an ordinary run, for a historic resume written before migration 0103,
     and for a run row that is gone. ``db.get`` is a primary-key lookup served from the
-    session's identity map when the caller already loaded the row (both callers do),
+    session's identity map when the caller already loaded the row (the callers do),
     so the common case costs no query at all.
     """
     ancestors: list[uuid.UUID] = []
@@ -504,11 +537,13 @@ async def _record_intake_outcome(
     """Validate → write the outcome + summary onto the thread → apply the project effect.
 
     ``summarise_only`` (INTAKE-5a.1) is the human-asked backfill pass. It writes the
-    ACCOUNT of the thread — outcome, label, note, title, summary — and touches nothing
-    else: the thread's status and the matter's open/closed state are facts a real run
-    established, and a pass whose only purpose is to describe them must not restate
-    them as decisions. Concretely, it can never downgrade a ``replied`` or ``handled``
-    thread back to ``awaiting_human``, and it can never re-open (or close) the matter.
+    ACCOUNT of the thread — outcome, label, note, summary — and touches nothing else:
+    the thread's status, the matter's NAME and its open/closed state are facts a real
+    run established, and a pass whose only purpose is to describe them must not
+    restate them as decisions. Concretely, it can never downgrade a ``replied`` or
+    ``handled`` thread back to ``awaiting_human``, never re-open (or close) the
+    matter, and never rename it (S5: the arg stays required — the model still has to
+    say what the matter is — but the result tells it the title was not applied).
     """
     try:
         proposal = RecordIntakeOutcomeInput(
@@ -569,8 +604,9 @@ async def _record_intake_outcome(
             thread.status = _OUTCOME_THREAD_STATUS[proposal.outcome]
         status_note = f"the thread is now {thread.status}"
 
-    # ONE owner-scoped load for every matter-side effect below (the name, the close,
-    # the re-open) — the same row, in the same transaction, read once.
+    # ONE owner-scoped load for the matter's lifecycle effects below (the close, the
+    # re-open) — the same row, in the same transaction, read once. The NAME is not
+    # written through it: that one is a conditional UPDATE (S4, below).
     project = (
         await db.execute(
             select(Project).where(
@@ -581,28 +617,46 @@ async def _record_intake_outcome(
 
     # INTAKE-5a.1 (maintainer UAT ruling, migration 0103): the matter's NAME is the
     # agent's summary of what this thread IS, not the subject line the eager row was
-    # opened with. Two fences, both structural:
+    # opened with. Three fences, all structural, and all of them evaluated BY THE
+    # DATABASE at write time (S4 review fix — a read-then-assign let a human PATCH
+    # that committed between the SELECT above and this write be overwritten, and its
+    # ``name_source`` reset to 'agent', losing the pin):
     #
-    # * ``intake_state == 'candidate'`` — only an intake-BORN matter is renamed. A
+    # * ``intake_state = 'candidate'`` — only an intake-BORN matter is renamed. A
     #   thread later attached to an ordinary matter (INTAKE-5b) must never rename
     #   the lawyer's own file.
-    # * ``name_source != 'human'`` — a person's name is final. This is ADR-F042's
+    # * ``name_source <> 'human'`` — a person's name is final. This is ADR-F042's
     #   auto-write-then-correct in its simplest form: the agent writes, the human
     #   corrects, and the correction is permanent (pins win).
-    if (
-        project is not None
-        and project.intake_state == "candidate"
-        and project.name_source != "human"
-        and project.name != proposal.matter_title
-    ):
-        project.name = proposal.matter_title
-        project.name_source = "agent"
+    # * ``owner_id`` — the same fence the SELECT above carries.
+    #
+    # A summarise pass renames NOTHING (S5): it exists to describe a settled thread,
+    # and its own result text used to say "nothing else changed" while the title
+    # moved underneath the lawyer.
+    if not summarise_only:
+        await db.execute(
+            update(Project)
+            .where(
+                Project.id == binding.project_id,
+                Project.owner_id == binding.user_id,
+                Project.intake_state == "candidate",
+                Project.name_source != "human",
+                Project.name != proposal.matter_title,
+            )
+            .values(name=proposal.matter_title, name_source="agent")
+            # "fetch" (Postgres: RETURNING, no extra round trip) so the session syncs
+            # the rows the DATABASE matched. The default "evaluate" would re-run the
+            # predicate against the possibly-stale identity-map copy and could tell
+            # this session the rename happened when the DB refused it.
+            .execution_options(synchronize_session="fetch")
+        )
 
     if summarise_only:
         return (
             f"Summary recorded for this thread ({proposal.outcome}, label: "
-            f"{proposal.label}). Nothing else changed: {status_note} and the matter's "
-            "state is exactly as the earlier run left it."
+            f"{proposal.label}). Nothing else changed: {status_note}, the matter's "
+            "state is exactly as the earlier run left it, and the title you wrote was "
+            "noted but NOT applied — a summary pass never renames the matter."
         )
 
     project_note = "the matter stays open for the lawyer"
@@ -907,6 +961,10 @@ async def safe_fail_intake_thread(
     ``summary_run_id`` against the newest settled run instead and shows the reader
     "the agent's last run did not finish", which is the honest form of the same fact.
 
+    A human-asked SUMMARISE pass is exempt (S3): it is read-only by construction, so
+    "it ended without an outcome" says nothing about whose decision the thread waits
+    for. Its thread is left exactly as the run that settled it left it.
+
     Returns whether it changed anything. Never raises: it must not mask the run's
     own outcome (the caller invokes it from a ``finally``).
     """
@@ -924,6 +982,12 @@ async def safe_fail_intake_thread(
                 run_id=run_id,
             )
             if thread is None or thread.status != "processing":
+                return False
+            if await is_summarise_pass_run(db, thread, run_id):
+                # S3 review fix: a summarise pass describes a thread, it never decides
+                # about one. Parking it at `awaiting_human` (and stamping the R7 note)
+                # would make the read-only pass the last word on a thread some earlier
+                # run really did settle.
                 return False
             thread.status = "awaiting_human"
             if thread.outcome_note is None:
