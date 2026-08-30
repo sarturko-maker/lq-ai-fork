@@ -1,4 +1,4 @@
-"""INTAKE-5a.1 — who named this matter: projects.name_source (ADR-F042 / ADR-F086)
+"""INTAKE-5a.1 — projects.name_source + agent_runs.resumed_from_run_id (ADR-F042/F086/F087)
 
 The maintainer's UAT of the Inbox (INTAKE-5a, PR #299) found every intake-born
 matter carrying the raw email subject as its name ("RE: FW: quick question"). The
@@ -25,9 +25,26 @@ marks the intake-born rows (``intake_state = 'candidate'``) ``'subject'``, becau
 that is literally where their names came from
 (``app.api.intake_emails._derive_project_name``).
 
-Reversible: the downgrade drops the CHECK and the column (the naming provenance is
-re-derivable only for intake rows, which is why the upgrade is the interesting
-direction).
+## ``agent_runs.resumed_from_run_id`` — the resume's parent link (fix D)
+
+A second, unrelated-looking column, and a P1: a resumed HITL run is a NEW
+``agent_runs`` row with no inbound message stamped on it, so
+``load_intake_thread_for_run`` fell through to its layer-2 heuristic ("the newest
+inbound processed by ANY run on this conversation") and — on a conversation holding
+several intake threads (ADR-F088 layer 2/3) — bound the resume to the WRONG thread.
+Seen twice on dev: an approved draft on the thread that was paused was refused by
+the delivered-row guard because the binding had landed on a sibling thread that had
+already replied. Two lawyer approvals were consumed and nothing was sent.
+
+The fix is a fact instead of a guess: the resume endpoint records WHICH run it is
+resuming, and the binder follows that link (through a chain of resumes) to the
+message its ancestor actually claimed. ``SET NULL`` on delete — losing the parent
+row costs the link, never the run. No backfill: historic resumes stay NULL and fall
+through to the legacy heuristic exactly as before.
+
+Reversible: the downgrade drops the CHECK, the FK and both columns (the naming
+provenance is re-derivable only for intake rows, which is why the upgrade is the
+interesting direction).
 
 Revision ID: 0103
 Revises: 0102
@@ -37,6 +54,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0103"
 down_revision = "0102"
@@ -67,7 +85,23 @@ def upgrade() -> None:
         f"name_source IN ({_SQL_NAME_SOURCES})",
     )
 
+    # --- fix D: the resume's parent link -----------------------------------
+    op.add_column(
+        "agent_runs",
+        sa.Column("resumed_from_run_id", UUID(as_uuid=True), nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_agent_runs_resumed_from_run_id",
+        "agent_runs",
+        "agent_runs",
+        ["resumed_from_run_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+
 
 def downgrade() -> None:
+    op.drop_constraint("fk_agent_runs_resumed_from_run_id", "agent_runs", type_="foreignkey")
+    op.drop_column("agent_runs", "resumed_from_run_id")
     op.drop_constraint("chk_projects_name_source", "projects", type_="check")
     op.drop_column("projects", "name_source")

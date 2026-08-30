@@ -303,10 +303,22 @@ async def load_intake_thread_for_run(
     1. **This run's own work.** The worker stamps an inbound message's ``run_id`` at
        the moment it starts a run for it (``intake_worker``), so the message carrying
        this ``run_id`` names the thread the run was started for.
-    2. **The conversation's lineage.** A resume is a NEW ``agent_runs`` row with no
-       messages of its own, so fall back to the newest inbound processed by ANY run on
-       this same agent conversation — precisely the message the paused run was working
-       on.
+    1b. **The resume's parent chain** (INTAKE-5a.1 fix D, migration 0103). A resume is
+       a NEW ``agent_runs`` row with no messages of its own, but it now records WHICH
+       run it resumes (``agent_runs.resumed_from_run_id``, set by the resume endpoint;
+       a resume of a resume chains, so the walk follows it up to
+       :data:`_RESUME_CHAIN_MAX_HOPS`). The thread is then the one whose inbound
+       message an ANCESTOR claimed — a fact, not an inference.
+
+       This layer exists because layer 2 below got it WRONG in production, twice: on a
+       conversation holding three intake threads, an approved reply on the paused
+       thread bound to a SIBLING thread that had already replied, and the tool's
+       delivered-row guard refused the send. The lawyer's approval was consumed and
+       nothing went out.
+    2. **The conversation's lineage — LEGACY heuristic, superseded by 1b.** The newest
+       inbound processed by ANY run on this same agent conversation. It is right when
+       the conversation holds ONE thread and a guess when it holds several, which is
+       why it now runs only for runs that predate the parent link (no backfill).
     3. **The single working thread.** With nothing processed yet, take the one thread
        that is not still ``received``.
 
@@ -342,6 +354,13 @@ async def load_intake_thread_for_run(
         bound = (
             await db.execute(_newest_processed(IntakeMessage.run_id == run_id))
         ).scalar_one_or_none()
+    if bound is None and run_id is not None:
+        # Layer 1b: follow the resume's own parent link (fix D).
+        ancestors = await _resume_ancestor_run_ids(db, run_id)
+        if ancestors:
+            bound = (
+                await db.execute(_newest_processed(IntakeMessage.run_id.in_(ancestors)))
+            ).scalar_one_or_none()
     if bound is None:
         bound = (
             await db.execute(
@@ -369,6 +388,34 @@ async def load_intake_thread_for_run(
         },
     )
     return None
+
+
+#: How far the resume chain is followed before the walk gives up (fix D). A human
+#: approving, being sent back to, and re-approving a draft builds a chain one link at
+#: a time; ten is far past any real sequence and makes a corrupted self-referential
+#: link a bounded walk rather than a hang.
+_RESUME_CHAIN_MAX_HOPS = 10
+
+
+async def _resume_ancestor_run_ids(db: AsyncSession, run_id: uuid.UUID) -> list[uuid.UUID]:
+    """The runs THIS run resumes, nearest ancestor first (INTAKE-5a.1 fix D).
+
+    Empty for an ordinary run, for a historic resume written before migration 0103,
+    and for a run row that is gone. ``db.get`` is a primary-key lookup served from the
+    session's identity map when the caller already loaded the row (both callers do),
+    so the common case costs no query at all.
+    """
+    ancestors: list[uuid.UUID] = []
+    current = await db.get(AgentRun, run_id)
+    for _ in range(_RESUME_CHAIN_MAX_HOPS):
+        if current is None or current.resumed_from_run_id is None:
+            break
+        parent_id = current.resumed_from_run_id
+        if parent_id in ancestors or parent_id == run_id:
+            break  # a cycle is a bug, not a state to walk forever
+        ancestors.append(parent_id)
+        current = await db.get(AgentRun, parent_id)
+    return ancestors
 
 
 async def load_conversation_intake_threads(

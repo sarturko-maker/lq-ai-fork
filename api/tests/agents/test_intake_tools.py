@@ -24,7 +24,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -1454,6 +1454,124 @@ async def test_binding_follows_the_conversation_lineage_for_a_resumed_run(
         )
         assert bound is not None
         assert bound.id == conversation.worked_thread_id
+
+
+async def _make_resume(
+    factory: async_sessionmaker[AsyncSession],
+    conversation: SeededConversation,
+    *,
+    parent_run_id: uuid.UUID | None,
+) -> uuid.UUID:
+    """A resume run on the SAME conversation: no messages of its own, optionally
+    carrying the parent link the resume endpoint now writes (fix D)."""
+    async with factory() as db:
+        resume = AgentRun(
+            user_id=conversation.seeded.user_id,
+            thread_id=conversation.agent_thread_id,
+            project_id=conversation.seeded.project_id,
+            status="running",
+            prompt="[resume: approve]",
+            max_steps=8,
+            resumed_from_run_id=parent_run_id,
+        )
+        db.add(resume)
+        await db.commit()
+        return resume.id
+
+
+async def _sibling_replied_more_recently(
+    factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """The live shape (fix D): a SIBLING thread's inbound is the newest message on the
+    conversation and was processed by its own run — so the layer-2 heuristic names
+    that sibling, not the thread the paused run was working."""
+    async with factory() as db:
+        sibling_run = AgentRun(
+            user_id=conversation.seeded.user_id,
+            thread_id=conversation.agent_thread_id,
+            project_id=conversation.seeded.project_id,
+            status="completed",
+            prompt="intake",
+            max_steps=8,
+        )
+        db.add(sibling_run)
+        await db.flush()
+        newest = (
+            (
+                await db.execute(
+                    select(IntakeMessage).where(
+                        IntakeMessage.thread_id == conversation.pending_a_id
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert newest is not None
+        newest.run_id = sibling_run.id
+        newest.created_at = datetime.now(tz=UTC) + timedelta(hours=1)
+        await db.commit()
+
+
+async def test_a_resume_binds_to_the_thread_its_parent_was_working(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """P1, reproduced from dev (fix D): the sibling thread carries the conversation's
+    NEWEST processed inbound, so the legacy lineage heuristic names it — and the
+    approved reply was then refused against that sibling's delivered row. With the
+    parent link the resume binds to the thread its paused run actually worked."""
+    await _sibling_replied_more_recently(commit_factory, conversation)
+    resume_run_id = await _make_resume(
+        commit_factory, conversation, parent_run_id=conversation.run_id
+    )
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=resume_run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.worked_thread_id
+        assert bound.id != conversation.pending_a_id
+
+
+async def test_a_resume_of_a_resume_follows_the_whole_chain(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """Send-back → redraft → approve builds a chain of resumes, none of which stamps a
+    message. The walk climbs it to the run that did."""
+    await _sibling_replied_more_recently(commit_factory, conversation)
+    first = await _make_resume(commit_factory, conversation, parent_run_id=conversation.run_id)
+    second = await _make_resume(commit_factory, conversation, parent_run_id=first)
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=second,
+        )
+        assert bound is not None
+        assert bound.id == conversation.worked_thread_id
+
+
+async def test_a_historic_resume_still_uses_the_legacy_lineage_heuristic(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """No backfill: a resume written before migration 0103 carries no parent link and
+    falls through to layer 2 exactly as it always did — which is the behaviour this
+    test pins, bug and all, so a future change to it is deliberate."""
+    await _sibling_replied_more_recently(commit_factory, conversation)
+    resume_run_id = await _make_resume(commit_factory, conversation, parent_run_id=None)
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=resume_run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.pending_a_id
 
 
 async def test_binding_falls_back_to_the_single_working_thread(

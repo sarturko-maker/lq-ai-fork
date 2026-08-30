@@ -1143,6 +1143,12 @@ async def resume_agent_run(
         max_steps=run.max_steps,
         budget_profile=run.budget_profile,
         resume_decision=body.decision.model_dump(exclude_none=True),
+        # INTAKE-5a.1 fix D: WHICH run this resumes. A resume row carries no work of
+        # its own (no stamped inbound message), so without this link the intake
+        # binder had to guess which of a conversation's threads it belonged to — and
+        # on a multi-thread conversation it guessed wrong, refusing an approved send
+        # against a sibling thread's already-delivered reply.
+        resumed_from_run_id=run.id,
     )
     db.add(resume)
     try:
