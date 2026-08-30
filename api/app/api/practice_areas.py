@@ -41,6 +41,7 @@ from app.api.dependencies import ActiveUser, AdminUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, NotFound, ValidationError
+from app.matters.reference import GENERIC_AREA_CODE, derive_code, uniquify_code
 from app.models.knowledge import KnowledgeBase
 from app.models.org_skill import OrgSkillVersion
 from app.models.playbook import Playbook
@@ -257,6 +258,7 @@ def _to_read(
         id=area.id,
         key=area.key,
         name=area.name,
+        area_code=area.area_code,
         unit_label=area.unit_label,
         configured=_is_configured(area),
         position=area.position,
@@ -431,6 +433,25 @@ async def update_practice_area_config(
         area.name = fields["name"]
     if "unit_label" in fields:
         area.unit_label = fields["unit_label"]
+    if "area_code" in fields:
+        # INTAKE-4a (ADR-F088): a code already minted into references stays valid —
+        # changing it only affects FUTURE allocations (and the counter continues
+        # under the OLD code, so nothing can collide). 409 on a code another area
+        # already holds; the DB partial unique index is the real arbiter.
+        new_code = fields["area_code"]
+        clash = (
+            await db.execute(
+                select(PracticeArea.id).where(
+                    PracticeArea.area_code == new_code, PracticeArea.id != area.id
+                )
+            )
+        ).scalar_one_or_none()
+        if clash is not None or new_code == GENERIC_AREA_CODE:
+            raise Conflict(
+                "That area code is already in use.",
+                details={"area_code": new_code},
+            )
+        area.area_code = new_code
     if "profile_md" in fields:
         area.profile_md = fields["profile_md"]
     if "default_tier_floor" in fields:
@@ -590,9 +611,28 @@ async def create_practice_area(
     next_position = (
         await db.execute(select(func.coalesce(func.max(PracticeArea.position), -1)))
     ).scalar_one() + 1
+    # INTAKE-4a (ADR-F088): every area carries a short code from birth so the
+    # admin sees (and can change) what its matter references will read like.
+    taken = {
+        str(code)
+        for code in (
+            await db.execute(
+                select(PracticeArea.area_code).where(PracticeArea.area_code.is_not(None))
+            )
+        ).scalars()
+    } | {GENERIC_AREA_CODE}
+    if payload.area_code is not None and payload.area_code in taken:
+        raise Conflict(
+            "That area code is already in use.", details={"area_code": payload.area_code}
+        )
+    area_code = payload.area_code or uniquify_code(
+        derive_code(payload.name) or derive_code(payload.key) or GENERIC_AREA_CODE, taken
+    )
+
     area = PracticeArea(
         key=payload.key,
         name=payload.name,
+        area_code=area_code,
         unit_label=payload.unit_label,
         profile_md=payload.profile_md,
         default_tier_floor=payload.default_tier_floor,

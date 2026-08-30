@@ -30,6 +30,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -98,6 +99,13 @@ class Project(Base):
             "intake_state IS NULL OR intake_state IN ('candidate','promoted','dismissed')",
             name="chk_projects_intake_state",
         ),
+        # INTAKE-4a (ADR-F088): the SQL mirror of
+        # app.matters.reference.REFERENCE_PATTERN / REFERENCE_MAX_CHARS.
+        CheckConstraint(
+            "reference IS NULL OR (reference ~ '^[A-Z0-9]{2,6}-[A-Z0-9]{2,6}-[0-9]{4,}$' "
+            "AND char_length(reference) <= 40)",
+            name="chk_projects_reference_format",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -141,6 +149,12 @@ class Project(Base):
     # 'promoted' = the lawyer kept it as a real matter; 'dismissed' = the
     # agent (or lawyer) filed it away with nothing external. CHECK above.
     intake_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # INTAKE-4a (ADR-F088, migration 0100): the neutral matter reference
+    # ``ORG-AREA-NNNN``, allocated once at creation and IMMUTABLE — no PUT/PATCH
+    # path accepts it. Globally UNIQUE (this deployment is single-tenant, so
+    # global IS per-org). NULL only for sandboxes (not matters) and for a row
+    # written by a path that predates the allocator.
+    reference: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -519,6 +533,43 @@ class MatterParticipant(Base):
             f"<MatterParticipant id={self.id} project_id={self.project_id} "
             f"side={self.side!r} trust={self.trust!r}>"
         )
+
+
+class MatterReferenceCounter(Base):
+    """The per-area-code counter behind ``ORG-AREA-NNNN`` — INTAKE-4a (ADR-F088).
+
+    One row per area CODE (not per area id): the code is what appears in the
+    reference, so keying the counter on it is what actually guarantees the string
+    is unique — a code re-minted on a different area continues the series instead
+    of restarting at 1 and colliding. Matters with no practice area allocate under
+    the reserved ``GEN`` code, for which no ``practice_areas`` row exists; that is
+    why this is a plain code column and not an FK.
+
+    Taken with ``SELECT … FOR UPDATE`` inside the caller's transaction
+    (``app.matters.reference.next_counter_value``), so the number and the matter
+    row it lands on commit — or roll back — together.
+    """
+
+    __tablename__ = "matter_reference_counters"
+    __table_args__ = (
+        PrimaryKeyConstraint("area_code", name="pk_matter_reference_counters"),
+        CheckConstraint(
+            "area_code ~ '^[A-Z0-9]{2,6}$'", name="chk_matter_reference_counters_area_code"
+        ),
+        CheckConstraint("next_value >= 1", name="chk_matter_reference_counters_next_value"),
+    )
+
+    area_code: Mapped[str] = mapped_column(Text, nullable=False)
+    next_value: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("1"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    def __repr__(self) -> str:
+        return f"<MatterReferenceCounter area_code={self.area_code!r} next_value={self.next_value}>"
 
 
 class MatterCapabilityToggle(Base):

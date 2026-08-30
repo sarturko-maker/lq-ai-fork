@@ -23,6 +23,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.matters.reference import CODE_PATTERN
+
 # Profile shape. ``area`` ships a fully-configured practice area (Commercial,
 # Privacy); ``blank`` creates a bare area the admin configures themselves — its
 # identity (key/name/unit) comes from the apply request, not the manifest.
@@ -69,6 +71,12 @@ class ProfileManifest(BaseModel):
 
     # --- area-only fields (required iff kind == "area", forbidden iff "blank") ---
     area_key: str | None = Field(default=None, pattern=SLUG_PATTERN)
+    #: INTAKE-4a (ADR-F088) — the area's short code, the middle segment of every
+    #: matter reference filed under it (``COM`` → ``NWT-COM-0042``). Shipped as
+    #: manifest data so a fresh org's references read right from matter one; the
+    #: admin can change it afterwards on the area page. Required for an ``area``
+    #: profile, forbidden on ``blank`` (whose identity comes from the request).
+    code: str | None = Field(default=None, pattern=CODE_PATTERN)
     unit_label: UnitLabel | None = None
     default_tier_floor: int | None = Field(default=None, ge=1, le=5)
     default_budget_profile: Literal["economy", "balanced", "generous"] | None = None
@@ -85,7 +93,9 @@ class ProfileManifest(BaseModel):
         """An ``area`` profile needs its area block; a ``blank`` one forbids it."""
         if self.kind == "area":
             missing = [
-                f for f in ("area_key", "unit_label", "bindings") if getattr(self, f) is None
+                f
+                for f in ("area_key", "code", "unit_label", "bindings")
+                if getattr(self, f) is None
             ]
             if missing:
                 raise ValueError(
@@ -96,6 +106,7 @@ class ProfileManifest(BaseModel):
                 f
                 for f in (
                     "area_key",
+                    "code",
                     "unit_label",
                     "default_tier_floor",
                     "default_budget_profile",

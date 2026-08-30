@@ -179,6 +179,94 @@ async def test_put_replaces_existing_profile(
     assert rows[0].content_md == "# New voice"
 
 
+# ---------------------------------------------------------------------------
+# INTAKE-4a (ADR-F088) — the org code, first segment of every matter reference
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_put_sets_the_org_code(
+    client: AsyncClient, db_session: AsyncSession, admin_user: User
+) -> None:
+    resp = await client.put(
+        "/api/v1/organization-profile",
+        headers=_bearer(admin_user),
+        json={"content_md": "# Voice", "org_code": "NWT"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["org_code"] == "NWT"
+
+    rows = (await db_session.execute(select(OrganizationProfile))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].org_code == "NWT"
+
+
+@pytest.mark.integration
+async def test_put_without_org_code_leaves_it_untouched(
+    client: AsyncClient, db_session: AsyncSession, admin_user: User
+) -> None:
+    """The House Brief form sends only ``content_md``; it must not wipe the code."""
+
+    db_session.add(
+        OrganizationProfile(content_md="# Old", org_code="NWT", updated_by=admin_user.id)
+    )
+    await db_session.flush()
+
+    resp = await client.put(
+        "/api/v1/organization-profile",
+        headers=_bearer(admin_user),
+        json={"content_md": "# New"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["org_code"] == "NWT"
+
+
+@pytest.mark.integration
+async def test_put_with_explicit_null_clears_the_org_code(
+    client: AsyncClient, db_session: AsyncSession, admin_user: User
+) -> None:
+    db_session.add(
+        OrganizationProfile(content_md="# Old", org_code="NWT", updated_by=admin_user.id)
+    )
+    await db_session.flush()
+
+    resp = await client.put(
+        "/api/v1/organization-profile",
+        headers=_bearer(admin_user),
+        json={"content_md": "# New", "org_code": None},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["org_code"] is None
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("bad", ["nwt", "N", "TOOLONGCODE", "NW T", "NW-T", "NW.T", ""])
+async def test_put_rejects_a_malformed_org_code(
+    client: AsyncClient, admin_user: User, bad: str
+) -> None:
+    """Reject, don't sanitize — a lowercase code is a 422, never up-cased for us."""
+
+    resp = await client.put(
+        "/api/v1/organization-profile",
+        headers=_bearer(admin_user),
+        json={"content_md": "# Voice", "org_code": bad},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.integration
+async def test_get_reports_the_org_code(
+    client: AsyncClient, db_session: AsyncSession, admin_user: User, regular_user: User
+) -> None:
+    db_session.add(
+        OrganizationProfile(content_md="# Voice", org_code="NWT", updated_by=admin_user.id)
+    )
+    await db_session.flush()
+    resp = await client.get("/api/v1/organization-profile", headers=_bearer(regular_user))
+    assert resp.status_code == 200
+    assert resp.json()["org_code"] == "NWT"
+
+
 @pytest.mark.integration
 async def test_put_accepts_content_at_the_cap(client: AsyncClient, admin_user: User) -> None:
     """A brief exactly at the cap saves — the boundary is inclusive."""

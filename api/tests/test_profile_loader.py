@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from app.config import get_settings
+from app.matters.reference import GENERIC_AREA_CODE, STANDARD_AREA_CODES, is_valid_code
 from app.profiles.bootstrap import resolve_profiles_dir
 from app.profiles.loader import ProfileLoadError, load_profiles
 from app.skills.bootstrap import resolve_skill_dirs
@@ -33,6 +34,7 @@ _GOOD_AREA: dict[str, Any] = {
     "display_name": "Widgets",
     "description": "A test area profile.",
     "area_key": "widgets",
+    "code": "WID",
     "unit_label": "Matter",
     "default_tier_floor": None,
     "default_budget_profile": None,
@@ -188,8 +190,44 @@ def test_folder_name_mismatch_fails_loud(tmp_path: Path, skill_registry: Any) ->
 
 def test_duplicate_area_key_fails_loud(tmp_path: Path, skill_registry: Any) -> None:
     _write(tmp_path, _GOOD_AREA)
-    _write(tmp_path, _mutate(name="gadgets", area_key="widgets"))  # same area_key
+    _write(tmp_path, _mutate(name="gadgets", area_key="widgets", code="GAD"))  # same area_key
     with pytest.raises(ProfileLoadError, match="already claimed"):
+        load_profiles(tmp_path, skill_registry=skill_registry)
+
+
+def test_duplicate_area_code_fails_loud(tmp_path: Path, skill_registry: Any) -> None:
+    """INTAKE-4a (ADR-F088): two areas sharing a code could mint the same
+    matter reference — refused at LOAD, like every other manifest cross-check."""
+    _write(tmp_path, _GOOD_AREA)
+    _write(tmp_path, _mutate(name="gadgets", area_key="gadgets"))  # same code "WID"
+    with pytest.raises(ProfileLoadError, match="already claimed"):
+        load_profiles(tmp_path, skill_registry=skill_registry)
+
+
+def test_reserved_generic_area_code_fails_loud(tmp_path: Path, skill_registry: Any) -> None:
+    """``GEN`` belongs to area-less matters; no real area may claim it."""
+    _write(tmp_path, _mutate(code="GEN"))
+    with pytest.raises(ProfileLoadError, match="already claimed"):
+        load_profiles(tmp_path, skill_registry=skill_registry)
+
+
+def test_area_without_a_code_fails_loud(tmp_path: Path, skill_registry: Any) -> None:
+    bad = _mutate()
+    bad.pop("code")
+    _write(tmp_path, bad)
+    with pytest.raises(ProfileLoadError, match="schema validation"):
+        load_profiles(tmp_path, skill_registry=skill_registry)
+
+
+def test_blank_with_a_code_fails_loud(tmp_path: Path, skill_registry: Any) -> None:
+    _write(tmp_path, dict(_GOOD_BLANK, code="SCR"), doctrine=None)
+    with pytest.raises(ProfileLoadError, match="schema validation"):
+        load_profiles(tmp_path, skill_registry=skill_registry)
+
+
+def test_lowercase_area_code_fails_loud(tmp_path: Path, skill_registry: Any) -> None:
+    _write(tmp_path, _mutate(code="wid"))
+    with pytest.raises(ProfileLoadError, match="schema validation"):
         load_profiles(tmp_path, skill_registry=skill_registry)
 
 
@@ -216,3 +254,37 @@ def test_real_shipped_profiles_load_clean() -> None:
     assert commercial.doctrine and "commercial" in commercial.doctrine.lower()
     assert commercial.manifest.bindings is not None
     assert "surgical-redline" in commercial.manifest.bindings.skills
+
+
+def test_shipped_manifests_carry_unique_valid_area_codes() -> None:
+    """Drift guard — INTAKE-4a (ADR-F088).
+
+    Every shipped ``area`` manifest declares a well-formed, unique matter-reference
+    code, none of them takes the reserved ``GEN``, and each agrees with the
+    service's ``STANDARD_AREA_CODES`` map (which additionally covers the areas
+    migration 0053 seeds without a manifest, and which the 0100 backfill uses).
+    """
+    settings = get_settings()
+    skills_dir, community_dir = resolve_skill_dirs(settings)
+    profiles_dir = resolve_profiles_dir(settings)
+    if not skills_dir.is_dir() or not profiles_dir.is_dir():
+        pytest.skip("shipped skills/ or profiles/ not present in this run layout")
+    real_skills = load_registry(skills_dir, community_skills_dir=community_dir)
+    reg = load_profiles(profiles_dir, skill_registry=real_skills)
+
+    codes: list[str] = []
+    for record in reg.list_records():
+        manifest = record.manifest
+        if manifest.kind != "area":
+            assert manifest.code is None
+            continue
+        assert manifest.code is not None
+        assert is_valid_code(manifest.code), manifest.name
+        assert manifest.code != GENERIC_AREA_CODE
+        codes.append(manifest.code)
+        assert manifest.area_key is not None
+        assert STANDARD_AREA_CODES.get(manifest.area_key) == manifest.code, (
+            f"manifest {manifest.name!r} code {manifest.code!r} disagrees with "
+            "app.matters.reference.STANDARD_AREA_CODES"
+        )
+    assert len(set(codes)) == len(codes)

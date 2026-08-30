@@ -66,6 +66,7 @@ from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, NotFound, ValidationError
+from app.matters.reference import allocate_reference
 from app.models.file import File as FileModel
 from app.models.knowledge import KnowledgeBase
 from app.models.practice_area import PracticeArea
@@ -247,6 +248,8 @@ async def _serialize_project(db: AsyncSession, project: Project) -> ProjectRespo
         privileged=project.privileged,
         minimum_inference_tier=project.minimum_inference_tier,
         is_sandbox=project.is_sandbox,
+        # INTAKE-4a (ADR-F088): read-only on the wire — no write schema accepts it.
+        reference=project.reference,
         attached_file_ids=file_ids,
         attached_skill_names=skill_names,
         attached_knowledge_base_ids=kb_ids,
@@ -381,6 +384,11 @@ async def create_project(
                 details={"practice_area_id": str(payload.practice_area_id)},
             )
 
+    # INTAKE-4a (ADR-F088): every matter gets its neutral ORG-AREA-NNNN reference
+    # at creation, allocated inside THIS transaction — a matter that fails to
+    # commit gives its number back rather than leaving a hole in the series.
+    reference = await allocate_reference(db, practice_area_id=payload.practice_area_id)
+
     project = Project(
         owner_id=user.id,
         name=payload.name,
@@ -390,6 +398,7 @@ async def create_project(
         privileged=payload.privileged,
         minimum_inference_tier=payload.minimum_inference_tier,
         practice_area_id=payload.practice_area_id,
+        reference=reference,
     )
     db.add(project)
     try:

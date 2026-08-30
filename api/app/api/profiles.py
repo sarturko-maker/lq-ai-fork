@@ -36,6 +36,7 @@ from app.api.practice_areas import _is_configured, _require_registered_group
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, Forbidden, InternalError, NotFound
+from app.matters.reference import GENERIC_AREA_CODE
 from app.models.practice_area import (
     OrgLibraryEntry,
     PracticeArea,
@@ -124,6 +125,28 @@ async def get_profile(name: str, admin: AdminUser, request: Request) -> ProfileD
     return _detail(record)
 
 
+async def _free_area_code(
+    db: AsyncSession, desired: str | None, *, current: str | None = None
+) -> str | None:
+    """The manifest's area code, unless another area already holds it — INTAKE-4a.
+
+    An apply must never steal a code out from under a different area: doing so
+    would let two areas mint the same matter reference. When the desired code is
+    taken (or reserved), the area keeps whatever it has (``current``), which for
+    a fresh area means ``None`` — the allocator derives one on first use
+    (``app.matters.reference.assign_area_code``). ADR-F088.
+    """
+
+    if desired is None or desired == GENERIC_AREA_CODE:
+        return current
+    holder = (
+        await db.execute(select(PracticeArea.id).where(PracticeArea.area_code == desired))
+    ).scalar_one_or_none()
+    if holder is None or (current is not None and desired == current):
+        return desired
+    return current
+
+
 @router.post(
     "/{name}/apply",
     response_model=ProfileApplyResult,
@@ -177,6 +200,9 @@ async def apply_profile(
         assert manifest.area_key is not None and manifest.bindings is not None  # kind=='area'
         target_key = manifest.area_key
         target_name = manifest.display_name
+        # INTAKE-4a (ADR-F088): the manifest's matter-reference code travels with
+        # the area, so a fresh org's references read right from matter one.
+        target_code: str | None = manifest.code
         # `unit_label` is a closed Literal on the manifest but a free string on
         # the blank-override path and on the DB column — widen to str | None.
         target_unit: str | None = manifest.unit_label
@@ -199,6 +225,9 @@ async def apply_profile(
         target_key = payload.target_key
         target_name = payload.name
         target_unit = payload.unit_label
+        # A blank area derives its code on first allocation (or the admin sets one
+        # on the area page) — the blank manifest carries no identity of its own.
+        target_code = None
         doctrine = None
         skills = []
         tool_groups = []
@@ -241,6 +270,7 @@ async def apply_profile(
         area = PracticeArea(
             key=target_key,
             name=target_name,
+            area_code=await _free_area_code(db, target_code),
             unit_label=target_unit,
             profile_md=doctrine,
             default_tier_floor=tier_floor,
@@ -271,6 +301,10 @@ async def apply_profile(
         # (names only — Q2 audit-diff). ``configured`` is derived, not tracked.
         for field, new_value in (
             ("name", target_name),
+            # INTAKE-4a: manifest-owned like the rest, but never stolen from
+            # another area — _free_area_code returns the area's current code when
+            # the manifest's is taken, so the overwrite is then a no-op.
+            ("area_code", await _free_area_code(db, target_code, current=area.area_code)),
             ("unit_label", target_unit),
             ("profile_md", doctrine),
             ("default_tier_floor", tier_floor),

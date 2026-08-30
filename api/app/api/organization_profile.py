@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import ActiveUser, AdminUser
 from app.audit import audit_action
 from app.db.session import get_db
+from app.matters.reference import CODE_PATTERN
 from app.models.organization_profile import OrganizationProfile
 
 router = APIRouter(prefix="/organization-profile", tags=["organization-profile"])
@@ -58,6 +59,10 @@ class OrganizationProfileResponse(BaseModel):
     """GET response shape; PUT also returns this body on success."""
 
     content_md: str
+    # INTAKE-4a (ADR-F088): the org's short code — the first segment of every
+    # matter reference. ``None`` = the admin has not set one, and the allocator
+    # falls back to the neutral placeholder ``ORG``.
+    org_code: str | None = None
     updated_at: datetime | None = None
     updated_by: str | None = None
 
@@ -69,9 +74,17 @@ class OrganizationProfileUpdateRequest(BaseModel):
     without deleting the row. The PUT is an upsert: insert if no row
     exists yet, update in place otherwise (preserving the row id so
     audit history correlates).
+
+    ``org_code`` (INTAKE-4a, ADR-F088) uses ``exclude_unset`` semantics so the
+    existing House Brief form — which sends only ``content_md`` — cannot wipe
+    the code by omission: key ABSENT leaves it unchanged, key present with
+    ``null`` clears it, key present with a value sets it. The value is
+    REJECTED, never up-cased or trimmed into shape (CLAUDE.md: validate at the
+    boundary, reject don't sanitize) — the admin form up-cases as you type.
     """
 
     content_md: str = Field(min_length=0, max_length=HOUSE_BRIEF_MAX_CHARS)
+    org_code: str | None = Field(default=None, pattern=CODE_PATTERN)
 
 
 # ---------------------------------------------------------------------------
@@ -111,9 +124,12 @@ async def get_organization_profile(
 
     row = await _load_singleton(db)
     if row is None:
-        return OrganizationProfileResponse(content_md="", updated_at=None, updated_by=None)
+        return OrganizationProfileResponse(
+            content_md="", org_code=None, updated_at=None, updated_by=None
+        )
     return OrganizationProfileResponse(
         content_md=row.content_md,
+        org_code=row.org_code,
         updated_at=row.updated_at,
         updated_by=str(row.updated_by) if row.updated_by else None,
     )
@@ -146,12 +162,20 @@ async def put_organization_profile(
     so admins can trace who changed the Profile and when.
     """
 
+    # INTAKE-4a (ADR-F088): key-absent leaves org_code alone, key-present-null
+    # clears it (the House Brief form sends only content_md and must not wipe it).
+    org_code_set = "org_code" in payload.model_fields_set
+
     row = await _load_singleton(db)
     if row is None:
         row = OrganizationProfile(content_md=payload.content_md, updated_by=user.id)
+        if org_code_set:
+            row.org_code = payload.org_code
         db.add(row)
     else:
         row.content_md = payload.content_md
+        if org_code_set:
+            row.org_code = payload.org_code
         row.updated_by = user.id
 
     await audit_action(
@@ -161,13 +185,14 @@ async def put_organization_profile(
         resource_type="organization_profile",
         resource_id=None,
         request=request,
-        details={"content_length": len(payload.content_md)},
+        details={"content_length": len(payload.content_md), "org_code_set": org_code_set},
     )
     await db.commit()
     await db.refresh(row)
 
     return OrganizationProfileResponse(
         content_md=row.content_md,
+        org_code=row.org_code,
         updated_at=row.updated_at,
         updated_by=str(row.updated_by) if row.updated_by else None,
     )

@@ -250,6 +250,12 @@ class ProjectResponse(BaseModel):
     # matters created via ``POST /projects``; ``True`` only for the
     # internally-managed row created by ``POST /projects/sandbox/ensure``.
     is_sandbox: bool = False
+    # INTAKE-4a (ADR-F088): the matter's neutral ORG-AREA-NNNN reference, allocated
+    # once at creation and IMMUTABLE — read-only on the wire (no create/update
+    # schema accepts it, so no client can set or change one). NULL for sandbox
+    # rows (a sandbox is not a matter) and for rows created before migration 0100
+    # backfilled the series.
+    reference: str | None = None
     attached_file_ids: list[uuid.UUID] = Field(default_factory=list)
     attached_skill_names: list[str] = Field(default_factory=list)
     attached_knowledge_base_ids: list[uuid.UUID] = Field(default_factory=list)

@@ -12,6 +12,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.matters.reference import CODE_PATTERN
+
 
 class BoundPlaybook(BaseModel):
     """One playbook bound to an area — the join summary the admin UI renders
@@ -57,6 +59,10 @@ class PracticeAreaRead(BaseModel):
     id: uuid.UUID
     key: str
     name: str
+    # INTAKE-4a (ADR-F088): the area's short code — the middle segment of every
+    # matter reference filed under it. None until the area's first allocation
+    # derives one (or an admin sets one).
+    area_code: str | None
     unit_label: str
     configured: bool
     position: int
@@ -105,6 +111,11 @@ class PracticeAreaConfigUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    # INTAKE-4a (ADR-F088): admin-editable area code. Rejected, never coerced —
+    # lowercase or an out-of-range length is a 422 (the admin form up-cases as
+    # you type). Like name/unit_label, an explicit null is rejected: clearing a
+    # code would strand the references already minted under it.
+    area_code: str | None = Field(default=None, pattern=CODE_PATTERN)
     unit_label: str | None = Field(default=None, min_length=1, max_length=200)
     profile_md: str | None = Field(default=None, max_length=20_000)
     default_tier_floor: int | None = Field(default=None, ge=1, le=5)
@@ -117,7 +128,7 @@ class PracticeAreaConfigUpdate(BaseModel):
     default_budget_profile: Literal["economy", "balanced", "generous"] | None = None
     agent_config: dict[str, Any] | None = None
 
-    @field_validator("name", "unit_label")
+    @field_validator("name", "unit_label", "area_code")
     @classmethod
     def _reject_explicit_null(cls, value: str | None) -> str:
         """SETUP-4b review fix 1: an explicit JSON ``null`` matches the ``None``
@@ -180,6 +191,9 @@ class PracticeAreaCreate(BaseModel):
 
     key: str = Field(pattern=r"^[a-z][a-z0-9-]{1,62}[a-z0-9]$")
     name: str = Field(min_length=1, max_length=200)
+    # INTAKE-4a (ADR-F088): optional at create — omitted, the handler derives one
+    # from ``name`` and uniquifies it. Rejected, never coerced, when supplied.
+    area_code: str | None = Field(default=None, pattern=CODE_PATTERN)
     unit_label: str = Field(min_length=1, max_length=200)
     profile_md: str | None = Field(default=None, max_length=20_000)
     default_tier_floor: int | None = Field(default=None, ge=1, le=5)

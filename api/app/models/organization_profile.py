@@ -46,6 +46,12 @@ class OrganizationProfile(Base):
         server_default=text("gen_random_uuid()"),
     )
     content_md: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # INTAKE-4a (ADR-F088, migration 0100): the tenant's own short code, the first
+    # segment of every matter reference (``NWT`` in ``NWT-COM-0042``). Admin-set
+    # once (setup wizard / House Brief page); NULL until then, and the allocator
+    # falls back to the neutral placeholder ``ORG``. CHECK ^[A-Z0-9]{2,6}$ at the
+    # DB level, mirrored by ``app.matters.reference.CODE_PATTERN``.
+    org_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
