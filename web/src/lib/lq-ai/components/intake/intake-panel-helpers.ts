@@ -301,3 +301,38 @@ export function messageSender(
 	if (message.direction === 'out') return `Sent from ${mailboxAddress}`;
 	return message.from_addr?.trim() || 'Unknown sender';
 }
+
+/**
+ * The server's refusal codes for "Summarise now", in the lawyer's words (INTAKE-5a.1).
+ *
+ * `POST /intake/threads/{id}/summarise` answers with a bare machine code
+ * (`{"detail": "thread_busy"}`), which the API client surfaces as the error's
+ * `message`. Showing that verbatim — as the first cut did — puts `thread_busy` in
+ * front of a lawyer. The mapping lives here, next to `canSummarise` (the client half
+ * of the same rules), so the two cannot drift apart.
+ */
+const SUMMARISE_REFUSALS: Record<string, string> = {
+	thread_busy: 'The agent is still working on this conversation — try again when it settles.',
+	matter_closed: 'This matter is closed; its threads keep the record they have.',
+	summary_exists: 'This thread already has a summary.',
+	summarise_in_progress: 'A summary is already on its way — it will appear here shortly.',
+	no_conversation: 'The agent never ran on this thread, so there is nothing to summarise yet.',
+	enqueue_failed: 'The summary could not be started just now. Nothing was queued — try again.'
+};
+
+/** Refusal codes that mean asking again would change nothing — the button goes away. */
+const SUMMARISE_SETTLED_CODES = new Set(['summary_exists', 'summarise_in_progress']);
+
+/** A refusal from the summarise endpoint, as a sentence. Anything unrecognised
+ *  (a 500, a proxy error, a network failure) gets the honest generic line rather
+ *  than a code the reader cannot act on. */
+export function summariseRefusalLine(detail: string | null | undefined): string {
+	const code = (detail ?? '').trim();
+	return SUMMARISE_REFUSALS[code] ?? 'Could not ask for a summary — nothing was started.';
+}
+
+/** Whether that refusal means the offer should disappear (there is already one, or
+ *  one is already coming), as opposed to "try again". */
+export function summariseIsSettled(detail: string | null | undefined): boolean {
+	return SUMMARISE_SETTLED_CODES.has((detail ?? '').trim());
+}

@@ -27,6 +27,8 @@ import {
 	outcomeLabel,
 	receiptChips,
 	rowMeta,
+	summariseIsSettled,
+	summariseRefusalLine,
 	summaryState,
 	waitingLine
 } from '../intake-panel-helpers';
@@ -291,5 +293,31 @@ describe('message sender attribution', () => {
 			'them@x.test'
 		);
 		expect(messageSender({ direction: 'in', from_addr: '  ' }, 'us@x.test')).toBe('Unknown sender');
+	});
+});
+
+describe('the summarise refusals speak English', () => {
+	it('never puts a server code in front of a lawyer', () => {
+		expect(summariseRefusalLine('thread_busy')).toBe(
+			'The agent is still working on this conversation — try again when it settles.'
+		);
+		expect(summariseRefusalLine('matter_closed')).toBe(
+			'This matter is closed; its threads keep the record they have.'
+		);
+		expect(summariseRefusalLine('summary_exists')).toBe('This thread already has a summary.');
+		// Anything unrecognised — a 500, a proxy, a network failure — is generic and
+		// honest about what did NOT happen.
+		expect(summariseRefusalLine('Request failed with status 500')).toBe(
+			'Could not ask for a summary — nothing was started.'
+		);
+		expect(summariseRefusalLine(null)).toBe('Could not ask for a summary — nothing was started.');
+	});
+
+	it('retires the offer only when asking again would change nothing', () => {
+		expect(summariseIsSettled('summary_exists')).toBe(true);
+		expect(summariseIsSettled('summarise_in_progress')).toBe(true);
+		expect(summariseIsSettled('thread_busy')).toBe(false);
+		expect(summariseIsSettled('enqueue_failed')).toBe(false);
+		expect(summariseIsSettled(undefined)).toBe(false);
 	});
 });

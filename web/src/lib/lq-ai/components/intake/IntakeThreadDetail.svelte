@@ -41,6 +41,8 @@
 		messageSender,
 		noteNeedsClamp,
 		receiptChips,
+		summariseIsSettled,
+		summariseRefusalLine,
 		summaryState,
 		waitingLine
 	} from './intake-panel-helpers';
@@ -68,6 +70,10 @@
 	// thread the agent never wrote an account of.
 	let summarising = $state(false);
 	let summariseNote = $state<string | null>(null);
+	// Once the pass is queued (or the server says one already exists / is coming) the
+	// offer goes away: asking twice cannot produce a second summary, and a button that
+	// stays put reads as "that did not work".
+	let summariseAsked = $state(false);
 
 	let loadGeneration = 0;
 	let destroyed = false;
@@ -106,6 +112,7 @@
 		data = null;
 		noteExpanded = false;
 		summariseNote = null;
+		summariseAsked = false;
 		void load(threadId);
 	});
 
@@ -115,7 +122,7 @@
 	const chips = $derived(thread ? receiptChips(thread) : []);
 	const waiting = $derived(thread ? waitingLine(thread) : null);
 	const clampNote = $derived(thread ? noteNeedsClamp(thread.outcome_note) : false);
-	const summariseOffered = $derived(thread ? canSummarise(thread) : false);
+	const summariseOffered = $derived(thread ? canSummarise(thread) && !summariseAsked : false);
 	const summary = $derived(thread ? summaryState(thread) : 'none');
 	const chainOpen = $derived(summary === 'none');
 	const canOpenConversation = $derived(Boolean(thread?.agent_thread_id));
@@ -128,11 +135,15 @@
 		try {
 			await summariseIntakeThread(thread.id);
 			// The pass runs on the worker; the summary appears on the next load.
+			summariseAsked = true;
 			summariseNote = 'Asked the agent for a summary — it will appear here shortly.';
 		} catch (e) {
-			// The server names every refusal (thread_busy, matter_closed, …); show its
-			// words rather than inventing a reason.
-			summariseNote = e instanceof LQAIApiError ? e.message : 'Could not ask for a summary.';
+			// The server names every refusal as a machine code (thread_busy,
+			// matter_closed, …). Translate it — never show the code — and drop the offer
+			// when asking again could not change the answer (INTAKE-5a.1 review N8).
+			const code = e instanceof LQAIApiError ? e.message : null;
+			summariseNote = summariseRefusalLine(code);
+			if (summariseIsSettled(code)) summariseAsked = true;
 		} finally {
 			summarising = false;
 		}
