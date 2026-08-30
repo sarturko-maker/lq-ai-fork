@@ -302,6 +302,15 @@ DRAFT_REPLY_MAX_ATTACHMENTS = 10
 # INTAKE-5a (ADR-F086, plan ruling 7): the thread summary's shape. Small on
 # purpose — the point of the Inbox is that a fresh reader takes in the whole
 # thread at a glance, so five short bullets is the budget, not a target.
+# INTAKE-5a.1 (maintainer UAT ruling): the matter's NAME, written by the agent —
+# the essence of the thread ("Contoso hosting renewal — pricing before notice
+# deadline"), not the email subject the eager row was opened with. 80 chars is a
+# name, not a sentence, and it sits under the 200-char ``projects.name`` CHECK
+# with room to spare. Single-line plain text, same rejection as a summary title:
+# it renders beside the matter reference in the Inbox, the cockpit and the agent's
+# own prompt, so a line break or a bidi override there would forge a second line.
+INTAKE_MATTER_TITLE_MAX_CHARS = 80
+
 INTAKE_SUMMARY_MAX_ITEMS = 5
 INTAKE_SUMMARY_TITLE_MAX_CHARS = 40
 INTAKE_SUMMARY_TEXT_MAX_CHARS = 300
@@ -329,7 +338,11 @@ class RecordIntakeOutcomeInput(BaseModel):
 
     ``label`` is a short free-form tag of the agent's own choosing (Ruling 5: no fixed
     taxonomy — nothing branches on it); ``note`` is the one-glance explanation the
-    lawyer reads in the intake list. ``summary`` (INTAKE-5a, ruling 7) is the agent's
+    lawyer reads in the intake list. ``matter_title`` (INTAKE-5a.1) is the NAME of
+    the matter this thread is — the agent's one-line statement of what the thread
+    turned out to be, which replaces the email subject the eager row was opened
+    with UNLESS a human has renamed it (``projects.name_source``). ``summary``
+    (INTAKE-5a, ruling 7) is the agent's
     ≤5-bullet account of the THREAD SO FAR, required on every call and written in
     full each time — it is what the Inbox opens on instead of the email chain. All
     three are model text: bounded here, stored on the thread, and never written into
@@ -341,6 +354,7 @@ class RecordIntakeOutcomeInput(BaseModel):
     outcome: IntakeOutcome
     label: _NulFreeStr = Field(min_length=1, max_length=INTAKE_LABEL_MAX_CHARS)
     note: _NulFreeStr = Field(min_length=1, max_length=INTAKE_NOTE_MAX_CHARS)
+    matter_title: _PlainLineStr = Field(min_length=1, max_length=INTAKE_MATTER_TITLE_MAX_CHARS)
     summary: list[IntakeSummaryItem] = Field(min_length=1, max_length=INTAKE_SUMMARY_MAX_ITEMS)
 
 

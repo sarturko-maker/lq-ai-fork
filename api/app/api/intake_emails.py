@@ -550,6 +550,12 @@ async def ingest_email(
                 owner_id=owner_user_id,
                 practice_area_id=practice_area_id,
                 name=project_name,
+                # INTAKE-5a.1 (migration 0103): this name is the SUBJECT LINE, and
+                # says so. It is a placeholder until the agent has read the thread
+                # and can name what the matter actually is
+                # (``record_intake_outcome(matter_title=…)``); a human rename flips
+                # it to 'human' and no agent write may then touch the name again.
+                name_source="subject",
                 slug=final_slug,
                 intake_state="candidate",
                 reference=reference,

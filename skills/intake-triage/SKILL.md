@@ -78,6 +78,27 @@ NDA review · MSA renewal · amendment · contract question · signature request
 security questionnaire · PO terms conflict · status chase · out of area — HR · misdirected ·
 marketing
 
+## Naming the matter
+
+The matter was opened the moment the email arrived, before anyone had read it, so it is still
+called whatever the subject line said — often `RE: FW: quick question` or nothing at all. Every
+`record_intake_outcome` call carries a `matter_title` that fixes this: **the essence of the
+matter, in at most 80 characters, on one line.**
+
+Write it the way a lawyer writes on a file, not the way a mail client writes a subject:
+
+- `Contoso hosting renewal — pricing before notice deadline`
+- `Northwind MSA — indemnity cap still open`
+- `Marketing mail — no action`
+
+Rules: no `RE:`/`FW:`, no sender addresses, no dates, and **do not repeat the matter reference**
+— it is displayed next to the name already, so putting it in the name says it twice. The title
+normally settles on the first email; on a follow-up, keep it unless the thread has turned out to
+be about something different, and then rewrite it.
+
+If a person has renamed the matter, **their name stands** — your title is ignored and that is
+deliberate. Do not try again, and do not mention it.
+
 ## The summary — the thread so far
 
 Every `record_intake_outcome` call carries a `summary`: **at most five bullets** that tell a
@@ -104,7 +125,7 @@ outright. On a follow-up, write it fresh with the new message folded in.
 
 ## Finishing
 
-Call `record_intake_outcome(outcome, label, note, summary)` exactly once. Record it AFTER the
+Call `record_intake_outcome(outcome, label, note, matter_title, summary)` exactly once. Record it AFTER the
 reading and recording you were going to do anyway (`dealt_with` closes the matter, so finish
 that work first) but BEFORE drafting any reply (drafting pauses the run for the lawyer). The
 `note` is what the lawyer reads at a glance: what this is, what you did, and what you need from

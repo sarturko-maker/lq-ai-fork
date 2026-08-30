@@ -33,6 +33,7 @@ from app.agents.intake_prompt import IntakeEmailView, build_intake_prompt
 from app.agents.intake_tools import build_intake_tools
 from app.agents.tools import MatterBinding
 from app.schemas.intake import (
+    INTAKE_MATTER_TITLE_MAX_CHARS,
     INTAKE_SUMMARY_MAX_ITEMS,
     INTAKE_SUMMARY_TEXT_MAX_CHARS,
     INTAKE_SUMMARY_TITLE_MAX_CHARS,
@@ -76,6 +77,37 @@ def test_summary_is_a_required_tool_argument() -> None:
     assert RecordIntakeOutcomeInput.model_fields["summary"].is_required()
     param = inspect.signature(_outcome_tool()).parameters["summary"]
     assert param.default is inspect.Parameter.empty
+
+
+def test_matter_title_is_a_required_tool_argument() -> None:
+    """INTAKE-5a.1: an optional title is one the model skips, and the matter stays
+    called "RE: FW: quick question" forever."""
+    assert RecordIntakeOutcomeInput.model_fields["matter_title"].is_required()
+    param = inspect.signature(_outcome_tool()).parameters["matter_title"]
+    assert param.default is inspect.Parameter.empty
+
+
+def test_the_title_bound_is_taught_wherever_it_is_enforced() -> None:
+    """The 80-character name: the schema rejects it, the docstring and the skill
+    teach it, and both instruction surfaces say the obligation exists."""
+    doc = " ".join((inspect.getdoc(_outcome_tool()) or "").split())
+    assert f"at most {INTAKE_MATTER_TITLE_MAX_CHARS} characters" in doc
+    # The one rule a reader can get wrong in a way the schema cannot catch.
+    assert "do NOT repeat the matter reference" in doc
+    skill = " ".join(_SKILL.read_text(encoding="utf-8").split())
+    assert f"at most {INTAKE_MATTER_TITLE_MAX_CHARS} characters" in skill
+    assert "do not repeat the matter reference" in skill
+    assert "their name stands" in skill
+    assert "NAMES this matter" in INTAKE_DOCTRINE
+    prompt = build_intake_prompt(
+        IntakeEmailView(
+            thread_ref=str(uuid.uuid4()),
+            from_addr="counterparty@example.net",
+            subject="Please review the attached NDA",
+            body_text="Hi, please review the attached mutual NDA.",
+        )
+    )
+    assert "a title naming what this matter IS" in prompt
 
 
 def test_tool_docstring_states_the_shape_the_schema_enforces() -> None:

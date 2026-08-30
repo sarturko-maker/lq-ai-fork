@@ -2396,6 +2396,8 @@ async def test_intake_matter_grants_the_outcome_tool_end_to_end(
                     "outcome": "needs_human",
                     "label": "NDA review",
                     "note": "Counterparty NDA to review; over to you.",
+                    # INTAKE-5a.1: the matter's own name, required alongside them.
+                    "matter_title": "Contoso NDA — mutual, before diligence",
                     # INTAKE-5a (ADR-F086 ruling 7): the summary is REQUIRED, so the
                     # scripted call carries one or the tool rejects it and the thread
                     # row — the proof this test rests on — never changes.
@@ -2435,9 +2437,11 @@ async def test_intake_matter_grants_the_outcome_tool_end_to_end(
         assert thread.summary_run_id == run_id
     audited = "\n".join(str(r.details) for r in await _tool_audit_rows(comp_env, run_id))
     assert "record_intake_outcome" in audited
-    # The note and the summary are model text — the audit contract keeps both out.
+    # The note, the summary and the matter title are model text — the audit contract
+    # keeps all of them out (counts/types/IDs only).
     assert "over to you" not in audited
     assert "attached mutual NDA" not in audited
+    assert "Contoso" not in audited
 
 
 async def test_ordinary_matter_never_gets_the_intake_tools(

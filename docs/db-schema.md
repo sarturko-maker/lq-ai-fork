@@ -195,6 +195,9 @@ CREATE TABLE projects (
     id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id                 UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     name                     TEXT NOT NULL,
+    name_source              VARCHAR(16) NOT NULL DEFAULT 'human',  -- 0103 (INTAKE-5a.1):
+                                    -- CHECK 'subject' | 'agent' | 'human'; who named this
+                                    -- matter. The agent's matter_title never overwrites 'human'
     slug                     TEXT NOT NULL,  -- URL-friendly identifier; unique-per-owner-active
     description              TEXT,
     context_md               TEXT,  -- free-form markdown
@@ -208,6 +211,9 @@ CREATE TABLE projects (
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     archived_at              TIMESTAMPTZ,  -- soft-delete; NULL means active
+    CONSTRAINT chk_projects_name_source CHECK (
+        name_source IN ('subject','agent','human')
+    ),
     CONSTRAINT chk_projects_tier_range CHECK (
         minimum_inference_tier IS NULL OR (minimum_inference_tier BETWEEN 1 AND 5)
     ),

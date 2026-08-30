@@ -101,6 +101,17 @@ class Project(Base):
             "intake_state IS NULL OR intake_state IN ('candidate')",
             name="chk_projects_intake_state",
         ),
+        # INTAKE-5a.1 (migration 0103): who last named this matter — 'subject'
+        # (the eager intake row, named from the email subject at ingest), 'agent'
+        # (record_intake_outcome's matter_title) or 'human' (a person renamed it
+        # through PATCH /projects/{id}). The agent write is refused against
+        # 'human' in code: pins win, exactly as they do for matter corrections
+        # (ADR-F042). Existing rows default to 'human' — every matter that
+        # predates the column was typed by a person.
+        CheckConstraint(
+            "name_source IN ('subject','agent','human')",
+            name="chk_projects_name_source",
+        ),
         # INTAKE-4a (ADR-F088): the SQL mirror of
         # app.matters.reference.REFERENCE_PATTERN / REFERENCE_MAX_CHARS.
         CheckConstraint(
@@ -129,6 +140,12 @@ class Project(Base):
         nullable=True,
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    # INTAKE-5a.1 (migration 0103): the provenance of ``name`` — see the CHECK
+    # above. Read by ``record_intake_outcome`` (never overwrite a human's name)
+    # and written by the human rename path.
+    name_source: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'human'"), default="human"
+    )
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     context_md: Mapped[str | None] = mapped_column(Text, nullable=True)

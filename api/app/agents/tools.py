@@ -118,6 +118,23 @@ class MatterBinding:
     # F1-S3: the matter's practice area (None for unfiled/legacy matters) —
     # carried into the guard context for per-area audit slicing.
     practice_area_id: uuid.UUID | None = None
+    # INTAKE-5a.1: the neutral matter reference (``ORG-COM-0013``, ADR-F088), so the
+    # agent's prompt names the matter the SAME way the lawyer's screen does. NULL for
+    # sandboxes and pre-allocator rows.
+    reference: str | None = None
+
+    @property
+    def display_name(self) -> str:
+        """ "ORG-COM-0013 · Contoso hosting renewal" — one string, both audiences.
+
+        The reference is what a person quotes in an email and what the stamping
+        layer threads on; the name is what the matter IS. Showing them together in
+        the prompt means the agent and the lawyer are never looking at two
+        different handles for the same file. A matter with no reference (sandbox,
+        pre-allocator row) degrades to its name alone.
+        """
+        reference = (self.reference or "").strip()
+        return f"{reference} · {self.name}" if reference else self.name
 
 
 def build_matter_tools(

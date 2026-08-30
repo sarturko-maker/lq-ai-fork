@@ -155,7 +155,11 @@ def build_intake_tools(
     )
 
     async def record_intake_outcome(
-        outcome: str, label: str, note: str, summary: list[dict[str, str]]
+        outcome: str,
+        label: str,
+        note: str,
+        matter_title: str,
+        summary: list[dict[str, str]],
     ) -> str:
         """Conclude this intake thread — call this exactly once, last.
 
@@ -177,6 +181,18 @@ def build_intake_tools(
         `note` is one short paragraph the lawyer reads at a glance: what this is,
         what you did, and what (if anything) you need from them.
 
+        `matter_title` NAMES this matter. The matter was opened before anyone had
+        read the email, so it is still called whatever the subject line said —
+        which is often "RE: FW: quick question". Replace it with the essence of
+        the matter in at most 80 characters, on one line, the way a lawyer would
+        write it on a file: "Contoso hosting renewal — pricing before notice
+        deadline", "Northwind MSA — indemnity cap open". No sender addresses, no
+        "RE:"/"FW:", and do NOT repeat the matter reference — it is displayed
+        beside the name already. The title usually settles after the first email;
+        write it again only when the thread turns out to be about something
+        different. If a human has renamed this matter, their name stands and
+        yours is ignored — that is deliberate, not a failure.
+
         `summary` is THE THREAD SO FAR for someone who has never seen it: one to
         five bullets, each `{"title": "...", "text": "..."}`. The title is two or
         three words the lawyer's eye lands on ("What they want", "What we did",
@@ -197,6 +213,7 @@ def build_intake_tools(
                 outcome=outcome,
                 label=label,
                 note=note,
+                matter_title=matter_title,
                 summary=summary,
             ),
             ctx,
@@ -409,6 +426,7 @@ async def _record_intake_outcome(
     outcome: str,
     label: str,
     note: str,
+    matter_title: str,
     summary: list[dict[str, str]],
 ) -> str:
     """Validate → write the outcome + summary onto the thread → apply the project effect."""
@@ -417,6 +435,7 @@ async def _record_intake_outcome(
             outcome=outcome,  # type: ignore[arg-type]  # Pydantic validates the closed set
             label=label,
             note=note,
+            matter_title=matter_title,
             summary=summary,  # type: ignore[arg-type]  # Pydantic validates the item shape
         )
     except ValidationError as exc:
@@ -463,34 +482,48 @@ async def _record_intake_outcome(
     if thread.status not in _SEND_TERMINAL_THREAD_STATUSES:
         thread.status = _OUTCOME_THREAD_STATUS[proposal.outcome]
 
-    project_note = "the matter stays open for the lawyer"
-    if proposal.outcome != "dealt_with" and prior_outcome == "dealt_with":
-        # Last-wins must win WHOLE (adversarial review B4): an earlier dealt_with in
-        # this same run closed the matter, so changing our mind has to re-open it or
-        # the thread says "open" while the matter is archived. Scoped to undoing OUR
-        # OWN close — a matter the human archived was never given a dealt_with
-        # outcome, so this branch cannot reach it.
-        reopened = (
-            await db.execute(
-                select(Project).where(
-                    Project.id == binding.project_id, Project.owner_id == binding.user_id
-                )
+    # ONE owner-scoped load for every matter-side effect below (the name, the close,
+    # the re-open) — the same row, in the same transaction, read once.
+    project = (
+        await db.execute(
+            select(Project).where(
+                Project.id == binding.project_id, Project.owner_id == binding.user_id
             )
-        ).scalar_one_or_none()
-        if reopened is not None:
-            reopened.archived_at = None
+        )
+    ).scalar_one_or_none()
+
+    # INTAKE-5a.1 (maintainer UAT ruling, migration 0103): the matter's NAME is the
+    # agent's summary of what this thread IS, not the subject line the eager row was
+    # opened with. Two fences, both structural:
+    #
+    # * ``intake_state == 'candidate'`` — only an intake-BORN matter is renamed. A
+    #   thread later attached to an ordinary matter (INTAKE-5b) must never rename
+    #   the lawyer's own file.
+    # * ``name_source != 'human'`` — a person's name is final. This is ADR-F042's
+    #   auto-write-then-correct in its simplest form: the agent writes, the human
+    #   corrects, and the correction is permanent (pins win).
+    if (
+        project is not None
+        and project.intake_state == "candidate"
+        and project.name_source != "human"
+        and project.name != proposal.matter_title
+    ):
+        project.name = proposal.matter_title
+        project.name_source = "agent"
+
+    project_note = "the matter stays open for the lawyer"
+    # Last-wins must win WHOLE (adversarial review B4): an earlier dealt_with in this
+    # same run closed the matter, so changing our mind has to re-open it or the thread
+    # says "open" while the matter is archived. Scoped to undoing OUR OWN close — a
+    # matter the human archived was never given a dealt_with outcome, so this branch
+    # cannot reach it.
+    if proposal.outcome != "dealt_with" and prior_outcome == "dealt_with" and project is not None:
+        project.archived_at = None
     if proposal.outcome == "dealt_with":
         # Close the matter: the SAME soft archive DELETE /projects/{id} performs
         # (archived_at), and nothing else — ``intake_state`` is provenance, never a
         # lifecycle the agent drives (ADR-F086 Amendment A1). Archiving is also the
         # memory fence: a closed matter composes no binding on a later run.
-        project = (
-            await db.execute(
-                select(Project).where(
-                    Project.id == binding.project_id, Project.owner_id == binding.user_id
-                )
-            )
-        ).scalar_one_or_none()
         if project is not None and project.archived_at is None:
             project.archived_at = datetime.now(tz=UTC)
         project_note = "the matter is closed and filed away"

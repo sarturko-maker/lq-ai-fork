@@ -190,6 +190,11 @@ def _binding(row: SeededIntake) -> MatterBinding:
 # succeed. Shape-checked by RecordIntakeOutcomeInput, so every write-path test has to
 # carry one — that is the point: the arg is REQUIRED, there is no "outcome without an
 # account of the thread".
+# INTAKE-5a.1: the matter's NAME, written by the agent. Required on every call for
+# the same reason the summary is — a matter still called "RE: FW: quick question" is
+# a matter the lawyer cannot find.
+_TITLE = "Contoso NDA — mutual, before diligence"
+
 _SUMMARY: list[dict[str, str]] = [
     {"title": "What they want", "text": "The counterparty asks us to review their mutual NDA."},
     {"title": "Where it stands", "text": "Read and redlined; waiting on the lawyer."},
@@ -282,6 +287,7 @@ async def test_dealt_with_files_the_thread_and_closes_the_matter(
             outcome="dealt_with",
             label="marketing",
             note="Vendor marketing email; nothing needed.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -312,6 +318,7 @@ async def test_needs_human_keeps_the_matter_open(
             outcome="needs_human",
             label="NDA review",
             note="Redline drafted.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -323,6 +330,142 @@ async def test_needs_human_keeps_the_matter_open(
         assert thread.status == "awaiting_human"
         assert project.archived_at is None
         assert project.intake_state == "candidate"
+
+
+# --------------------------------------------------------------------------- #
+# INTAKE-5a.1 — the matter's NAME (migration 0103, projects.name_source)
+# --------------------------------------------------------------------------- #
+
+
+async def _set_name(
+    factory: async_sessionmaker[AsyncSession],
+    project_id: uuid.UUID,
+    *,
+    name: str,
+    source: str,
+    intake_state: str | None = "candidate",
+) -> None:
+    async with factory() as db:
+        project = await db.get(Project, project_id)
+        assert project is not None
+        project.name = name
+        project.name_source = source
+        project.intake_state = intake_state
+        await db.commit()
+
+
+async def test_the_agent_names_the_matter_it_read(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """The eager row was named from the subject line; concluding renames it to what
+    the thread turned out to be, and records that the AGENT did so."""
+    await _set_name(
+        commit_factory, seeded.project_id, name="RE: FW: quick question", source="subject"
+    )
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="Redline drafted.",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        assert project is not None
+        assert project.name == _TITLE
+        assert project.name_source == "agent"
+
+
+async def test_a_later_run_may_improve_its_own_title(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """An agent-written name is still the agent's: the thread turning out to be
+    something else rewrites it."""
+    await _set_name(commit_factory, seeded.project_id, name="Old reading", source="agent")
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title="Contoso hosting renewal — pricing before notice deadline",
+            summary=_SUMMARY,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        assert project is not None
+        assert project.name == "Contoso hosting renewal — pricing before notice deadline"
+        assert project.name_source == "agent"
+
+
+async def test_a_human_name_is_never_overwritten(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """ADR-F042 in its simplest form: the human writes last, permanently. The rest of
+    the conclusion (outcome, label, note, summary) still lands."""
+    await _set_name(commit_factory, seeded.project_id, name="Project Atlas", source="human")
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert project is not None and thread is not None
+        assert project.name == "Project Atlas"
+        assert project.name_source == "human"
+        assert thread.outcome == "needs_human"
+        assert thread.summary == _SUMMARY
+
+
+async def test_a_matter_not_born_from_email_is_never_renamed(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """Only an intake-BORN matter carries a subject line for a name. A thread filed
+    onto the lawyer's own matter (INTAKE-5b) must never rename their file."""
+    await _set_name(
+        commit_factory, seeded.project_id, name="Atlas MSA", source="agent", intake_state=None
+    )
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        assert project is not None
+        assert project.name == "Atlas MSA"
 
 
 @pytest.mark.parametrize(
@@ -355,6 +498,7 @@ async def test_outcome_never_overwrites_a_settled_send_status(
             outcome=outcome,
             label="NDA review",
             note="n",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -374,6 +518,7 @@ def _bad(**overrides: object) -> dict[str, object]:
         "outcome": "dealt_with",
         "label": "x",
         "note": "y",
+        "matter_title": _TITLE,
         "summary": _SUMMARY,
     }
     base.update(overrides)
@@ -398,6 +543,13 @@ def _bad(**overrides: object) -> dict[str, object]:
         _bad(summary=[{"title": "t", "text": "line one\nline two"}]),  # control char
         _bad(summary=[{"title": "t\x1b[31m", "text": "x"}]),  # ANSI escape
         _bad(summary=[{"title": "t", "text": "x\x00y"}]),  # NUL
+        # INTAKE-5a.1 — the matter title's own bounds. Single line, same control-char
+        # rejection as a summary title: it renders beside the matter reference.
+        _bad(matter_title=""),
+        _bad(matter_title="t" * 81),
+        _bad(matter_title="Contoso NDA\nsecond line"),
+        _bad(matter_title="Contoso\u2028NDA"),
+        _bad(matter_title="Contoso\x00NDA"),
         _bad(summary=[{"title": "", "text": "x"}]),  # empty title
         _bad(summary=[{"title": "t"}]),  # missing text
         _bad(summary=[{"title": "t", "text": "x", "extra": "z"}]),  # extra="forbid"
@@ -448,6 +600,7 @@ async def test_summary_is_written_in_full_and_rewritten_wholesale(
             outcome="needs_human",
             label="NDA review",
             note="Redline drafted.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -468,6 +621,7 @@ async def test_summary_is_written_in_full_and_rewritten_wholesale(
             outcome="needs_human",
             label="NDA review",
             note="They came back.",
+            matter_title=_TITLE,
             summary=rewritten,
         )
         await db.commit()
@@ -494,6 +648,7 @@ async def test_summary_is_stripped_of_surrounding_whitespace(
             outcome="needs_human",
             label="NDA review",
             note="n",
+            matter_title=_TITLE,
             summary=[{"title": "  What they want  ", "text": "  A review.  "}],
         )
         await db.commit()
@@ -519,6 +674,7 @@ async def test_safe_fail_leaves_the_previous_summary_in_place(
             outcome="needs_human",
             label="NDA review",
             note="Redline drafted.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -551,6 +707,7 @@ async def test_second_call_overwrites_last_wins(
             outcome="dealt_with",
             label="spam",
             note="Noise.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -563,6 +720,7 @@ async def test_second_call_overwrites_last_wins(
             outcome="needs_human",
             note="On reflection the lawyer should see this.",
             label="unclear",
+            matter_title=_TITLE,
             summary=[{"title": "Where it stands", "text": "Over to the lawyer after all."}],
         )
         await db.commit()
@@ -616,6 +774,7 @@ async def test_non_intake_matter_records_nothing(
                 outcome="dealt_with",
                 label="x",
                 note="y",
+                matter_title=_TITLE,
                 summary=_SUMMARY,
             )
         assert "not an intake thread" in out
@@ -1479,6 +1638,7 @@ async def test_safe_fail_leaves_a_concluded_thread_alone(
             outcome="dealt_with",
             label="spam",
             note="Noise.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()

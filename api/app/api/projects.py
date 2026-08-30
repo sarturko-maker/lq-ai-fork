@@ -518,6 +518,11 @@ async def update_project(
 
     if "name" in update_fields:
         project.name = update_fields["name"]
+        # INTAKE-5a.1 (migration 0103): a person named this matter, so the agent's
+        # own title (``record_intake_outcome(matter_title=…)``) must never overwrite
+        # it again. Same posture as a pinned matter correction — the human write
+        # wins after the fact, permanently (ADR-F042).
+        project.name_source = "human"
 
     if "slug" in update_fields:
         new_slug = update_fields["slug"]
