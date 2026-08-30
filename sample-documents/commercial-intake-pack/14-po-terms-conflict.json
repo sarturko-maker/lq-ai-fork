@@ -1,0 +1,21 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-po-terms-conflict",
+    "subject": "Their PO says their terms apply - which wins?"
+  },
+  "message": {
+    "provider_message_id": "14-po-conflict@fixture.northwindtrading.co.uk",
+    "from_addr": "l.okonkwo@northwindtrading.co.uk",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-25T11:10:00+00:00",
+    "text": "Hi,\n\nSandbrook have raised a PO for the September delivery and the PO says 'supplier's acceptance is subject to Sandbrook's standard purchasing terms'. We already have a signed supply agreement with them from 2024. Their purchasing terms have 60-day payment and an uncapped indemnity.\n\nThe warehouse wants to ship on Friday. Which terms actually apply?\n\nLola",
+    "headers": {},
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

@@ -18,13 +18,16 @@ milestone (`docs/fork/plans/INTAKE-INBOX-plan.md`):
   message on a thread. ``UNIQUE(thread_id, provider_message_id)`` is the
   idempotency anchor: duplicate webhook/websocket delivery is a no-op.
 
-See migration ``0098_intake_substrate.py`` for the DDL these mirror.
+See migrations ``0098_intake_substrate.py`` (the three tables) and
+``0099_intake_outcome_and_triage_skill.py`` (INTAKE-3: the thread outcome +
+the inbound message's own content) for the DDL these mirror.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -36,7 +39,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -46,6 +49,12 @@ from app.db.base import Base
 _THREAD_STATUSES = ("received", "processing", "awaiting_human", "replied", "handled", "error")
 _AUTH_STATES = ("pass", "fail", "unknown")
 _MESSAGE_DIRECTIONS = ("in", "out")
+# INTAKE-3 (migration 0099): the closed outcome vocabulary the agent's
+# ``record_intake_outcome`` tool writes. Nothing else may write this column.
+# TWO values (ADR-F086 Amendment A1): every intake thread IS a matter, so there is
+# no promotion step — ``dealt_with`` closes the matter, ``needs_human`` leaves it
+# open for the lawyer.
+_THREAD_OUTCOMES = ("dealt_with", "needs_human")
 
 
 def _in_set(column: str, values: tuple[str, ...]) -> str:
@@ -150,6 +159,10 @@ class IntakeThread(Base):
             "label IS NULL OR char_length(label) BETWEEN 1 AND 200",
             name="chk_intake_threads_label_len",
         ),
+        CheckConstraint(
+            f"outcome IS NULL OR {_in_set('outcome', _THREAD_OUTCOMES)}",
+            name="chk_intake_threads_outcome",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -178,6 +191,10 @@ class IntakeThread(Base):
     subject: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     # Free-form agent-chosen tag (Ruling 5) — display/grouping only.
     label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # INTAKE-3 (ADR-F086, migration 0099): the run's STRUCTURAL conclusion — one of
+    # _THREAD_OUTCOMES, written only by the agent's ``record_intake_outcome`` tool
+    # (never free prose, never inferred from model text). NULL until a run concludes.
+    outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
     outcome_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'received'"))
     last_message_id: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -217,6 +234,18 @@ class IntakeMessage(Base):
         CheckConstraint(
             _in_set("direction", _MESSAGE_DIRECTIONS), name="chk_intake_messages_direction"
         ),
+        CheckConstraint(
+            "from_addr IS NULL OR char_length(from_addr) BETWEEN 1 AND 320",
+            name="chk_intake_messages_from_addr_len",
+        ),
+        CheckConstraint(
+            "subject IS NULL OR char_length(subject) <= 998",
+            name="chk_intake_messages_subject_len",
+        ),
+        CheckConstraint(
+            "body_text IS NULL OR char_length(body_text) <= 512000",
+            name="chk_intake_messages_body_text_len",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -231,6 +260,29 @@ class IntakeMessage(Base):
     )
     provider_message_id: Mapped[str] = mapped_column(Text, nullable=False)
     direction: Mapped[str] = mapped_column(Text, nullable=False)
+    # INTAKE-3 (migration 0099): the message's own content, persisted so the arq
+    # job — whose payload is ONLY the thread id — can re-derive the email for the
+    # agent's fenced prompt block (app.agents.intake_prompt). Every value here is
+    # UNTRUSTED sender-controlled text: it is boundary-validated at
+    # app.schemas.intake, fenced as DATA in the prompt, and never logged or
+    # audited. For a ``direction='out'`` row these carry a DRAFT reply the agent
+    # composed (draft_email_reply); delivery arrives in INTAKE-4.
+    from_addr: Mapped[str | None] = mapped_column(Text, nullable=True)
+    to_addrs: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The names ingest_bytes() actually stored for this message's attachments —
+    # what ``read_document`` will answer to, so the prompt can name real files.
+    attachment_filenames: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    # Provider-CLAIMED send time (validated, never trusted for ordering — the
+    # thread's last_inbound_at is stamped from the server clock).
+    provider_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # The agent run that processed this message (INTAKE-3); SET NULL on run
     # delete keeps the message row (audit-adjacent, like File.created_by_run_id).
     run_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -234,3 +234,67 @@ class IntakeEmailIngestResponse(BaseModel):
     thread_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
     files_ingested: int = 0
+
+
+# ---------------------------------------------------------------------------
+# INTAKE-3 (ADR-F086) — the agent's intake tool-call boundaries.
+#
+# Code-validated writes (ADR-F018 shape): the model PROPOSES, code DISPOSES
+# against these schemas BEFORE anything is written; a failure is rejected back
+# to the model with the reason (reject, never truncate/sanitize). Only A-class
+# content args appear here — run_id / project_id / thread are B-class and set
+# by the tool from the run's binding, never model-visible.
+# ---------------------------------------------------------------------------
+
+# The closed outcome vocabulary (ADR-F086: "the run concludes via a tool call with
+# a closed outcome field — never free prose"). Mirrors app.models.intake._THREAD_OUTCOMES
+# and the migration-0099 CHECK; keep the three in sync. TWO values only (ADR-F086
+# Amendment A1): every intake thread IS a matter, so "keep it as a candidate" is not a
+# decision anyone makes — the thread either needed nothing (``dealt_with``, matter
+# closed) or it needs the lawyer (``needs_human``, matter stays open).
+IntakeOutcome = Literal["dealt_with", "needs_human"]
+
+INTAKE_LABEL_MAX_CHARS = 200
+INTAKE_NOTE_MAX_CHARS = 2_000
+DRAFT_REPLY_SUBJECT_MAX_CHARS = 998  # RFC 5322 line limit, as for a thread subject
+DRAFT_REPLY_BODY_MAX_CHARS = 50_000
+DRAFT_REPLY_MAX_RECIPIENTS = 20
+DRAFT_REPLY_MAX_ATTACHMENTS = 10
+
+
+class RecordIntakeOutcomeInput(BaseModel):
+    """Validate one ``record_intake_outcome`` call — the run's structural conclusion.
+
+    ``label`` is a short free-form tag of the agent's own choosing (Ruling 5: no fixed
+    taxonomy — nothing branches on it); ``note`` is the one-glance explanation the
+    lawyer reads in the intake list. Both are model text: bounded here, stored on the
+    thread, and never written into an audit row or a log line.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    outcome: IntakeOutcome
+    label: _NulFreeStr = Field(min_length=1, max_length=INTAKE_LABEL_MAX_CHARS)
+    note: _NulFreeStr = Field(min_length=1, max_length=INTAKE_NOTE_MAX_CHARS)
+
+
+class DraftEmailReplyInput(BaseModel):
+    """Validate one ``draft_email_reply`` call — a reply the human must approve.
+
+    v1 SENDS NOTHING (ADR-F086: approval-required only, no auto-send path anywhere).
+    The tool is interrupt-gated unconditionally
+    (``app.agents.hitl.ALWAYS_INTERRUPT_TOOL_NAMES``), so a body validated here has
+    already been approved by the supervising lawyer by the time it executes; the
+    delivery leg (api → mail-bridge ``/send``) lands in INTAKE-4.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    to: list[_NulFreeAddr] = Field(min_length=1, max_length=DRAFT_REPLY_MAX_RECIPIENTS)
+    subject: _NulFreeStr = Field(min_length=1, max_length=DRAFT_REPLY_SUBJECT_MAX_CHARS)
+    body: _NulFreeStr = Field(min_length=1, max_length=DRAFT_REPLY_BODY_MAX_CHARS)
+    # File ids must belong to THIS matter — enforced by the tool against the DB
+    # (a foreign id is refused the way a cross-user read is: "not found").
+    attachment_file_ids: list[uuid.UUID] = Field(
+        default_factory=list, max_length=DRAFT_REPLY_MAX_ATTACHMENTS
+    )

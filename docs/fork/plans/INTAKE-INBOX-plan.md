@@ -316,3 +316,20 @@ demonstrable; nothing user-visible changes until INTAKE-5 except the admin bindi
   slice on top of the F050 prize work.
 - OSS Agent Inbox compatibility shim (five LangGraph-Platform endpoints) — only if we ever
   want their hosted UI as a second surface.
+
+## Amendment A1 (2026-08-29, maintainer ruling during INTAKE-3) — every thread is a matter
+
+Supersedes the `candidate | promoted | dismissed` lifecycle above. The eager `projects` row
+IS the matter from message one; `projects.intake_state` is kept as **provenance only**
+("born from email") and the tool-grant gate — it is never a state the human must promote
+through. The promote step is removed. Agent outcomes shrink to two:
+
+- `dealt_with` → matter **closed** (`archived_at` set, label + one-line note); thread `handled`.
+  A closed matter's memory is never injected anywhere, so archiving is the memory fence.
+- `needs_human` → matter stays **open**, thread `awaiting_human` (needs-attention flag).
+  Former `candidate_matter` collapses into this.
+
+The decision the candidate state stood in for — "this belongs to EXISTING Matter X"
+(keep / close / attach + merge the stub) — becomes the INTAKE-4/5 human operation (later
+agent-proposed), not promote. The default matter list shows closed-by-intake matters under
+the ordinary archive filter; no parallel intake list. ADR-F086 carries the same amendment.

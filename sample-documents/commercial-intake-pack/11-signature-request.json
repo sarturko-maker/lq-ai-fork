@@ -1,0 +1,21 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-signature-order-form",
+    "subject": "Ready to sign - Halden order form (agreed last week)"
+  },
+  "message": {
+    "provider_message_id": "11-signature@fixture.northwindtrading.co.uk",
+    "from_addr": "p.nagi@northwindtrading.co.uk",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-25T08:15:00+00:00",
+    "text": "Hi Legal,\n\nThe Halden order form is final - you approved the terms last Thursday and nothing has changed since. Who signs it, and can we get it out today? Halden want it before their quarter end on Friday.\n\nPriya Nagi",
+    "headers": {},
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

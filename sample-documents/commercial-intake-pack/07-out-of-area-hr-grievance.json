@@ -1,0 +1,21 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-hr-grievance",
+    "subject": "Formal grievance - my line manager"
+  },
+  "message": {
+    "provider_message_id": "07-hr@fixture.northwindtrading.co.uk",
+    "from_addr": "d.whitfield@northwindtrading.co.uk",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-24T13:45:00+00:00",
+    "text": "I want to raise a formal grievance about my line manager in the Leeds warehouse. He has repeatedly made comments about my health condition in front of the team and last week refused my request for the adjustments my GP recommended. I have been signed off twice this year because of the stress.\n\nI do not want this to go to my manager. Who deals with this?\n\nDawn Whitfield",
+    "headers": {},
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

@@ -36,7 +36,8 @@ from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_
 
 pytestmark = pytest.mark.integration
 
-_COMMERCIAL_SKILLS = 10  # +1 ADV-1 (ADR-F084): adversarial-review
+# +1 ADV-1 (ADR-F084): adversarial-review; +1 INTAKE-3 (ADR-F086): intake-triage
+_COMMERCIAL_SKILLS = 11
 _COMMERCIAL_TOOLS = 2
 
 

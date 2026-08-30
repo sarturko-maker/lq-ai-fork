@@ -191,10 +191,21 @@ async def ingest_email(
     # duplicate-vs-new is this flush. Nothing above this line wrote
     # anything that isn't safely re-creatable (thread rows are idempotent
     # by construction — the unique constraint IS the arbiter).
+    # INTAKE-3 (migration 0099): the message's own content is persisted HERE, at
+    # the claim, because the arq job's payload is only the thread id — the worker
+    # re-derives the email from these columns to build its fenced prompt block
+    # (app.agents.intake_prompt). Every value is boundary-validated untrusted
+    # sender text; ``attachment_filenames`` is filled in after ingest below with
+    # the names actually stored (what ``read_document`` answers to).
     message_row = IntakeMessage(
         thread_id=thread.id,
         provider_message_id=envelope.message.provider_message_id,
         direction="in",
+        from_addr=envelope.message.from_addr,
+        to_addrs=list(envelope.message.to),
+        subject=envelope.thread.subject,
+        body_text=envelope.message.text,
+        provider_timestamp=envelope.message.timestamp,
     )
     db.add(message_row)
     try:
@@ -222,6 +233,7 @@ async def ingest_email(
     # every attachment that actually lands in storage so a later failure
     # (in this loop OR at the final commit) can clean all of them up.
     uploaded_storage_paths: list[str] = []
+    ingested_filenames: list[str] = []
     files_ingested = 0
     try:
         now = datetime.now(tz=UTC)
@@ -272,7 +284,12 @@ async def ingest_email(
                 data=attachment.decoded_bytes,
             )
             uploaded_storage_paths.append(row.storage_path)
+            ingested_filenames.append(row.filename)
             files_ingested += 1
+
+        # The STORED names (ingest_bytes may normalise the provider's filename),
+        # so the agent's prompt names files ``read_document`` will actually find.
+        message_row.attachment_filenames = ingested_filenames
 
         await db.commit()
     except Exception:

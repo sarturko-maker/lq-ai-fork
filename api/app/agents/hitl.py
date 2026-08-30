@@ -14,6 +14,10 @@ policy ∩ the run's ACTUAL grant set:
 * An empty result compiles to ``None``: the caller then never sets the
   ``interrupt_on`` kwarg, no HITL middleware attaches, and the agent graph is
   byte-identical to an unconfigured area's (the zero-config invariant, ADR-F071).
+* INTAKE-3 (ADR-F086) adds a code-enforced FLOOR on top of the policy:
+  :data:`ALWAYS_INTERRUPT_TOOL_NAMES` — outbound tools — are gated whenever the run
+  was granted them, whatever the policy says (or does not say). Structural, not
+  policy: the prompt-injection backstop cannot be configured away.
 
 The pause description is FORK-authored (a plain static string per tool) — never
 model, skill, or document text; the pending call's args ride the interrupt payload
@@ -32,6 +36,17 @@ logger = logging.getLogger(__name__)
 # would break "what you saw is what runs" until arg-diff review UX exists.
 _ALLOWED_DECISIONS = ["approve", "reject"]
 
+# INTAKE-3 (ADR-F086): the STRUCTURAL HITL floor — not policy. Every outbound tool
+# is interrupt-gated whenever it is granted, regardless of (and unremovable by) the
+# area's stored ``hitl_policy``, including an empty or absent one. This is the
+# prompt-injection backstop the ADR names: "the safety line is structural, not
+# policy … no category mechanism exists that could unlock auto-send", so nothing an
+# email says and no admin misconfiguration can let a reply leave without a human.
+# Names here are unioned into the compiled policy iff they are in the run's grant
+# set — an ungranted name still compiles to nothing (the zero-config invariant holds
+# byte-identically for every non-intake run).
+ALWAYS_INTERRUPT_TOOL_NAMES = frozenset({"draft_email_reply"})
+
 
 def _describe(tool_name: str) -> str:
     """The fork-authored ask shown to the human (R3) — static, never model text."""
@@ -47,16 +62,17 @@ def compile_hitl_policy(policy: dict[Any, Any], granted: frozenset[str]) -> dict
     ``InterruptOnConfig``-shaped dict: ``allowed_decisions=["approve", "reject"]``
     plus the fork-authored description.
     """
+    compiled: dict[str, Any] = {}
     if not isinstance(policy, dict):
         # The column has no DB CHECK and is dict-typed only at the ORM boundary;
         # a non-object value (plantable today only by out-of-band SQL) must degrade,
-        # not raise (R2: a malformed policy never bricks a run — ADR-F071).
+        # not raise (R2: a malformed policy never bricks a run — ADR-F071). It must
+        # NOT, however, drop the structural floor below (ADR-F086).
         logger.warning(
             "hitl_policy ignored: stored value is not an object",
             extra={"event": "hitl_policy_not_object", "value_type": type(policy).__name__},
         )
-        return None
-    compiled: dict[str, Any] = {}
+        return _with_structural_floor(compiled, granted)
     for name, value in policy.items():
         if not isinstance(name, str):
             logger.warning(
@@ -82,22 +98,54 @@ def compile_hitl_policy(policy: dict[Any, Any], granted: frozenset[str]) -> dict
             "allowed_decisions": list(_ALLOWED_DECISIONS),
             "description": _describe(name),
         }
+    return _with_structural_floor(compiled, granted)
+
+
+def _with_structural_floor(
+    compiled: dict[str, Any], granted: frozenset[str]
+) -> dict[str, Any] | None:
+    """Union the code-enforced floor into a compiled policy (ADR-F086, INTAKE-3).
+
+    Structural, not policy: an outbound tool the run was GRANTED is gated whether or
+    not the area's JSONB names it, and the policy cannot remove it (a stored
+    ``{"draft_email_reply": false}`` is already skipped as malformed, and even a
+    hostile value cannot delete the key added here — the floor is applied last).
+    A run that was granted none of these names is untouched, so the zero-config
+    invariant (``None`` when nothing compiles) is byte-identical for every
+    non-intake run.
+    """
+    for name in sorted(ALWAYS_INTERRUPT_TOOL_NAMES & granted):
+        compiled[name] = {
+            "allowed_decisions": list(_ALLOWED_DECISIONS),
+            "description": _describe(name),
+        }
     return compiled or None
 
 
 def stamp_subagent_opt_out(
     subagents: Sequence[dict[str, Any]], compiled: dict[str, Any] | None
 ) -> None:
-    """Opt every fork-authored subagent spec out of a compiled policy (ADR-F071).
+    """Opt every fork-authored subagent spec out of a compiled policy — EXCEPT the
+    structural floor (ADR-F071 + ADR-F086).
 
-    LEAD-only scope in v1: spec-level ``interrupt_on={}`` suppresses deepagents'
-    inheritance of the top-level policy. No-op when nothing compiled — the
-    zero-config invariant requires the specs untouched (byte-identical graph).
-    The deepagents auto-added "general-purpose" subagent has no spec here and
-    still INHERITS the policy — accepted (it closes the ``task``-delegation
-    bypass for lead-granted tools; ADR-F071).
+    LEAD-only scope in v1: spec-level ``interrupt_on`` suppresses deepagents'
+    inheritance of the top-level policy. Clearing it OUTRIGHT would have handed a
+    delegated subagent an ungated ``draft_email_reply`` — the outbound tool the whole
+    injection backstop rests on (adversarial review B2). So the AREA's policy entries
+    are still dropped, but every name in :data:`ALWAYS_INTERRUPT_TOOL_NAMES` that
+    actually compiled is carried into each spec: the floor is structural, and
+    delegation is not a way around it.
+
+    No-op when nothing compiled — the zero-config invariant requires the specs
+    untouched (byte-identical graph), and a non-intake run compiles no floor, so its
+    specs still receive exactly ``{}``. The deepagents auto-added "general-purpose"
+    subagent has no spec here and still INHERITS the full policy — accepted (it closes
+    the ``task``-delegation bypass for lead-granted tools; ADR-F071).
     """
     if compiled is None:
         return
+    floor = {
+        name: config for name, config in compiled.items() if name in ALWAYS_INTERRUPT_TOOL_NAMES
+    }
     for spec in subagents:
-        spec["interrupt_on"] = {}
+        spec["interrupt_on"] = dict(floor)

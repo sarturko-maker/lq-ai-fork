@@ -1,0 +1,21 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-invoice-dispute-vantor",
+    "subject": "Overdue invoices INV-4471 / INV-4488 - final notice before recovery"
+  },
+  "message": {
+    "provider_message_id": "10-invoice@fixture.northwindtrading.co.uk",
+    "from_addr": "credit.control@vantor-supplies.com",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-24T16:20:00+00:00",
+    "text": "Dear Sirs,\n\nInvoices INV-4471 (GBP 22,140) and INV-4488 (GBP 9,860) remain unpaid 74 and 52 days past due respectively. Unless payment is received within 7 days we will instruct recovery agents and claim statutory interest and compensation under the Late Payment of Commercial Debts (Interest) Act 1998.\n\nYour buyer has told us the goods were rejected, but we have no written rejection notice under clause 8 of our supply terms.\n\nVantor Supplies Ltd, Credit Control",
+    "headers": {},
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

@@ -46,6 +46,7 @@ from app.agents.budget import BudgetEnvelope
 from app.agents.commercial_tools import COMMERCIAL_TOOL_NAMES, build_commercial_tools
 from app.agents.deal_changes import DealChangeLedger
 from app.agents.document_summary_tools import DOCUMENT_SUMMARY_TOOL_NAMES
+from app.agents.intake_tools import INTAKE_TOOL_NAMES
 from app.agents.knowledge_tools import KNOWLEDGE_TOOL_NAMES, build_knowledge_tools
 from app.agents.live_changes import ChangeLedger
 from app.agents.matter_consolidation import MATTER_CONSOLIDATION_TOOL_NAMES
@@ -329,7 +330,15 @@ def hitl_eligible_tool_names() -> frozenset[str]:
     intersection drops it). HITL-3's admin write surface 422s on any name outside
     this set; HITL-1 only compiles (unknown names drop with a warning).
     """
-    return _MATTER_SCOPE_TOOL_NAMES | frozenset().union(*GROUP_TOOL_NAMES.values())
+    # INTAKE-3 (ADR-F086): the intake grants are matter-bound but CONDITIONAL (built
+    # only for a thread's own intake run), so they are unioned in here rather than
+    # added to the always-built matter scope above. They are still part of the HITL
+    # vocabulary: an admin may gate ``record_intake_outcome`` by policy, and
+    # ``draft_email_reply`` is gated by the STRUCTURAL floor
+    # (``app.agents.hitl.ALWAYS_INTERRUPT_TOOL_NAMES``) whether or not a policy names it.
+    return (
+        _MATTER_SCOPE_TOOL_NAMES | INTAKE_TOOL_NAMES | frozenset().union(*GROUP_TOOL_NAMES.values())
+    )
 
 
 def area_hitl_eligible_tool_names(bound_group_keys: Iterable[str]) -> frozenset[str]:
@@ -370,7 +379,9 @@ def area_hitl_eligible_tool_names(bound_group_keys: Iterable[str]) -> frozenset[
 #     ``0069_matter_memory_skill_binding.py`` (matter-memory, every standard area),
 #     ``0072_commercial_negotiation_review_skill.py`` (negotiation-review, commercial),
 #     ``0073_commercial_roster_and_reconciliation.py`` (deal-review, commercial),
-#     ``0083_bind_tabular_review_skill.py`` (tabular-review, commercial).
+#     ``0083_bind_tabular_review_skill.py`` (tabular-review, commercial),
+#     ``0097_bind_adversarial_review_skill.py`` (adversarial-review, commercial),
+#     ``0099_intake_outcome_and_triage_skill.py`` (intake-triage, commercial).
 #   * tools: ``0086_tool_group_registry_deployment_toggles.py`` (``_SEED_TOOL_GROUPS``).
 #   * playbooks: no seed migration binds any playbook to any area by default (verified —
 #     no ``practice_area_playbooks`` INSERT exists in any migration), so no area has a
@@ -390,6 +401,9 @@ RECOMMENDED_LIBRARY_SETS: dict[str, dict[str, tuple[str, ...]]] = {
             "tabular-review",
             # ADV-1 (ADR-F084): when to OFFER the hostile-reader pass + how to weigh it.
             "adversarial-review",
+            # INTAKE-3 (ADR-F086, migration 0099): how to read one email thread from
+            # the legal-intake mailbox and which of the three outcomes applies.
+            "intake-triage",
         ),
     },
     "privacy": {

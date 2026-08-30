@@ -856,7 +856,8 @@ at the same envelope seam. Slices (tasks #537–#543): INTAKE-0 ADR + re-sequenc
 (migration `projects.intake_state` + intake_mailboxes/threads/messages, `ingest_bytes()`
 extraction, bridge-auth'd internal endpoint) · 2 AgentMail probe + mail-bridge (the only
 AgentMail-touching slice; needs API key + dedicated inbox) · 3 the intake run (doctrine skill +
-outcome tool + Claude-judged 20-email eval) · 4 HITL edit/respond (ADR-F087) + approved send ·
+structural two-outcome tool `dealt_with`/`needs_human`, code-scored 20-email eval; every thread
+IS a matter — promote removed, plan § Amendment A1) · 4 HITL edit/respond (ADR-F087) + approved send ·
 5 cockpit Intake view · 6 E2E acceptance. Research: `docs/fork/plans/research/INTAKE-*.md`.
 
 ## CUSTODIAN — contract custodian-of-record (PLANNED 2026-07-11; plan: `docs/fork/plans/CUSTODIAN-milestone.md`)

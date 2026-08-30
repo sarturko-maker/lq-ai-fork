@@ -1,0 +1,21 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-fyi-companies-house",
+    "subject": "FYI - confirmation statement filed"
+  },
+  "message": {
+    "provider_message_id": "04-fyi@fixture.northwindtrading.co.uk",
+    "from_addr": "company.secretary@northwindtrading.co.uk",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-24T12:00:00+00:00",
+    "text": "For your records - the annual confirmation statement for Northwind Trading Ltd was filed today and accepted. No action needed from Legal.\n\nCompany Secretary",
+    "headers": {},
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

@@ -2272,3 +2272,205 @@ async def test_zero_config_hitl_policy_composes_to_no_pause(
     assert [r.details["tool"] for r in rows] == ["search_documents"]
     steps = await _run_steps(comp_env, run_id)
     assert all(s.kind != "hitl_request" for s in steps)
+
+
+# --------------------------------------------------------------------------- #
+# INTAKE-3 (ADR-F086): the intake grant is STRUCTURAL — it keys on the project's
+# intake_state, not on any practice-area configuration.
+# --------------------------------------------------------------------------- #
+
+
+def test_intake_doctrine_rides_the_prompt_only_for_an_intake_run() -> None:
+    """The "conclude with record_intake_outcome" floor is UNCONDITIONAL for an
+    intake run (VM2-B lesson: an always-granted tool needs doctrine outside any data
+    fence) and completely absent for every other run."""
+    from app.agents.composition import INTAKE_DOCTRINE
+
+    binding = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Intake — NDA",
+        privileged=False,
+        minimum_inference_tier=None,
+        practice_area_id=None,
+    )
+    assert INTAKE_DOCTRINE in system_prompt_for(binding, intake_enabled=True)
+    assert INTAKE_DOCTRINE not in system_prompt_for(binding, intake_enabled=False)
+    assert INTAKE_DOCTRINE not in system_prompt_for(None, intake_enabled=True)
+    assert "record_intake_outcome" in INTAKE_DOCTRINE
+
+
+@pytest_asyncio.fixture
+async def intake_thread_id(comp_env: CompositionEnv) -> AsyncIterator[uuid.UUID]:
+    """Turn the composition matter into an intake candidate with a bound thread.
+
+    The mailbox is torn down HERE: ``intake_mailboxes.owner_user_id`` is ON DELETE
+    RESTRICT, so a surviving row would block ``comp_env``'s own user cleanup.
+    """
+    from app.models.intake import IntakeMailbox
+
+    thread_id, mailbox_id = await _make_intake_thread(comp_env)
+    try:
+        yield thread_id
+    finally:
+        async with comp_env.factory() as db:
+            await db.execute(delete(IntakeMailbox).where(IntakeMailbox.id == mailbox_id))
+            await db.commit()
+
+
+async def _make_intake_thread(env: CompositionEnv) -> tuple[uuid.UUID, uuid.UUID]:
+    """Turn the composition matter into an intake candidate with a bound thread."""
+    from app.models.intake import IntakeMailbox, IntakeThread
+    from app.models.practice_area import PracticeArea
+
+    async with env.factory() as db:
+        area_id = (
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        project = await db.get(Project, env.project_id)
+        assert project is not None
+        project.intake_state = "candidate"
+        mailbox = IntakeMailbox(
+            provider="agentmail",
+            inbox_id=f"inbox-{uuid.uuid4().hex[:8]}",
+            address="legal-intake@example.com",
+            practice_area_id=area_id,
+            owner_user_id=env.user_id,
+        )
+        db.add(mailbox)
+        await db.flush()
+        thread = IntakeThread(
+            mailbox_id=mailbox.id,
+            provider_thread_id=f"thr-{uuid.uuid4().hex[:8]}",
+            project_id=env.project_id,
+            subject="Please review the attached NDA",
+            status="processing",
+            auth_state="pass",
+            message_count=1,
+        )
+        db.add(thread)
+        await db.commit()
+        return thread.id, mailbox.id
+
+
+async def _bind_intake_run(env: CompositionEnv, intake_thread_id: uuid.UUID) -> uuid.UUID:
+    """A run that IS the thread's intake run — its conversation is the thread's
+    ``agent_thread_id`` (the S2 identity gate)."""
+    from app.models.intake import IntakeThread
+
+    run_id = await env.make_run(project_id_value=env.project_id)
+    async with env.factory() as db:
+        run = await db.get(AgentRun, run_id)
+        thread = await db.get(IntakeThread, intake_thread_id)
+        assert run is not None and thread is not None
+        thread.agent_thread_id = run.thread_id
+        await db.commit()
+    return run_id
+
+
+async def test_intake_matter_grants_the_outcome_tool_end_to_end(
+    comp_env: CompositionEnv, intake_thread_id: uuid.UUID
+) -> None:
+    """ADR-F086: the thread's OWN intake run gets record_intake_outcome. The scripted
+    run concludes the thread; a missing grant would deny the dispatch, so the thread
+    row IS the proof."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.models.intake import IntakeThread
+
+    run_id = await _bind_intake_run(comp_env, intake_thread_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "record_intake_outcome",
+                {
+                    "outcome": "needs_human",
+                    "label": "NDA review",
+                    "note": "Counterparty NDA to review; over to you.",
+                },
+            ),
+            final_message("filed for the lawyer"),
+        ]
+    )
+    # An intake run ALWAYS compiles a HITL floor (draft_email_reply is granted), and
+    # the runner fails closed without a checkpointer — production has one; the test
+    # supplies an in-memory saver.
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+        checkpointer_provider=InMemorySaver,
+    )
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "completed", run.error
+    async with comp_env.factory() as db:
+        thread = await db.get(IntakeThread, intake_thread_id)
+        assert thread is not None
+        assert thread.outcome == "needs_human"
+        assert thread.status == "awaiting_human"
+    audited = "\n".join(str(r.details) for r in await _tool_audit_rows(comp_env, run_id))
+    assert "record_intake_outcome" in audited
+    # The note is model text — the audit contract keeps it out of the row.
+    assert "over to you" not in audited
+
+
+async def test_ordinary_matter_never_gets_the_intake_tools(
+    comp_env: CompositionEnv,
+) -> None:
+    """A normal matter (intake_state NULL) must not be able to touch intake state —
+    the tool is never built, so it never enters the run's grant set."""
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "record_intake_outcome",
+                {"outcome": "dealt_with", "label": "x", "note": "y"},
+            ),
+            final_message("done"),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+    audited = "\n".join(str(r.details) for r in await _tool_audit_rows(comp_env, run_id))
+    assert "record_intake_outcome" not in audited
+
+
+async def test_ordinary_cockpit_chat_on_an_intake_matter_gets_neither_tools_nor_doctrine(
+    comp_env: CompositionEnv, intake_thread_id: uuid.UUID
+) -> None:
+    """S2: under Amendment A1 an intake-born matter is an ORDINARY matter the lawyer
+    opens and chats about. A cockpit turn on its own conversation must not be told to
+    conclude with record_intake_outcome, must not be granted the intake tools, and
+    must not have a HITL policy forced onto it."""
+    from app.models.intake import IntakeThread
+
+    # A run on a DIFFERENT conversation than the thread's agent_thread_id.
+    intake_run_id = await _bind_intake_run(comp_env, intake_thread_id)
+    assert intake_run_id is not None
+    cockpit_run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "record_intake_outcome",
+                {"outcome": "dealt_with", "label": "x", "note": "y"},
+            ),
+            final_message("clause 7 says ..."),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=cockpit_run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+    audited = "\n".join(str(r.details) for r in await _tool_audit_rows(comp_env, cockpit_run_id))
+    assert "record_intake_outcome" not in audited
+    async with comp_env.factory() as db:
+        thread = await db.get(IntakeThread, intake_thread_id)
+        assert thread is not None
+        assert thread.outcome is None
+        assert thread.status == "processing"

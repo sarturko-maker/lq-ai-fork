@@ -1,0 +1,23 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-question-indemnity",
+    "subject": "Re: Quick question - can we agree to an uncapped indemnity?"
+  },
+  "message": {
+    "provider_message_id": "15-chase@fixture.northwindtrading.co.uk",
+    "from_addr": "r.lindqvist@northwindtrading.co.uk",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-25T12:00:00+00:00",
+    "text": "Following up on the below - the customer is chasing me for an answer today. Any steer at all would help, even a provisional one.\n\nRikard",
+    "headers": {
+      "In-Reply-To": "03-question@fixture.northwindtrading.co.uk"
+    },
+    "auth_state": "pass",
+    "attachments": []
+  }
+}
