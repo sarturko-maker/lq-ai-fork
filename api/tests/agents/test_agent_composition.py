@@ -2626,8 +2626,19 @@ async def test_a_resumed_summarise_pass_stays_read_only(
     composed = model.bound_tool_names & hitl_eligible_tool_names()
     assert composed == SUMMARISE_PASS_TOOL_NAMES - MATTER_CONVERSATION_TOOL_NAMES
     assert "draft_email_reply" not in composed
+
     # ...and it is coached as the pass it is, not as a drafting intake run.
-    system_text = "\n".join(str(m.content) for m in model.seen_messages[0])
+    # Content may arrive as plain text OR as typed blocks; ``str()`` on a block list
+    # is a repr (newlines escaped), which can never contain the doctrine verbatim —
+    # extract the text blocks instead.
+    def _message_text(content: object) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+        return str(content)
+
+    system_text = "\n".join(_message_text(m.content) for m in model.seen_messages[0])
     assert INTAKE_SUMMARISE_DOCTRINE in system_text
 
 
