@@ -57,7 +57,32 @@ def test_intake_email_job_registered_on_worker_settings() -> None:
     the queue and are silently never executed.
     """
 
-    assert intake_email_job in WorkerSettings.functions
+    registered = [
+        f
+        for f in WorkerSettings.functions
+        if f is intake_email_job or getattr(f, "name", None) == INTAKE_EMAIL_JOB_NAME
+    ]
+    assert len(registered) == 1, "intake_email_job must be registered exactly once"
+
+
+@pytest.mark.unit
+def test_intake_job_keeps_no_arq_result() -> None:
+    """INTAKE-4b (ADR-F087): load-bearing, not tuning.
+
+    The job id is deterministic per (thread, message) so a redelivered webhook
+    cannot double-queue it — but arq refuses that id while ``arq:result:<id>``
+    exists, and the default keeps it for an HOUR after the job finishes. The
+    requeue-on-settle hook re-runs exactly that (thread, message) after an
+    earlier attempt returned ``deferred``, so with the default it enqueued
+    nothing and the email starved. Found live; guarded here.
+    """
+    pytest.importorskip("arq")
+
+    fns = [f for f in WorkerSettings.functions if getattr(f, "name", None) == INTAKE_EMAIL_JOB_NAME]
+    assert len(fns) == 1, "intake_email_job must be registered via arq's func()"
+    assert fns[0].keep_result_s == 0
+    # The registered name is still what the api enqueues.
+    assert fns[0].name == QUEUE_SIDE_JOB_NAME
 
 
 @pytest.mark.unit

@@ -1393,6 +1393,48 @@ async def test_requeue_hands_a_deferred_message_back_to_the_queue(
     assert calls == [(seeded.thread_id, pending_id)]
 
 
+async def test_requeue_reports_a_refused_enqueue_as_a_failure(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """ADR-F087: a refused enqueue means the message is STILL waiting and nothing
+    will pick it up — the landing endpoint already burned its own enqueue and this
+    hook is the only other producer. It must read as False, not as a success with a
+    `queued: false` field buried in an info line."""
+    run_id = await _make_run(commit_factory, seeded, status="completed")
+    async with commit_factory() as db:
+        db.add(
+            IntakeMessage(
+                thread_id=seeded.thread_id,
+                provider_message_id=f"msg-{uuid.uuid4().hex[:8]}",
+                direction="in",
+                from_addr="counterparty@example.net",
+                to_addrs=["legal-intake@example.com"],
+                body_text="Still waiting.",
+            )
+        )
+        await db.commit()
+
+    async def refused(thread_id: uuid.UUID, provider_message_id: str) -> bool:
+        return False
+
+    assert await requeue_pending_intake_message(commit_factory, run_id, enqueue=refused) is False
+    # Nothing was consumed: every inbound is still unclaimed and re-enqueueable.
+    async with commit_factory() as db:
+        inbound = (
+            (
+                await db.execute(
+                    select(IntakeMessage).where(
+                        IntakeMessage.thread_id == seeded.thread_id,
+                        IntakeMessage.direction == "in",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert inbound and all(m.run_id is None for m in inbound)
+
+
 async def test_requeue_is_a_noop_with_nothing_pending(
     commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
 ) -> None:

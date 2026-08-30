@@ -21,6 +21,8 @@ from app.workers.queue import (
     abort_agent_run_job,
     agent_run_job_id,
     enqueue_agent_run_job,
+    enqueue_intake_email_job,
+    intake_email_job_id,
 )
 
 pytestmark = pytest.mark.unit
@@ -81,3 +83,76 @@ async def test_abort_is_best_effort_on_transport_failure() -> None:
 
     with patch.object(queue_module, "_get_m3a6_pool", new=_exploding_pool):
         await abort_agent_run_job(uuid.uuid4())  # must not raise
+
+
+# --------------------------------------------------------------------------- #
+# INTAKE-4b (ADR-F087): the intake job id is REUSED, so a refusal must surface
+# --------------------------------------------------------------------------- #
+
+
+class _JobIdPool:
+    """A pool that models arq's real job-key semantics.
+
+    ``enqueue_job`` returns ``None`` while the id is still known — queued,
+    running, or holding an ``arq:result:<id>`` key — and a real job object once
+    it is free again. :meth:`finish` is the moment a job completes with
+    ``keep_result=0``: the id becomes reusable immediately.
+    """
+
+    def __init__(self) -> None:
+        self.known: set[str] = set()
+        self.kwargs: list[dict[str, Any]] = []
+
+    async def enqueue_job(self, *args: Any, **kwargs: Any) -> Any:
+        self.kwargs.append(kwargs)
+        job_id = kwargs["_job_id"]
+        if job_id in self.known:
+            return None
+        self.known.add(job_id)
+        return object()
+
+    def finish(self, job_id: str) -> None:
+        self.known.discard(job_id)
+
+
+async def test_intake_enqueue_reports_a_refused_job_id() -> None:
+    """Enqueue twice in a row: the second is REFUSED and must read as False.
+
+    It used to return True regardless, which is what made requeue-on-settle a
+    silent no-op — the hook believed it had handed the message back.
+    """
+    thread_id = uuid.uuid4()
+    pool = _JobIdPool()
+    with patch.object(queue_module, "_get_m3a6_pool", new=_pool_getter(pool)):  # type: ignore[arg-type]
+        assert await enqueue_intake_email_job(thread_id, provider_message_id="<m1@x>") is True
+        assert await enqueue_intake_email_job(thread_id, provider_message_id="<m1@x>") is False
+    assert pool.kwargs[0] == {"_job_id": intake_email_job_id(thread_id, "<m1@x>")}
+
+
+async def test_intake_enqueue_works_again_once_the_job_finished() -> None:
+    """What ``keep_result=0`` buys: the id is reusable the moment the job is
+    done, so the requeue hook can re-run the SAME (thread, message) that an
+    earlier attempt deferred. With arq's default the id stayed refused for an
+    hour and the message starved (ADR-F087)."""
+    thread_id = uuid.uuid4()
+    job_id = intake_email_job_id(thread_id, "<m1@x>")
+    pool = _JobIdPool()
+    with patch.object(queue_module, "_get_m3a6_pool", new=_pool_getter(pool)):  # type: ignore[arg-type]
+        assert await enqueue_intake_email_job(thread_id, provider_message_id="<m1@x>") is True
+        pool.finish(job_id)  # the job ran (returned "deferred") and kept no result
+        assert await enqueue_intake_email_job(thread_id, provider_message_id="<m1@x>") is True
+
+
+async def test_a_different_message_is_never_deduped_against_another() -> None:
+    thread_id = uuid.uuid4()
+    pool = _JobIdPool()
+    with patch.object(queue_module, "_get_m3a6_pool", new=_pool_getter(pool)):  # type: ignore[arg-type]
+        assert await enqueue_intake_email_job(thread_id, provider_message_id="<m1@x>") is True
+        assert await enqueue_intake_email_job(thread_id, provider_message_id="<m2@x>") is True
+    assert intake_email_job_id(thread_id, "<m1@x>") != intake_email_job_id(thread_id, "<m2@x>")
+
+
+async def test_intake_enqueue_transport_failure_maps_to_false() -> None:
+    pool = _FakePool(boom=ConnectionError("redis down"))
+    with patch.object(queue_module, "_get_m3a6_pool", new=_pool_getter(pool)):
+        assert await enqueue_intake_email_job(uuid.uuid4(), provider_message_id="<m@x>") is False

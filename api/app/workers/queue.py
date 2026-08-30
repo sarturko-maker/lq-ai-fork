@@ -367,6 +367,15 @@ async def enqueue_intake_email_job(thread_id: uuid.UUID, *, provider_message_id:
     the same message can never double-queue a run for it — arq's
     job-key semantics collapse the second enqueue to a no-op.
 
+    INTAKE-4b (ADR-F087): that collapse is REPORTED, not swallowed. arq
+    returns ``None`` when it refuses the id, and this helper used to
+    return ``True`` anyway — so the requeue-on-settle hook believed it had
+    handed a deferred message back when it had not. Deduping is still the
+    intended behaviour for a redelivered webhook; a caller that means "run
+    this again now" must see the ``False``. (The matching half is
+    ``keep_result=0`` on the worker registration: without it the id stayed
+    refused for an hour AFTER the job finished.)
+
     Best-effort/non-fatal, matching every other ``enqueue_*`` helper here
     EXCEPT :func:`enqueue_agent_run_job`: the caller
     (``app.api.intake_emails.ingest_email``) already committed the thread/
@@ -383,11 +392,21 @@ async def enqueue_intake_email_job(thread_id: uuid.UUID, *, provider_message_id:
 
     try:
         pool = await _get_m3a6_pool()
-        await pool.enqueue_job(
+        job = await pool.enqueue_job(
             INTAKE_EMAIL_JOB_NAME,
             str(thread_id),
             _job_id=intake_email_job_id(thread_id, provider_message_id),
         )
+        if job is None:
+            # arq refused the id: a job with it is queued, running, or (until
+            # keep_result=0 landed — see arq_setup) still holding a result key.
+            # This is the ONLY signal the caller gets, and swallowing it is what
+            # made requeue-on-settle a silent no-op for an hour (ADR-F087).
+            log.warning(
+                "enqueue_intake_email_job: arq refused the job id (already known)",
+                extra={"event": "intake_enqueue_deduped", "thread_id": str(thread_id)},
+            )
+            return False
         log.info(
             "enqueue_intake_email_job: enqueued",
             extra={"event": "intake_email_enqueue", "thread_id": str(thread_id)},

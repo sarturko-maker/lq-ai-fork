@@ -847,16 +847,30 @@ async def requeue_pending_intake_message(
                 return False
             thread_id, provider_message_id = pending.thread_id, pending.provider_message_id
         queued = await enqueue(thread_id, provider_message_id)
+        if not queued:
+            # A refused enqueue means this message is STILL pending and nothing
+            # will pick it up: the landing endpoint already burned its own
+            # enqueue, and this hook is the only other producer. That is an
+            # orphaned email, so it is a WARNING with ids — never an info line
+            # with `queued: false` buried in it (ADR-F087, found live).
+            logger.warning(
+                "intake re-enqueue was refused; the deferred message is still waiting",
+                extra={
+                    "event": "intake_requeue_refused",
+                    "thread_id": str(thread_id),
+                    "run_id": str(run_id),
+                },
+            )
+            return False
         logger.info(
             "intake thread has a deferred message; re-enqueued after the run settled",
             extra={
                 "event": "intake_deferred_message_requeued",
                 "thread_id": str(thread_id),
                 "run_id": str(run_id),
-                "queued": queued,
             },
         )
-        return queued
+        return True
     except Exception:
         logger.exception(
             "intake re-enqueue hook failed (the message stays pending for a later run)",

@@ -229,6 +229,41 @@ mailbox — so the rule now lives once, in `run_service.newest_live_run` /
 resume that died before driving the graph never consumed the interrupt, so the ask is
 still answerable and the conversation is still busy.
 
+### The requeue that never ran: a deterministic job id plus an arq result key
+
+Third live finding, and the last one between the send and a working loop. With the
+in-flight rule fixed the worker no longer saw the conversation as busy — but the sibling
+thread still never ran, because the requeue never actually reached the queue.
+
+`enqueue_intake_email_job` keys the job on a deterministic `_job_id` (thread + message) so
+a redelivered webhook cannot double-queue an email. arq enforces that by refusing an id
+while it is *known*, and "known" includes `arq:result:<job_id>`, which the default
+`keep_result` holds for an **hour after the job finishes**. The requeue-on-settle hook
+exists to re-run exactly the (thread, message) an earlier attempt returned `deferred` for
+— the one id guaranteed to still be in Redis. `pool.enqueue_job` returned `None`, and the
+helper returned `True` regardless, so the hook logged a successful requeue and nothing
+was queued. Redis on dev held ~10 such `arq:result:intake-email:…` keys.
+
+Three changes, none of which removes the dedup:
+
+1. the worker registers the job as `func(intake_email_job, keep_result=0)`, so a finished
+   job (`deferred`/`noop`/`started`) leaves no result key and the id is reusable
+   immediately — the dedup window narrows to what it is for, a job still QUEUED or
+   RUNNING;
+2. the enqueue helper returns `job is not None` and logs `intake_enqueue_deduped` with the
+   thread id when arq refuses — a refusal is a fact the caller needs, not noise;
+3. `requeue_pending_intake_message` treats a refusal as a real failure (WARNING with the
+   thread and run ids). It is the only producer left for a deferred message — the landing
+   endpoint already burned its own enqueue — so a silent `False` there is an orphaned
+   email.
+
+**`agent_run_job` does not share the trap** and is deliberately left alone: its job id is
+keyed on a run id, a run row is enqueued exactly once (a resume is a NEW row with a NEW
+id), so a lingering result key can never block a legitimate enqueue — and it already
+treats `None` as fatal (ADR-F009: an unqueued run is settled `failed`, never a zombie).
+The rule to carry forward: a deterministic job id is safe only while the id is never
+legitimately reused; the moment it is, `keep_result` becomes part of the contract.
+
 ## Consequences
 
 - The lawyer's edit is what is sent, and the row, the audit trail and the mailbox agree.
