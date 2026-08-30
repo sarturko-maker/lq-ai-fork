@@ -104,7 +104,7 @@ _UNAUTHENTICATED_CAUTION = (
 # Deliberately says nothing about whether that reference exists — the note reads
 # the same for an unknown reference and for a real matter whose roster the sender
 # is not on, so the agent (and anyone reading its output) learns nothing it could
-# use to probe for matters. The value is rendered through _single_line like every
+# use to probe for matters. The value is rendered through single_line_neutralised like every
 # other untrusted field, even though it already passed a strict format check.
 _CLAIMED_REFERENCE_NOTE = (
     "The sender put the matter reference {reference} on this message (in the subject line or "
