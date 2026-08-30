@@ -17,9 +17,9 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 
 class AgentRunStatus(StrEnum):
@@ -113,22 +113,81 @@ class AgentRunCreate(BaseModel):
     thread_id: uuid.UUID | None = None
 
 
-class ResumeDecision(BaseModel):
-    """The human's resolution of ONE paused ask (HITL-2, ADR-F071).
+def _no_control_chars(value: str) -> str:
+    """Reject (never strip) control characters other than newline and tab.
 
-    v1 is deliberately a SINGLE decision applied to the whole pending ask
-    (one Approve/Refuse button pair — no per-call granularity, since ``edit``
-    is a named non-goal until an arg-diff review UX exists). The runner fans
-    this one decision across every gated tool call in the paused turn when it
-    builds ``Command(resume=…)``. ``message`` is only meaningful for a
-    ``reject`` (the refusal the model sees when it closes the turn); it is
+    An approved reply's text goes out over SMTP: a bare CR, a NUL or an escape
+    sequence in a subject line is header-injection surface, and in a body it is
+    junk a human did not intend. "Reject, don't sanitize" (CLAUDE.md).
+    """
+    for ch in value:
+        if ch in "\n\t":
+            continue
+        if ord(ch) < 0x20 or ord(ch) == 0x7F:
+            raise ValueError("must not contain control characters (except newline and tab)")
+    return value
+
+
+_CleanText = Annotated[str, AfterValidator(_no_control_chars)]
+
+
+class EditedEmailReplyArgs(BaseModel):
+    """The lawyer's edit of a pending ``draft_email_reply`` (INTAKE-4b, ADR-F087).
+
+    The prose fields, and ONLY those. An omitted ``subject`` KEEPS the model's
+    original argument (the runner merges over the pending action request), so
+    "I only fixed the body" does not silently blank the subject line.
+
+    **``to`` is deliberately not editable** (``extra="forbid"`` rejects it). The
+    mail-bridge is reply-only by construction — it derives the recipients from the
+    message being answered and is never handed an address, which is the property
+    that stops anything the agent produces from mailing a third party (ADR-F086).
+    A recipient editor would therefore be a control that does nothing; honouring one
+    means widening the egress surface, which is its own decision, not a UI detail.
+
+    Bounds mirror :class:`~app.schemas.intake.DraftEmailReplyInput` exactly — this
+    is the API boundary; the tool re-validates the merged args against that schema
+    when it executes (code disposes twice, ADR-F018).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    subject: _CleanText | None = Field(default=None, min_length=1, max_length=998)
+    body: _CleanText = Field(min_length=1, max_length=50_000)
+
+
+class ResumeDecision(BaseModel):
+    """The human's resolution of ONE paused ask (HITL-2, ADR-F071; ADR-F087).
+
+    A SINGLE decision applied to the whole pending ask — the runner fans it across
+    every gated tool call in the paused turn when it builds ``Command(resume=…)``.
+
+    ``message`` is only meaningful for a ``reject``: it becomes the tool result the
+    model sees, which is exactly why the UI's "Respond — tell the agent what to
+    change" is a reject WITH a message rather than a fourth verb (ADR-F087). It is
     validated (reject-don't-sanitize), never sanitized, and never logged.
+
+    ``edit`` (ADR-F087, amending F071's non-goal) carries the lawyer's rewritten
+    ``draft_email_reply`` arguments and is accepted ONLY when the pending ask is
+    that tool — the endpoint 422s otherwise, and the runner checks again against
+    ``hitl.EDITABLE_TOOL_NAMES``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["approve", "reject"]
+    type: Literal["approve", "reject", "edit"]
     message: str | None = Field(default=None, max_length=2_000)
+    edited_args: EditedEmailReplyArgs | None = None
+
+    @model_validator(mode="after")
+    def _fields_match_the_verb(self) -> ResumeDecision:
+        if self.type == "edit" and self.edited_args is None:
+            raise ValueError("edited_args is required for an 'edit' decision")
+        if self.type != "edit" and self.edited_args is not None:
+            raise ValueError("edited_args is only valid on an 'edit' decision")
+        if self.type != "reject" and self.message is not None:
+            raise ValueError("message is only valid on a 'reject' decision")
+        return self
 
 
 class AgentRunResume(BaseModel):

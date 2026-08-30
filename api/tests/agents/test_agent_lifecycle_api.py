@@ -14,6 +14,7 @@ tests/agents/test_agent_lease.py and live verification).
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -191,16 +192,32 @@ async def test_cancel_settles_a_paused_run(
 # ---------------------------------------------------------------------------
 
 
-async def _seed_hitl_step(db: AsyncSession, run: AgentRun, *, tool: str = "apply_redline") -> None:
-    """A settled hitl_request step recording the pending ask (its name is what
-    the resume audit row reports)."""
+async def _seed_hitl_step(
+    db: AsyncSession,
+    run: AgentRun,
+    *,
+    tool: str = "apply_redline",
+    args: dict[str, Any] | None = None,
+    allowed: list[str] | None = None,
+    summary: str | None = None,
+) -> None:
+    """A settled hitl_request step recording the pending ask.
+
+    Its ``name`` is what the resume audit row reports; its ``summary`` is the
+    digest the per-tool decision gate reads (INTAKE-4b, ADR-F087). ``allowed=None``
+    writes a PRE-F087 digest (no ``allowed_decisions`` key) — which must still
+    resume with approve/reject.
+    """
+    entry: dict[str, Any] = {"tool": tool, "args": args or {}}
+    if allowed is not None:
+        entry["allowed_decisions"] = allowed
     db.add(
         AgentRunStep(
             run_id=run.id,
             seq=2,
             kind="hitl_request",
             name=tool,
-            summary=f'[{{"tool": "{tool}", "args": {{}}}}]',
+            summary=summary if summary is not None else json.dumps([entry], sort_keys=True),
         )
     )
     await db.flush()
@@ -287,6 +304,114 @@ async def test_resume_reject_carries_no_message_in_audit(
     ).scalar_one()
     assert "message" not in audit.details
     assert audit.details["decision"] == "reject"
+
+
+# --- INTAKE-4b (ADR-F087): the `edit` verb is per-tool ----------------------
+
+_EDIT_BODY = {
+    "decision": {
+        "type": "edit",
+        "edited_args": {
+            "subject": "Re: NDA",
+            "body": "Thanks — we have it and will come back this week.",
+        },
+    }
+}
+
+
+async def test_resume_edit_is_accepted_for_a_pending_draft_email_reply(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    """The lawyer's rewritten draft rides the resume run; the audit row still
+    carries the decision TYPE only — never the text they wrote."""
+    paused = await _make_run(db_session, user=user_a, status="awaiting_input")
+    await _seed_hitl_step(
+        db_session,
+        paused,
+        tool="draft_email_reply",
+        args={"to": ["counterparty@example.net"], "subject": "Re: NDA", "body": "Draft."},
+        allowed=["approve", "edit", "reject"],
+    )
+
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
+        resp = await client.post(
+            f"/api/v1/agents/runs/{paused.id}/resume",
+            headers=_bearer(user_a),
+            json=_EDIT_BODY,
+        )
+
+    assert resp.status_code == 202, resp.text
+    resume = (
+        await db_session.execute(
+            select(AgentRun).where(AgentRun.id == uuid.UUID(resp.json()["id"]))
+        )
+    ).scalar_one()
+    assert resume.resume_decision == _EDIT_BODY["decision"]
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "agent_run.hitl_decision",
+                AuditLog.resource_id == str(paused.id),
+            )
+        )
+    ).scalar_one()
+    assert audit.details["decision"] == "edit"
+    assert "edited_args" not in audit.details
+    assert "Thanks" not in json.dumps(audit.details)
+
+
+@pytest.mark.parametrize(
+    ("tool", "allowed", "summary"),
+    [
+        # An area-policy tool never admits `edit`, whatever its digest claims.
+        ("apply_redline", ["approve", "edit", "reject"], None),
+        ("apply_redline", ["approve", "reject"], None),
+        # A pre-F087 digest carries no verbs at all ⇒ conservative pair.
+        ("draft_email_reply", None, None),
+        # A truncated / unparseable digest can only NARROW, never widen.
+        ("draft_email_reply", None, '[{"tool": "draft_email_reply", "args": {"body": "Th'),
+    ],
+)
+async def test_resume_edit_is_refused_unless_the_pending_ask_allows_it(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+    tool: str,
+    allowed: list[str] | None,
+    summary: str | None,
+) -> None:
+    paused = await _make_run(db_session, user=user_a, status="awaiting_input")
+    await _seed_hitl_step(db_session, paused, tool=tool, allowed=allowed, summary=summary)
+
+    resp = await client.post(
+        f"/api/v1/agents/runs/{paused.id}/resume", headers=_bearer(user_a), json=_EDIT_BODY
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"] == "decision_not_allowed_for_pending_tool"
+    # No resume run was created, and the pause is still live and re-answerable.
+    runs = (
+        (await db_session.execute(select(AgentRun).where(AgentRun.thread_id == paused.thread_id)))
+        .scalars()
+        .all()
+    )
+    assert [r.id for r in runs] == [paused.id]
+
+
+async def test_resume_approve_and_reject_still_work_on_a_pre_f087_digest(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    """The narrowing fallback must not break the two verbs that always existed."""
+    for decision in ({"type": "approve"}, {"type": "reject", "message": "no"}):
+        paused = await _make_run(db_session, user=user_a, status="awaiting_input")
+        await _seed_hitl_step(db_session, paused, tool="send_notice", allowed=None)
+        with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
+            resp = await client.post(
+                f"/api/v1/agents/runs/{paused.id}/resume",
+                headers=_bearer(user_a),
+                json={"decision": decision},
+            )
+        assert resp.status_code == 202, resp.text
 
 
 async def test_resume_non_paused_run_returns_409(
@@ -418,11 +543,31 @@ async def test_resume_rejects_invalid_body(
     """Closed-enum body: an unknown decision type or an extra field is 422
     (reject-don't-sanitize)."""
     paused = await _make_run(db_session, user=user_a, status="awaiting_input")
+    await _seed_hitl_step(
+        db_session, paused, tool="draft_email_reply", allowed=["approve", "edit", "reject"]
+    )
+    good_args = {"subject": "Re: NDA", "body": "Fine."}
     for bad in (
-        {"decision": {"type": "maybe"}},  # not in the approve|reject enum
+        {"decision": {"type": "maybe"}},  # not in the approve|reject|edit enum
         {"decision": {"type": "approve", "unexpected": 1}},  # extra field forbidden
         {"decision": {}},  # missing type
         {},  # missing decision
+        # INTAKE-4b (ADR-F087): the verb and its payload must agree...
+        {"decision": {"type": "edit"}},  # edit without edited_args
+        {"decision": {"type": "approve", "edited_args": good_args}},
+        {"decision": {"type": "reject", "edited_args": good_args}},
+        {"decision": {"type": "approve", "message": "why"}},  # message is reject-only
+        # ...and the edited args are bounded the way the tool's own input is.
+        # Recipients are NOT editable: the bridge derives them (ADR-F086/F087).
+        {"decision": {"type": "edit", "edited_args": {**good_args, "to": ["a@example.net"]}}},
+        {"decision": {"type": "edit", "edited_args": {**good_args, "body": ""}}},
+        {"decision": {"type": "edit", "edited_args": {**good_args, "body": "a" * 50_001}}},
+        {"decision": {"type": "edit", "edited_args": {**good_args, "subject": "s" * 999}}},
+        # Control characters are rejected, never stripped (header-injection surface).
+        {"decision": {"type": "edit", "edited_args": {**good_args, "subject": "Re:\rBcc: x"}}},
+        {"decision": {"type": "edit", "edited_args": {**good_args, "body": "hi\x00there"}}},
+        {"decision": {"type": "edit", "edited_args": {"body": "no body key?", "nope": 1}}},
+        {"decision": {"type": "edit", "edited_args": {"subject": "only"}}},  # body required
     ):
         resp = await client.post(
             f"/api/v1/agents/runs/{paused.id}/resume",
