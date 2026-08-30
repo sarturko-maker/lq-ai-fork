@@ -269,6 +269,10 @@ class IntakeMessage(Base):
             "references_header IS NULL OR char_length(references_header) <= 2000",
             name="chk_intake_messages_references_len",
         ),
+        CheckConstraint(
+            "send_error IS NULL OR char_length(send_error) BETWEEN 1 AND 100",
+            name="chk_intake_messages_send_error_len",
+        ),
         Index("ix_intake_messages_provider_message_id", "provider_message_id"),
     )
 
@@ -309,6 +313,13 @@ class IntakeMessage(Base):
     # compared to ``provider_message_id`` values, never parsed for meaning.
     in_reply_to: Mapped[str | None] = mapped_column(Text, nullable=True)
     references_header: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # INTAKE-4b (ADR-F087, migration 0101): why the approved send of THIS outbound
+    # row failed, as an error CLASS ONLY (``timeout``, ``http_502``, ``duplicate``,
+    # ``not_configured``, …). Never a provider message, a body or an address — a
+    # provider error string quotes the recipient and the subject, and the audit
+    # contract (counts/types/IDs) applies to this column too. NULL on every inbound
+    # row and on every reply that was actually delivered.
+    send_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Provider-CLAIMED send time (validated, never trusted for ordering — the
     # thread's last_inbound_at is stamped from the server clock).
     provider_timestamp: Mapped[datetime | None] = mapped_column(

@@ -244,6 +244,11 @@ services:
       # bridge traffic with 500 when either is unset.
       LQ_AI_BRIDGE_TOKEN: ${LQ_AI_BRIDGE_TOKEN:-}
       LQ_AI_BRIDGE_MASTER_KEY: ${LQ_AI_BRIDGE_MASTER_KEY:-}
+      # INTAKE-4b (ADR-F087) — where the mail-bridge is reachable for the
+      # approved-reply send. Authenticated with LQ_AI_BRIDGE_TOKEN above; no
+      # mailbox credential is involved (the bridge stays the sole holder).
+      # Harmless when the `mail` profile is inactive: nothing calls it.
+      LQ_AI_MAIL_BRIDGE_URL: ${LQ_AI_MAIL_BRIDGE_URL:-http://mail-bridge:8004}
       # SETUP-5a (ADR-F063) — deployment default budget profile for new agent
       # runs. Optional; unset ⇒ "" ⇒ balanced (config.py normalizes "" → None).
       RUN_DEFAULT_BUDGET_PROFILE: ${RUN_DEFAULT_BUDGET_PROFILE:-}
@@ -405,6 +410,11 @@ services:
       # Phase 5 doesn't need a second docker-compose edit.
       LQ_AI_GATEWAY_URL: ${LQ_AI_GATEWAY_URL:-http://gateway:8001}
       LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      # INTAKE-4b (ADR-F087) — the agent run executes HERE, and the approved
+      # reply is sent from inside the `draft_email_reply` tool, so the worker
+      # needs the bridge's URL and the bearer it authenticates with.
+      LQ_AI_MAIL_BRIDGE_URL: ${LQ_AI_MAIL_BRIDGE_URL:-http://mail-bridge:8004}
+      LQ_AI_BRIDGE_TOKEN: ${LQ_AI_BRIDGE_TOKEN:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Retrieval providers (ADR-F049 C1/D). The agent run executes HERE, so the
       # in-process ONNX models (local embedder + cross-encoder rerank) load in

@@ -2227,7 +2227,12 @@ async def test_area_hitl_policy_pauses_the_gated_tool_run(
     assert [s.kind for s in steps] == ["model_turn", "hitl_request"]
     assert steps[-1].name == "search_documents"
     assert json.loads(steps[-1].summary) == [
-        {"args": {"query": "liability"}, "tool": "search_documents"}
+        {
+            # ADR-F087: per-tool verbs — an area-policy tool keeps approve/reject.
+            "allowed_decisions": ["approve", "reject"],
+            "args": {"query": "liability"},
+            "tool": "search_documents",
+        }
     ]
 
 
@@ -2298,6 +2303,10 @@ def test_intake_doctrine_rides_the_prompt_only_for_an_intake_run() -> None:
     assert INTAKE_DOCTRINE not in system_prompt_for(binding, intake_enabled=False)
     assert INTAKE_DOCTRINE not in system_prompt_for(None, intake_enabled=True)
     assert "record_intake_outcome" in INTAKE_DOCTRINE
+    # INTAKE-4b (ADR-F087): "Respond" is reject+message, which reaches the model as
+    # the TOOL RESULT — so the doctrine must tell it to redraft rather than close the
+    # turn with an acknowledgement. Without this line the lawyer's note goes nowhere.
+    assert "NEW draft with draft_email_reply" in INTAKE_DOCTRINE
 
 
 @pytest_asyncio.fixture

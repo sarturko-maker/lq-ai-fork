@@ -24,12 +24,16 @@ tools, so no ``practice_area_tool_groups`` row exists or is needed:
   ``projects.intake_state`` is PROVENANCE ("born from email") and the grant gate for
   these tools — the agent path never writes it.
 
-* :func:`draft_email_reply` — composes a reply and records it as a
-  ``direction='out'`` ``intake_messages`` row. **It sends nothing.** v1 has no
-  auto-send path anywhere (ADR-F086), and this tool is interrupt-gated
-  UNCONDITIONALLY by :data:`app.agents.hitl.ALWAYS_INTERRUPT_TOOL_NAMES` — a
-  structural gate, not a policy one, so no area config and no instruction inside a
-  hostile email can unlock it. Delivery (api → mail-bridge ``/send``) is INTAKE-4.
+* :func:`draft_email_reply` — composes a reply, records it as a ``direction='out'``
+  ``intake_messages`` row and, INTAKE-4b (ADR-F087), SENDS it. There is still no
+  auto-send path: the tool is interrupt-gated UNCONDITIONALLY by
+  :data:`app.agents.hitl.ALWAYS_INTERRUPT_TOOL_NAMES` — a structural gate, not a
+  policy one, so no area config and no instruction inside a hostile email can
+  unlock it — and its body runs only after a human approved (or edited) the exact
+  call. "The tool executed" and "a lawyer said yes to these bytes" are one event,
+  which is precisely why the send lives in the tool. Delivery goes through the
+  injected mail-bridge client (api → bridge ``POST /send``); the api holds only
+  the bridge token, never a mailbox credential (ADR-F086).
 
 Both writes go through ``guarded_dispatch`` (R6 grant / R5 halt / R4 cost) with the
 guard's auto-audit only: counts/IDs, never the label, the note or a body. The grant
@@ -52,8 +56,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.tools import MatterBinding
+from app.clients.mail_bridge import BridgeClient, BridgeSendError
+from app.matters.stamping import tag_subject
 from app.models.agent_run import AgentRun
-from app.models.file import File
 from app.models.intake import IntakeMessage, IntakeThread
 from app.models.project import Project
 from app.schemas.intake import DraftEmailReplyInput, RecordIntakeOutcomeInput
@@ -79,12 +84,19 @@ def build_intake_tools(
     *,
     run_id: uuid.UUID,
     binding: MatterBinding,
+    bridge: BridgeClient | None = None,
 ) -> list[Callable[..., Any]]:
     """Build the two intake tools for one run on an intake-born matter.
 
     The guard context grants exactly :data:`INTAKE_TOOL_NAMES`; ``binding.project_id``
     scopes every write, so the blast radius is this one matter and the one
     intake thread bound to it.
+
+    ``bridge`` (INTAKE-4b, ADR-F087) is the mail-bridge send seam, constructed at the
+    composition root and injected here — never reached for as a global. ``None`` means
+    the deployment has not configured a bridge: an approved reply is then kept as a
+    draft with ``send_error='not_configured'`` and the tool says plainly that nothing
+    was delivered.
     """
     ctx = GuardContext(
         session_factory=session_factory,
@@ -125,7 +137,7 @@ def build_intake_tools(
     async def draft_email_reply(
         to: list[str], subject: str, body: str, attachment_file_ids: list[str] | None = None
     ) -> str:
-        """Draft a reply to this intake email. It is NOT sent — a lawyer decides.
+        """Propose a reply to this intake email. Nothing is sent until a lawyer approves.
 
         Use this when the right answer to the email is a reply: an answer to a
         question, an acknowledgement with what happens next, a request for the
@@ -134,12 +146,18 @@ def build_intake_tools(
         Write it as the company's legal team would write it: plain English, short,
         no legalese, no promises the lawyer has not made. `to` is the address(es)
         the reply should go to; `subject` is the reply's subject line; `body` is the
-        full message text. `attachment_file_ids` may name documents already in this
-        matter (their ids) if the reply should carry them.
+        full message text.
 
-        This call always stops for the supervising lawyer's approval before it does
-        anything, and even once approved it only RECORDS the draft — nothing is
-        delivered to anyone. Say so plainly when you tell the lawyer what you did.
+        This call ALWAYS stops for the supervising lawyer first. They read your
+        draft and either approve it (optionally after editing your wording — what
+        they approve is what goes out), or send it back with a note telling you what
+        to change; when that happens, write a NEW draft with this tool that answers
+        their note. Only after an approval is the reply delivered to the recipient,
+        as a reply on the original email thread.
+
+        `attachment_file_ids` is recorded but attachments CANNOT be delivered yet:
+        call this with no attachment ids, and say in the body what the lawyer should
+        attach if a document really has to travel with the reply.
         """
         return await guarded_dispatch(
             "draft_email_reply",
@@ -151,6 +169,7 @@ def build_intake_tools(
                 subject=subject,
                 body=body,
                 attachment_file_ids=attachment_file_ids or [],
+                bridge=bridge,
             ),
             ctx,
         )
@@ -293,8 +312,19 @@ async def _draft_email_reply(
     subject: str,
     body: str,
     attachment_file_ids: list[str],
+    bridge: BridgeClient | None = None,
 ) -> str:
-    """Validate → check the attachments are this matter's → record the draft."""
+    """Validate → record the outbound row → SEND it (INTAKE-4b, ADR-F087).
+
+    This body runs only AFTER a human approved (or edited) the call — the tool is
+    interrupt-gated unconditionally (``hitl.ALWAYS_INTERRUPT_TOOL_NAMES``), so
+    "the tool executed" and "a lawyer said yes to these exact bytes" are the same
+    event. That is why the send lives here and not behind a second endpoint.
+
+    Order matters: the row is inserted and COMMITTED before the bridge is called,
+    so a crash mid-send leaves a record of what we tried rather than a delivered
+    email nobody has. Exactly one attempt is ever made — no retries (ADR-F087).
+    """
     try:
         proposal = DraftEmailReplyInput(
             to=to,
@@ -305,6 +335,17 @@ async def _draft_email_reply(
     except ValidationError as exc:
         return _rejection_text(exc, tool="draft_email_reply")
 
+    if proposal.attachment_file_ids:
+        # INTAKE-4b: the send carries text only. Recording "3 attachments" on a
+        # reply that goes out without them would make the row lie about what the
+        # counterparty received, so this is refused BEFORE anything is written —
+        # the model redrafts without them (and the docstring tells it not to try).
+        return (
+            "Attachments cannot be delivered yet, so nothing was sent. Call "
+            "draft_email_reply again with no attachment_file_ids — say in the body "
+            "what the lawyer should attach if a document has to travel with the reply."
+        )
+
     thread = await _load_thread_for_project(db, binding.project_id)
     if thread is None:
         return (
@@ -312,60 +353,124 @@ async def _draft_email_reply(
             "Nothing was drafted."
         )
 
-    attachment_names: list[str] = []
-    if proposal.attachment_file_ids:
-        # Owner- AND matter-scoped: a file id from anywhere else is simply "not
-        # found" (no existence disclosure — the house 404 posture).
-        rows = (
-            (
-                await db.execute(
-                    select(File.id, File.filename).where(
-                        File.id.in_(proposal.attachment_file_ids),
-                        File.project_id == binding.project_id,
-                        File.owner_id == binding.user_id,
-                        File.deleted_at.is_(None),
-                    )
-                )
+    # ADR-F088: the matter reference stamps the subject we record and becomes the
+    # Reply-To plus-tag the bridge composes, so a reply to this reply comes home.
+    # NULL only for a matter that predates the reference (or a sandbox) — the send
+    # still happens, unstamped, rather than failing on a cosmetic.
+    reference = (
+        await db.execute(
+            select(Project.reference).where(
+                Project.id == binding.project_id, Project.owner_id == binding.user_id
             )
-            .tuples()
-            .all()
         )
-        found = {row[0] for row in rows}
-        missing = [fid for fid in proposal.attachment_file_ids if fid not in found]
-        if missing:
-            return (
-                f"{len(missing)} of the attachment ids you gave are not documents in this "
-                "matter, so nothing was drafted. Attach only files from this matter's "
-                "documents and call draft_email_reply again."
-            )
-        attachment_names = [row[1] for row in rows]
+    ).scalar_one_or_none()
+    stamped_subject = tag_subject(proposal.subject, reference) if reference else proposal.subject
 
-    draft = IntakeMessage(
+    # The message we are replying TO: the thread's newest INBOUND provider id. The
+    # bridge is reply-only by construction (it derives the recipients from this
+    # message), which is exactly why no address of ours ever reaches it.
+    reply_to_message_id = (
+        await db.execute(
+            select(IntakeMessage.provider_message_id)
+            .where(IntakeMessage.thread_id == thread.id, IntakeMessage.direction == "in")
+            .order_by(IntakeMessage.created_at.desc(), IntakeMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    outbound = IntakeMessage(
         thread_id=thread.id,
-        # There is no provider id until INTAKE-4 actually delivers this; the
-        # unique key (thread_id, provider_message_id) needs a value, so mint a
-        # local, clearly-marked one. INTAKE-4 replaces it with the real id on send.
+        # A local, clearly-marked placeholder until the provider assigns the real
+        # id (the unique key (thread_id, provider_message_id) needs a value). On a
+        # successful send it is REPLACED by the provider's id — the one an inbound
+        # References header will name, which is what layer 2 matches on (ADR-F088).
         provider_message_id=f"draft:{uuid.uuid4()}",
         direction="out",
         run_id=run_id,
+        # What the agent said it was answering, recorded for the matter file. It is
+        # NOT what addresses the send: the bridge derives the recipients from the
+        # message being replied to and is never handed an address (ADR-F086), which
+        # is also why `to` is not one of the human-editable fields (ADR-F087).
         to_addrs=list(proposal.to),
-        subject=proposal.subject,
+        subject=stamped_subject,
         body_text=proposal.body,
-        attachment_filenames=attachment_names,
+        attachment_filenames=[],
     )
-    db.add(draft)
+    db.add(outbound)
     await db.flush()
+    # Durable BEFORE the network call: the idempotency key IS this row id, and a
+    # process that dies mid-send must leave the attempt visible (the R7 safe-fail
+    # hook then parks the thread for the lawyer).
+    await db.commit()
 
-    attached = (
-        ""
-        if not attachment_names
-        else f" It carries {len(attachment_names)} of this matter's documents as attachments."
+    failure: str | None = None
+    if bridge is None:
+        failure = "not_configured"
+    elif reply_to_message_id is None:
+        failure = "no_inbound_message"
+    else:
+        try:
+            sent = await bridge.send_reply(
+                reply_to_provider_message_id=reply_to_message_id,
+                idempotency_key=str(outbound.id),
+                text=proposal.body,
+                reply_to_tag=reference,
+            )
+        except BridgeSendError as exc:
+            failure = exc.reason
+        else:
+            outbound.provider_message_id = sent.provider_message_id
+            thread.status = "replied"
+            if sent.provider_thread_id != thread.provider_thread_id:
+                # Never fatal, never a second source of truth: the reply belongs to
+                # the thread we replied into, and a disagreement is worth seeing.
+                logger.warning(
+                    "sent reply landed on a different provider thread than expected",
+                    extra={
+                        "event": "intake_reply_thread_mismatch",
+                        "thread_id": str(thread.id),
+                        "run_id": str(run_id),
+                    },
+                )
+            logger.info(
+                "intake reply sent",
+                extra={
+                    "event": "intake_reply_sent",
+                    "thread_id": str(thread.id),
+                    "message_id": str(outbound.id),
+                    "run_id": str(run_id),
+                    "stamped": reference is not None,
+                },
+            )
+            return (
+                "Sent. The lawyer's approved reply has gone out on this email thread"
+                + (f" stamped {reference}" if reference else "")
+                + ", and it is recorded on the matter. Tell the lawyer plainly that "
+                "the reply was sent, and conclude with record_intake_outcome if you "
+                "have not already."
+            )
+
+    outbound.send_error = failure
+    thread.status = "error"
+    logger.warning(
+        "intake reply was approved but not sent",
+        extra={
+            "event": "intake_reply_send_failed",
+            "thread_id": str(thread.id),
+            "message_id": str(outbound.id),
+            "run_id": str(run_id),
+            "reason": failure,
+        },
     )
     return (
-        "The reply is recorded as a draft on this intake thread and is NOT sent — "
-        "nothing has left the system." + attached + " Delivery of approved replies "
-        "arrives in a later slice (INTAKE-4); until then the lawyer sends it themselves. "
-        "Tell the lawyer plainly that the reply is drafted, not sent."
+        # Deliberately NOT "nothing left the building": a timeout or a duplicate-key
+        # refusal cannot prove that. Treat delivery as unconfirmed and hand it to the
+        # human, who can look in the mailbox — that is the only honest claim here.
+        f"NOT DELIVERED — the send failed ({failure}) and was NOT retried, so assume "
+        "the reply did not go out and say so; only the mailbox can confirm otherwise. "
+        "The lawyer's approved text is saved on this matter. Record the outcome as "
+        "needs_human with a note saying the reply is written but was not delivered, so "
+        "the lawyer can check and send it themselves."
     )
 
 
