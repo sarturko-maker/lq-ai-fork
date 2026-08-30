@@ -40,7 +40,7 @@ from .forwarder import IntakeForwarder
 from .observability import init_otel, instrument_http_client, mute_url_logging
 from .pipeline import RECEIVED_EVENT_TYPE, IntakePipeline
 from .schemas import SendReplyRequest, SendReplyResponse
-from .sender import MailSender
+from .sender import DuplicateSendError, MailSender
 from .subscriber import MailSubscriber
 
 log = logging.getLogger(__name__)
@@ -252,7 +252,17 @@ def create_app(
         payload: SendReplyRequest,
         mail_sender: Annotated[MailSender, Depends(_get_sender)],
     ) -> SendReplyResponse:
-        return await mail_sender.reply(payload)
+        # INTAKE-4b (ADR-F087): a repeated idempotency key is REFUSED, never
+        # delivered a second time. The key is echoed nowhere and the detail names
+        # no content — the caller already knows which send it retried.
+        try:
+            return await mail_sender.reply(payload)
+        except DuplicateSendError:
+            log.warning(
+                "mail-bridge: duplicate send refused",
+                extra={"event": "mail_send_duplicate"},
+            )
+            raise HTTPException(status_code=409, detail="duplicate idempotency key") from None
 
     if cfg.agentmail_webhook_secret is not None:
         # PROD ingress. Mounted only when a Svix secret exists, so a dev
