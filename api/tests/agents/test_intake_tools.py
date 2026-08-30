@@ -2094,6 +2094,13 @@ async def _resume_of(
     async with factory() as db:
         parent = await db.get(AgentRun, parent_run_id)
         assert parent is not None
+        # One running run per thread (uq_agent_runs_thread_running): pause every
+        # running row first, as the resume endpoint's world always has.
+        await db.execute(
+            sa_update(AgentRun)
+            .where(AgentRun.thread_id == parent.thread_id, AgentRun.status == "running")
+            .values(status="awaiting_input")
+        )
         resume = AgentRun(
             user_id=parent.user_id,
             thread_id=parent.thread_id,

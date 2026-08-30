@@ -467,7 +467,7 @@ async def test_openapi_paths_match_sketch() -> None:
     # +2: INTAKE-5a (ADR-F086) — the lawyer's Inbox reads: GET /intake/threads +
     #   GET /intake/threads/{thread_id} (200 -> 202).
     # +1: INTAKE-5a.1 — POST /intake/threads/{thread_id}/summarise (202 -> 203).
-    assert len(actual) == 202  # +3: ADR-F054 capability panel (GET/PUT
+    assert len(actual) == 203  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH
