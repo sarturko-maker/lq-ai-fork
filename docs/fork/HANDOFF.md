@@ -5,71 +5,79 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 ## State
 
-- Branch: `main` — **INTAKE-2 (AgentMail probe + mail-bridge) implemented and LIVE-VERIFIED
-  2026-08-29**, this PR. New top-level service `mail-bridge/` (compose profile `mail`, host
-  port 8004) + `mail-bridge-checks` CI job + api-side envelope-bounds drift-guard test.
-- Live end-to-end PROVEN on the dev stack: a real external Gmail email → AgentMail →
-  bridge reconciliation → normalize + presigned-URL attachment fetch →
-  `POST /internal/intake/emails` → intake thread (`auth_state=pass`) + candidate project +
-  .docx ingested `ready` (12,775 bytes, byte-exact). Idempotency replay verified (restart →
-  `duplicate delivery`, no new rows). `/readyz` green incl. subscription age.
-- **Persistent dev config created (NOT smoke — keep):** `intake_mailboxes` row
-  `557264d0-43c9-47bd-ab34-d30f085af51a` binding (agentmail, oscar-lq@agentmail.to) →
-  Commercial area, owner admin@lq.ai. AgentMail creds live in the gitignored dev `.env`
-  (lines ~401-403: `AGENTMAIL_API_KEY`, `AGENTMAIL_INBOX_ADDRESS`,
-  commented `AGENTMAIL_WEBHOOK_SECRET`) — consumed ONLY by mail-bridge, never api.
-- Probe evidence: `docs/fork/evidence/intake-probe/` (findings.md + captured websocket
-  frames, incl. a live external `message.received`). Ground truth over the research doc.
-- **Milestone: INTAKE** — plan `docs/fork/plans/INTAKE-INBOX-plan.md` (ACCEPTED). Slice
-  tasks #537–#543; #539 (INTAKE-2) closes with this PR. CUSTODIAN queues behind INTAKE.
-- Untracked on purpose (ride their own future PRs): `sample-documents/`, 4 scenario live
-  tests, PYMUPDF research, `docs/fork/evidence/{demo-rehearsal,memory-demo-rehearsal}/`.
-  Memory-video pivot (2026-08-24) delivered earlier — runbook/discussion docs in
-  `sample-documents/commercial-redline-brief/`, maintainer records at leisure.
+- Branch: `intake-3-intake-run` — **INTAKE-3 (the intake run) implemented, reviewed, and
+  LIVE-VERIFIED 2026-08-30**, this PR. Migration **0099** (intake_threads.outcome CHECK
+  `dealt_with|needs_human`, intake_messages content columns, `intake-triage` skill bound to
+  Commercial). Dev DB is at 0099; api/arq-worker/ingest-worker rebuilt together.
+- **Maintainer ruling R10 / Amendment A1 (2026-08-29): EVERY intake thread IS a matter.**
+  Promote is gone; `projects.intake_state` is provenance + tool-grant gate only. Outcomes:
+  `dealt_with` → thread `handled` + matter `archived_at` (memory fence); `needs_human` →
+  thread `awaiting_human`, matter open. "Attach to existing Matter X" is the INTAKE-4/5 human
+  decision. Recorded in plan § Amendment A1 and ADR-F086 § Amendment A1 (still `proposed`).
+- Live proof (real Gmail → AgentMail → bridge → worker → run): junk "50% off office chairs"
+  → `handled`/`dealt_with`/label `marketing`/archived, 9 steps, 67k tokens; "please review the
+  attached NDA" (+ AWDC .docx) → agent read the doc, wrote Roster/Documents/File/3 Facts,
+  `record_intake_outcome(needs_human)` label "review request — AWDC purchase terms (not NDA)",
+  then paused `awaiting_input` on `draft_email_reply` (HITL floor), matter open, 0 drafts
+  persisted (awaiting approval), 25 steps, 125k tokens. Thread ids `f4ff2ffe…`, `dfedec48…`.
+- Older threads `eacb1f25…`/`ffe5314b…` (pre-0099, no content columns) stay `received` — no
+  job will ever pick them; delete or leave as fixtures.
+- Milestone INTAKE: 0/1/2/3 done (#290/#291/#293/this). Next INTAKE-4 (#541).
+- Untracked on purpose (ride their own future PRs): `sample-documents/` except
+  `commercial-intake-pack/`, 4 scenario live tests, PYMUPDF research,
+  `docs/fork/evidence/{demo-rehearsal,memory-demo-rehearsal}/`.
 
-## Done (INTAKE-2 — this PR)
+## Done (INTAKE-3 — this PR)
 
-- **Live AgentMail probe** (all semantics verified against the real API, SDK 0.5.9):
-  self-send fires `message.sent`+`delivered`, NEVER `message.received` (loop guard is a
-  plain event_type filter); attachment download = presigned CloudFront URL (~1h TTL,
-  unauthenticated — the URL IS a credential); reply threads by message_id alone; websocket
-  subscribe acks fast but has NO replay (durable events API logs only `label.added`).
-- **`mail-bridge/`** (slack-bridge pattern, DI via lifespan composition root): websocket
-  dev ingress with real-uptime-gated backoff + best-effort reconciliation poll
-  (`after=` high-water mark, explicit `include_spam/blocked/unauthenticated=False`);
-  Svix-verified prod webhook (mounted only when secret set; Content-Length cap; 5xx →
-  Svix retries); normalize → `InboundEmailEnvelope` (NUL strip, truncate-with-marker,
-  caps restated from api schema + drift-guard test `api/tests/test_intake_envelope_bounds_drift.py`);
-  streaming attachment fetch with hard per-item/aggregate abort; bearer-gated reply-only
-  `/send` (nothing calls it until INTAKE-4). 105 tests; ruff + `mypy --strict` clean.
-- Fresh-context adversarial review: 2 blockers (clean-close reconnect storm; presigned URL
-  leaking through exception chains into tracebacks) + 9 should-fixes ALL fixed; deferred on
-  record: Dockerfile root/install-order (pre-existing bridge convention).
-- Security posture: API key + presigned URLs never logged (httpx/httpcore muted to WARNING —
-  httpx logs full request URLs at INFO; audit backlogged for gateway/api); logs carry
-  counts/types/IDs only; `/readyz` status words never exception text.
+- R1 `api/app/agents/run_service.py` headless `start_agent_run` (endpoint byte-identical,
+  patch seams kept). R2 `intake_worker.py` core `process_intake_thread` (+ arq wrapper):
+  `with_for_update` thread lock, oldest pending inbound first, in-flight defer + **requeue on
+  settle** (`requeue_pending_intake_message` in the agent_run_worker settle hook), owner
+  mismatch → `error`, bad budget profile → default, `DEFAULT_INTAKE_MAX_STEPS=40`.
+- R4 `intake_prompt.py`: per-run **nonce fence**, newline collapse + 5-dash neutralisation on
+  every rendered field (fence-escape + hostile-filename fixtures in the pack). R5
+  `intake_tools.py`: `record_intake_outcome` (last-call-wins incl. un-archive), `draft_email_reply`
+  (persists `intake_messages` direction='out', sends nothing). Tools + `INTAKE_DOCTRINE` granted
+  ONLY on the intake conversation (`thread_id == intake_threads.agent_thread_id`) — ordinary
+  cockpit chats on the matter get neither. R6 `ALWAYS_INTERRUPT_TOOL_NAMES` floor applied last
+  AND kept on every subagent spec. R7 safe-fail keyed on the agent conversation.
+- R8 `skills/intake-triage/SKILL.md` + 4-piece bind. R9 code-scored eval
+  `sample-documents/commercial-intake-pack/` (22 envelopes) — **22/22 PASS, 0 UNSAFE** live.
+- Fresh-context adversarial review: 4 blockers (fence escape, subagent floor cleared, orphaned
+  deferred follow-ups, half-wins un-archive) + 6 should-fixes + nits — ALL fixed.
+- Verification: containerized api suite (pre-fix) 3897 passed / 2 pre-existing env failures
+  (`test_branding` BRAND_ACCENT_LIGHT="" in dev .env; `test_health` deps reachable in compose);
+  post-fix touched-module suites 383 passed; ruff + mypy clean; migration up→down→up on a
+  throwaway pgvector container.
 
-## Next slice — INTAKE-3 (the intake run) — task #540
+## Next slice — INTAKE-4 (#541) — HITL edit/respond + approved send (ADR-F087)
 
-One deep-agent run per email thread on the bound Commercial agent (normal `agent_loop`
-purpose — NO gateway purpose edit): fill the stub `intake_email_job` (re-derive everything
-from DB; payload is thread_id only), structural `record_intake_outcome` tool
-(dealt-with → auto-dismiss project / paused-for-HITL / candidate matter), free-form
-`intake_threads.label`, intake SKILL doctrine (taxonomy = examples only), lean budget +
-low step cap. Read plan § Ruling 1 + § Doctrine first. Consider the doctrine note on
-unsupported attachment types (txt/images settle `failed/unsupported_type`).
+Consumer of the bridge `/send` (reply-only). The lawyer approves/edits the persisted draft →
+api calls mail-bridge `/send` with `reply_to_message_id`; `intake_messages` out row gets the
+provider id; thread → `replied`. Widen HITL from approve/reject to edit/respond for
+`draft_email_reply` only (ADR-F087). Design first: where the draft lives in the cockpit
+(matter view vs inbox surface, INTAKE-5), and the "attach to existing Matter X" operation
+(A1) — plan both before code. Backlog from INTAKE-3: retire `intake_state` enum values
+`promoted/dismissed` (schema cleanup); docs/db-schema.md lacks the email-intake tables.
 
 ## Pick up exactly here
 
-If this PR isn't merged yet: full-suite containerized api run + merge gate, then merge.
-After merge: rebuild api + arq-worker + ingest-worker together (drift-guard test rides in
-api/tests), `docker image prune -f`, bring mail-bridge back up
-(`docker compose --profile mail up -d mail-bridge`). Then start INTAKE-3 per the block
-above. Task tracker: mark #539 completed; #540 = next (also still owed: #538 → completed
-from 2026-08-24 — MCP task tools were disconnected).
+If this PR is merged: start INTAKE-4 with a written plan (ADR-F087 draft) — read ADR-F086
++ Amendment A1, the plan § Security posture, and `mail-bridge/app/main.py` `/send`. If not
+merged: check `gh pr view --repo sarturko-maker/lq-ai-fork` for CI, then squash-merge per
+ADR-F005. Working model: Sonnet easy / Opus implement+review+fix / Fable orchestrate, design,
+live-verify, merge. Task tracker owed: #538/#539/#540 → completed (MCP task tools
+disconnected).
 
 ## Gotchas
 
+- **A bare `pytest -q` inside the api container runs every provider test** (container carries
+  `LQ_AI_GATEWAY_KEY`) and rewrites committed `docs/fork/evidence/**` — use `-m "not provider"`
+  and `git checkout docs/fork/evidence` if you forget.
+- `docker compose run api …` runs the image entrypoint = `alembic upgrade head` on the dev
+  DB: a containerized test run silently migrates dev. Fine (auto-migrate-on-boot), but know it.
+- Intake runs ALWAYS compile a HITL policy → fail closed without a checkpointer; any harness
+  with `checkpointer_provider=lambda: None` must inject one.
 - **api health endpoint is `/health`, NOT `/healthz`** — the bridge's readiness probe hit
   this; anything new probing the api must use `/health`.
 - `docker compose config` interpolates `.env` and prints secrets — ALWAYS

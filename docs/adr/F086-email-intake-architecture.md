@@ -99,3 +99,12 @@ Option 4, concretely:
 - Seam comments referencing this ADR belong at: the internal intake router + worker,
   `record_intake_outcome`, the bridge envelope contract, and the `projects.intake_state`
   lifecycle.
+
+## Amendment A1 (2026-08-29, maintainer ruling, pre-acceptance) — every thread is a matter
+
+The `candidate / promoted / dismissed` lifecycle in the decision outcome is withdrawn. The
+eagerly created `projects` row IS the matter from message one; `intake_state` survives as
+provenance ("born from email") and as the intake-tool grant gate, never as a promotion
+gate. Agent outcomes: `dealt_with` → matter closed (`archived_at`, label + note; archiving is
+the memory fence) / `needs_human` → matter open, thread `awaiting_human`. "Attach to existing
+Matter X" replaces promote as the human's decision (INTAKE-4/5). Full text: plan § Amendment A1.

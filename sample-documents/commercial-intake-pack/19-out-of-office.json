@@ -1,0 +1,23 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-ooo",
+    "subject": "Automatic reply: Supplier onboarding"
+  },
+  "message": {
+    "provider_message_id": "19-ooo@fixture.northwindtrading.co.uk",
+    "from_addr": "j.mercer@sandbrook-group.com",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-25T16:00:00+00:00",
+    "text": "I am out of the office until 8 September with limited access to email. For anything urgent please contact my colleague on the procurement desk.\n\nJonah Mercer",
+    "headers": {
+      "Auto-Submitted": "auto-replied"
+    },
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

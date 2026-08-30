@@ -1,0 +1,21 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-security-questionnaire",
+    "subject": "Vendor security questionnaire - please complete sections 4 and 7"
+  },
+  "message": {
+    "provider_message_id": "13-questionnaire@fixture.northwindtrading.co.uk",
+    "from_addr": "vendor.risk@brightline-retail.com",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-25T10:30:00+00:00",
+    "text": "Hello,\n\nAs part of onboarding Northwind as a supplier, please complete sections 4 (subprocessors) and 7 (contractual commitments) of the attached-style questionnaire. Section 7 asks for your standard liability cap, your data breach notification window, and whether you will sign our DPA unamended.\n\nWe need this back within 10 business days.\n\nBrightline Retail - Vendor Risk",
+    "headers": {},
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

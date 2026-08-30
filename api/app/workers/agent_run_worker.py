@@ -40,6 +40,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import get_agent_checkpointer
+from app.agents.intake_tools import requeue_pending_intake_message, safe_fail_intake_thread
 from app.agents.lease import claim_run, settle_run
 from app.audit import audit_action
 from app.config import get_settings
@@ -136,6 +137,21 @@ async def execute_run_job(
             extra={"event": "agent_run_interrupted", "run_id": str(run_id)},
         )
         raise
+    finally:
+        # INTAKE-3 (ADR-F086, R7): the safe-fail hook. Every terminal path — the
+        # normal return, the settle-and-re-raise above, and a composition failure
+        # that settled itself — passes through here AFTER the run row is settled.
+        # A no-op for every non-intake run (one indexed lookup); for an intake run
+        # whose thread is still 'processing' (the agent never called
+        # record_intake_outcome) it parks the thread for the lawyer with a FIXED
+        # fork-authored note, so a failed/cancelled/capped/paused run can never
+        # strand a thread invisibly. Never raises — it must not mask the run's
+        # own outcome.
+        await safe_fail_intake_thread(session_factory, run_id)
+        # ADR-F086 B3: settling this run frees the thread, so a follow-up email that
+        # was deferred while it ran gets handed back to the queue here — nothing else
+        # would ever re-enqueue it (the landing endpoint's job id is per-message).
+        await requeue_pending_intake_message(session_factory, run_id)
     return {"run_id": str(run_id), "executed": True}
 
 

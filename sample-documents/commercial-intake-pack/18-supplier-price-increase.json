@@ -1,0 +1,21 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-price-increase",
+    "subject": "Annual price adjustment - 9.4% from 1 October"
+  },
+  "message": {
+    "provider_message_id": "18-price-increase@fixture.northwindtrading.co.uk",
+    "from_addr": "accounts@durrant-packaging.co.uk",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-25T15:05:00+00:00",
+    "text": "Dear customer,\n\nWe are writing to notify you of an annual price adjustment of 9.4% across all product lines with effect from 1 October 2026, in line with our standard terms and conditions.\n\nNo action is required; the new rates will appear on invoices from October.\n\nDurrant Packaging Ltd",
+    "headers": {},
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-question-indemnity",
+    "subject": "Quick question - can we agree to an uncapped indemnity?"
+  },
+  "message": {
+    "provider_message_id": "03-question@fixture.northwindtrading.co.uk",
+    "from_addr": "r.lindqvist@northwindtrading.co.uk",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-24T11:20:00+00:00",
+    "text": "Hi,\n\nA customer is asking us to accept an uncapped indemnity for IP infringement in their purchase terms. No contract attached yet - I just want to know whether that is something we ever agree to, or whether I should push back before I waste time.\n\nThanks,\nRikard",
+    "headers": {},
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

@@ -67,8 +67,8 @@ from sqlalchemy import CursorResult, func, select, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.budget import resolve_envelope
 from app.agents.checkpointer import get_agent_checkpointer, has_checkpoint
+from app.agents.run_service import AgentThreadBusy, start_agent_run
 from app.agents.stream import (
     CHANNEL_CLOSED,
     SSE_DONE,
@@ -101,7 +101,6 @@ from app.schemas.agent_runs import (
     AgentThreadDetailResponse,
     AgentThreadListResponse,
     AgentThreadRead,
-    BudgetProfile,
     MatterActivityRead,
     MatterActivityResponse,
     UnfiledThreadsSummary,
@@ -118,9 +117,6 @@ _LIMIT_MAX = 200
 # Interim flood brake until F1 lands R4 budgets and the arq migration:
 # a caller may have at most this many runs at status='running' at once.
 _MAX_CONCURRENT_RUNS_PER_USER = 3
-
-# Thread titles are the bounded first prompt until auto-titling (F1/F2).
-_TITLE_LIMIT = 120
 
 # Follow-up admission set (F1-S1, ADR-F009): any settled run admits the
 # next turn — thread repair fixes dangling tool calls; checkpoint state
@@ -397,88 +393,32 @@ async def create_agent_run(
             detail="too_many_running_runs",
         )
 
-    if thread is None:
-        thread = AgentThread(
+    # INTAKE-3: the run mechanic itself (thread create-or-continue, budget/steps
+    # resolution and materialization, insert + commit, enqueue with the ADR-F009
+    # fatal-failure contract) lives in the HTTP-free
+    # :func:`app.agents.run_service.start_agent_run`, shared with the intake worker.
+    # Everything ABOVE this line is the request-shaped half that stays here: owner
+    # checks (404, never 403), the sandbox filter, continuability/matter-archived
+    # gates and the flood brake. ``enqueue_agent_run_job`` is passed through by name
+    # so this module stays the patch seam the endpoint tests drive.
+    try:
+        run = await start_agent_run(
+            db,
             user_id=user.id,
             project_id=body.project_id,
-            title=body.prompt[:_TITLE_LIMIT],
+            thread=thread,
+            prompt=body.prompt,
+            budget_profile=body.budget_profile,
+            max_steps=body.max_steps,
+            model_alias=body.model_alias,
+            # Both resolved HERE, by name, so this module stays the seam the
+            # endpoint tests patch (settings for the deployment-default chain,
+            # enqueue for the no-worker case).
+            settings=get_settings(),
+            enqueue=enqueue_agent_run_job,
         )
-        db.add(thread)
-        await db.flush()  # assigns thread.id for the run row below
-
-    # SETUP-5a (ADR-F063): resolve the budget profile ONCE, here, and persist
-    # the RESOLVED value — a later default change must never silently re-price
-    # an already-created run. Chain: run-explicit > area default (the bound
-    # matter's practice area) > deployment default > balanced.
-    settings = get_settings()
-    area_default: str | None = None
-    if body.budget_profile is None and thread.project_id is not None:
-        area_default = (
-            await db.execute(
-                select(PracticeArea.default_budget_profile)
-                .join(Project, Project.practice_area_id == PracticeArea.id)
-                .where(Project.id == thread.project_id)
-            )
-        ).scalar_one_or_none()
-    resolved_profile = (
-        body.budget_profile
-        or (BudgetProfile(area_default) if area_default else None)
-        or (
-            BudgetProfile(settings.run_default_budget_profile)
-            if settings.run_default_budget_profile
-            else None
-        )
-        or BudgetProfile.balanced
-    )
-
-    # Slice O (ADR-F053): resolve the cost/effort envelope. ``max_steps`` is
-    # materialized on the row (the runner reads it directly); the other three
-    # brakes are re-resolved from ``budget_profile`` at composition. An explicit
-    # request ``max_steps`` overrides the profile's step ceiling (advanced).
-    envelope = resolve_envelope(resolved_profile, settings)
-    resolved_max_steps = body.max_steps if body.max_steps is not None else envelope.max_steps
-    run = AgentRun(
-        user_id=user.id,
-        thread_id=thread.id,
-        # Snapshot of the thread's binding (ADR-F008) — re-validated at
-        # execution time by the composition point (F0-S4 rule).
-        project_id=thread.project_id,
-        status=AgentRunStatus.running.value,
-        prompt=body.prompt,
-        model_alias=body.model_alias,
-        max_steps=resolved_max_steps,
-        budget_profile=resolved_profile.value,
-    )
-    db.add(run)
-    thread.last_run_at = datetime.now(UTC)
-    try:
-        await db.commit()
-    except IntegrityError as exc:
-        # The partial unique index (one running run per thread) closes
-        # the check-then-insert race between concurrent follow-ups.
-        if "uq_agent_runs_thread_running" in str(exc.orig):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="thread_busy") from exc
-        raise
-    await db.refresh(run)
-
-    # F1-S1 (ADR-F009): execution happens on the arq worker. A run that
-    # could not be queued has NO executor — settle it failed right here
-    # (the sweep would catch it minutes later; the user shouldn't wait
-    # that long to learn nothing is running). The settle uses THIS
-    # request's session (the DI seam tests drive), conditional on
-    # status='running' for monotonicity.
-    if not await enqueue_agent_run_job(run.id):
-        await db.execute(
-            sa_update(AgentRun)
-            .where(AgentRun.id == run.id, AgentRun.status == AgentRunStatus.running.value)
-            .values(
-                status=AgentRunStatus.failed.value,
-                error="enqueue failed: no worker will execute this run",
-                finished_at=func.now(),
-            )
-        )
-        await db.commit()
-        await db.refresh(run)
+    except AgentThreadBusy as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="thread_busy") from exc
 
     return AgentRunRead.model_validate(run)
 

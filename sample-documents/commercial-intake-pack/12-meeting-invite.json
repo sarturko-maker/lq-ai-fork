@@ -1,0 +1,23 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-meeting-invite",
+    "subject": "Invitation: Supplier onboarding sync @ Wed 2 Sep 14:00 (BST)"
+  },
+  "message": {
+    "provider_message_id": "12-meeting@fixture.northwindtrading.co.uk",
+    "from_addr": "calendar-notification@northwindtrading.co.uk",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-25T09:00:00+00:00",
+    "text": "You have been invited to the following event.\n\nSupplier onboarding sync\nWhen: Wed 2 Sep 2026 14:00-14:30 (BST)\nWhere: Teams\nOrganiser: operations@northwindtrading.co.uk\n\nThis is an automated calendar notification.",
+    "headers": {
+      "Auto-Submitted": "auto-generated"
+    },
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-newsletter-lawwatch",
+    "subject": "LawWatch Weekly: 7 contract clauses that will define 2027"
+  },
+  "message": {
+    "provider_message_id": "05-newsletter@fixture.northwindtrading.co.uk",
+    "from_addr": "newsletter@lawwatch-media.com",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-24T06:00:00+00:00",
+    "text": "THIS WEEK IN COMMERCIAL LAW\n\n* Seven clauses in-house teams are rewriting for 2027\n* Webinar: AI indemnities, Thursday 3pm\n* Download our free MSA benchmarking report\n\nYou are receiving this because you subscribed. Unsubscribe here.",
+    "headers": {
+      "Precedence": "bulk"
+    },
+    "auth_state": "pass",
+    "attachments": []
+  }
+}

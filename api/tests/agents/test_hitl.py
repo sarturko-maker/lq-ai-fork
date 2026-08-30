@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.agents.hitl import compile_hitl_policy, stamp_subagent_opt_out
+from app.agents.hitl import ALWAYS_INTERRUPT_TOOL_NAMES, compile_hitl_policy, stamp_subagent_opt_out
 
 _GRANTED = frozenset({"apply_redline", "search_documents", "read_document"})
 
@@ -113,3 +113,79 @@ def test_stamp_without_compiled_policy_touches_nothing() -> None:
     stamp_subagent_opt_out(specs, None)
     assert specs == before
     assert "interrupt_on" not in specs[0]
+
+
+# --- INTAKE-3 (ADR-F086): the code-enforced structural floor ------------------
+#
+# ``draft_email_reply`` is gated because it is OUTBOUND, not because an area
+# configured it. These pin that the floor cannot be configured away AND that a run
+# which was never granted the tool is byte-identical to the pre-slice behaviour.
+
+_INTAKE_GRANTED = frozenset({"record_intake_outcome", "draft_email_reply", "read_document"})
+
+
+def test_structural_floor_gates_outbound_tool_with_an_empty_policy() -> None:
+    compiled = compile_hitl_policy({}, _INTAKE_GRANTED)
+    assert compiled is not None
+    assert set(compiled) == {"draft_email_reply"}
+    assert compiled["draft_email_reply"]["allowed_decisions"] == ["approve", "reject"]
+
+
+def test_policy_cannot_remove_the_structural_floor() -> None:
+    """Neither a `false` entry (skipped as malformed) nor a policy that simply
+    omits the tool can leave an outbound call ungated."""
+    for policy in ({"draft_email_reply": False}, {"read_document": True}, {"nope": True}):
+        compiled = compile_hitl_policy(dict(policy), _INTAKE_GRANTED)
+        assert compiled is not None, policy
+        assert "draft_email_reply" in compiled, policy
+
+
+def test_structural_floor_survives_a_malformed_non_object_policy() -> None:
+    compiled = compile_hitl_policy("not-a-dict", _INTAKE_GRANTED)  # type: ignore[arg-type]
+    assert compiled is not None
+    assert set(compiled) == {"draft_email_reply"}
+
+
+def test_floor_does_not_gate_the_outcome_tool() -> None:
+    """record_intake_outcome is NOT outbound — it stays ungated unless an area's
+    policy asks for it (the ADR gates what LEAVES the system, not what files it)."""
+    compiled = compile_hitl_policy({}, _INTAKE_GRANTED)
+    assert compiled is not None
+    assert "record_intake_outcome" not in compiled
+
+
+def test_non_intake_runs_keep_the_zero_config_invariant() -> None:
+    """A run that was never granted an outbound tool compiles to None exactly as
+    before — the floor is grant-set-intersected, so nothing changes for it."""
+    assert compile_hitl_policy({}, _GRANTED) is None
+    assert compile_hitl_policy({"retired_tool": True}, _GRANTED) is None
+
+
+def test_subagents_keep_the_structural_floor_but_lose_the_area_policy() -> None:
+    """B2: clearing a subagent's interrupt_on outright handed a DELEGATED agent an
+    ungated draft_email_reply — the one tool the injection backstop rests on. The
+    AREA's entries still drop; the floor does not."""
+    compiled = compile_hitl_policy({"read_document": True}, _INTAKE_GRANTED)
+    assert compiled is not None
+    assert set(compiled) == {"read_document", "draft_email_reply"}
+    specs: list[dict[str, Any]] = [{"name": "clause-drafter"}, {"name": "clause-reviewer"}]
+    stamp_subagent_opt_out(specs, compiled)
+    for spec in specs:
+        assert set(spec["interrupt_on"]) == {"draft_email_reply"}
+        assert spec["interrupt_on"]["draft_email_reply"]["allowed_decisions"] == [
+            "approve",
+            "reject",
+        ]
+    # Each spec owns its dict — mutating one must not leak into the others.
+    specs[0]["interrupt_on"].clear()
+    assert set(specs[1]["interrupt_on"]) == {"draft_email_reply"}
+
+
+def test_non_intake_subagents_are_still_fully_opted_out() -> None:
+    """The pre-slice behaviour survives wherever no floor tool is granted."""
+    compiled = compile_hitl_policy({"apply_redline": True}, _GRANTED)
+    assert compiled is not None
+    assert not (ALWAYS_INTERRUPT_TOOL_NAMES & _GRANTED)
+    specs: list[dict[str, Any]] = [{"name": "document-researcher"}]
+    stamp_subagent_opt_out(specs, compiled)
+    assert specs[0]["interrupt_on"] == {}

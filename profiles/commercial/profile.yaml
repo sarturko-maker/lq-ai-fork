@@ -18,6 +18,7 @@ bindings:
   - deal-review
   - tabular-review
   - adversarial-review
+  - intake-triage
   tool_groups:
   - redlining
   - tabular

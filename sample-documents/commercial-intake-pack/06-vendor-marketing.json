@@ -1,0 +1,21 @@
+{
+  "provider": "agentmail",
+  "inbox_id": "legal-intake@northwindtrading.co.uk",
+  "thread": {
+    "provider_thread_id": "thr-marketing-clausemate",
+    "subject": "Cut your contract turnaround by 60% - 15 minutes?"
+  },
+  "message": {
+    "provider_message_id": "06-marketing@fixture.northwindtrading.co.uk",
+    "from_addr": "tyler.j@clausemate.io",
+    "to": [
+      "legal-intake@northwindtrading.co.uk"
+    ],
+    "cc": [],
+    "timestamp": "2026-08-24T07:30:00+00:00",
+    "text": "Hi there,\n\nI noticed Northwind is scaling its supplier base. ClauseMate helps in-house teams cut contract turnaround by 60%. Do you have 15 minutes on Thursday for a quick demo?\n\nBook a slot: clausemate.io/demo\n\nTyler",
+    "headers": {},
+    "auth_state": "pass",
+    "attachments": []
+  }
+}
