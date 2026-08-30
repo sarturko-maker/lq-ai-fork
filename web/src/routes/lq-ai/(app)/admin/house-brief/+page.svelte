@@ -87,9 +87,10 @@
 		try {
 			const resp = await organizationProfileApi.updateOrganizationProfile({
 				content_md: content,
-				// Explicit null CLEARS the code; the server leaves it alone only when
-				// the key is absent, and this form owns the field, so it always sends.
-				org_code: orgCode === '' ? null : orgCode
+				// A blank field means "leave it as it is", never "clear it": matters
+				// already carry the code in their references, so the server refuses to
+				// clear one (422 on null/'') and we simply omit the key.
+				...(orgCode === '' ? {} : { org_code: orgCode })
 			});
 			content = resp.content_md;
 			orgCode = resp.org_code ?? '';

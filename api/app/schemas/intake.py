@@ -68,6 +68,17 @@ _MAX_ATTACHMENT_B64_CHARS = (MAX_ATTACHMENT_DECODED_BYTES * 4 // 3) + 1024
 # agent prompt never fences, header names/values outside this set.
 ALLOWED_HEADER_KEYS = frozenset({"Auto-Submitted", "Precedence", "In-Reply-To", "References"})
 _HEADER_VALUE_MAX_CHARS = 500
+# INTAKE-4a (ADR-F088): ``References`` is the ONE header that grows without bound
+# — every hop appends the message it answered — and it is the one the layer-2
+# resolver reads. At 500 chars a thread of ~8 exchanges already overflows, and
+# because senders APPEND, a head-first trim throws away the newest ids, i.e.
+# exactly the ones most likely to be ours. So this header gets its own, larger
+# cap (matching the ``intake_messages.references_header`` CHECK and
+# ``stamping.MAX_PARSED_HEADER_CHARS``) and is trimmed from the HEAD, keeping the
+# tail. A trim can bisect the oldest ``<id>`` token; the parser requires both
+# angle brackets, so a bisected token is simply not a token.
+_REFERENCES_VALUE_MAX_CHARS = 2_000
+_TAIL_TRUNCATED_HEADERS = frozenset({"References"})
 
 
 def _reject_nul_bytes(value: str) -> str:
@@ -184,7 +195,12 @@ class InboundEmailMessage(BaseModel):
         for k, v in value.items():
             if k not in ALLOWED_HEADER_KEYS:
                 continue
-            text = str(v)[:_HEADER_VALUE_MAX_CHARS]
+            raw = str(v)
+            if k in _TAIL_TRUNCATED_HEADERS:
+                # Keep the NEWEST ids (senders append), not the oldest.
+                text = raw[-_REFERENCES_VALUE_MAX_CHARS:]
+            else:
+                text = raw[:_HEADER_VALUE_MAX_CHARS]
             if "\x00" in text:
                 raise ValueError(f"header {k!r} value must not contain NUL (\\x00) bytes")
             filtered[str(k)] = text

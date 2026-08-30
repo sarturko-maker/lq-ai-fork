@@ -48,6 +48,13 @@ MAX_SUBJECT_CHARS = 998
 MAX_FILENAME_CHARS = 500
 MAX_CONTENT_TYPE_CHARS = 200
 MAX_HEADER_VALUE_CHARS = 500
+# INTAKE-4a (ADR-F088): ``References`` is the one header that grows without bound
+# (each hop appends the message it answered) AND the one the api's layer-2
+# resolver reads to attach a reply to its matter. 500 chars overflows after ~8
+# exchanges, and since senders APPEND, a head-first trim discards the NEWEST ids
+# — precisely the ones likely to be ours. Larger cap, trimmed from the head so
+# the tail survives. Must equal the api's ``_REFERENCES_VALUE_MAX_CHARS``.
+MAX_REFERENCES_VALUE_CHARS = 2000
 
 #: Appended to a body we had to shorten so the reading lawyer (and the agent)
 #: can see that the text is not the whole message.
@@ -76,6 +83,18 @@ def strip_nuls(value: str) -> str:
 
 def _clean(value: str | None, *, limit: int) -> str:
     return strip_nuls(value or "")[:limit]
+
+
+def _clean_tail(value: str | None, *, limit: int) -> str:
+    """:func:`_clean`, but keeping the END of an over-long value.
+
+    For an append-only header (``References``) the newest entries are at the
+    tail, so that is the half worth keeping. A trim may bisect the oldest
+    ``<id>`` token; the api's parser requires both angle brackets, so a bisected
+    token is simply not parsed rather than mis-parsed.
+    """
+
+    return strip_nuls(value or "")[-limit:]
 
 
 def truncate_body(text: str) -> str:
@@ -167,10 +186,11 @@ def _bound_headers(message: Message) -> dict[str, str]:
 
     references = getattr(message, "references", None)
     if isinstance(references, str) and references.strip():
-        headers["References"] = _clean(references, limit=MAX_HEADER_VALUE_CHARS)
+        headers["References"] = _clean_tail(references, limit=MAX_REFERENCES_VALUE_CHARS)
     elif isinstance(references, list) and references:
+        # Provider order is oldest-first, same as the wire header.
         joined = " ".join(str(ref) for ref in references)
-        headers["References"] = _clean(joined, limit=MAX_HEADER_VALUE_CHARS)
+        headers["References"] = _clean_tail(joined, limit=MAX_REFERENCES_VALUE_CHARS)
 
     raw = getattr(message, "headers", None)
     if isinstance(raw, dict):

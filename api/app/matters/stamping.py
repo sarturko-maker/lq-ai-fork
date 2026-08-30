@@ -166,6 +166,26 @@ def normalise_address(value: str) -> str:
     return candidate.lower()
 
 
+def looks_like_address(value: str) -> bool:
+    """Whether a normalised string is shaped like an email address at all.
+
+    Deliberately crude — one ``@`` with something either side, no whitespace.
+    Its only job is to keep NON-address text out of an address comparison: a
+    matter's roster aliases hold display-name strings as well as addresses
+    (ADR-F048 — they are the tracked-change author strings a person writes
+    under), so comparing a sender to an alias like ``"Legal"`` or ``"Author"``
+    would let a stranger who signs their mail with a common name walk through
+    an identity check. Both sides of that comparison go through here first.
+    """
+
+    if not value or len(value) > MAX_PARSED_ADDR_CHARS:
+        return False
+    if any(ch.isspace() for ch in value):
+        return False
+    local, sep, domain = value.partition("@")
+    return bool(sep) and bool(local) and bool(domain) and "@" not in domain
+
+
 def parse_plus_tags(addresses: list[str]) -> list[str]:
     """Every distinct plus-tag reference across a recipient list, in order."""
 
@@ -222,6 +242,7 @@ __all__ = [
     "MAX_PARSED_SUBJECT_CHARS",
     "MAX_PARSED_TAGS",
     "has_reference_tag",
+    "looks_like_address",
     "normalise_address",
     "parse_plus_tag",
     "parse_plus_tags",

@@ -222,9 +222,16 @@ async def test_put_without_org_code_leaves_it_untouched(
 
 
 @pytest.mark.integration
-async def test_put_with_explicit_null_clears_the_org_code(
-    client: AsyncClient, db_session: AsyncSession, admin_user: User
+@pytest.mark.parametrize("cleared", [None, ""], ids=["explicit-null", "empty-string"])
+async def test_put_refuses_to_clear_the_org_code(
+    client: AsyncClient, db_session: AsyncSession, admin_user: User, cleared: str | None
 ) -> None:
+    """A code cannot be cleared once matters carry it in their references.
+
+    Same posture as ``area_code``: absent leaves it alone, a value sets it, and
+    null/'' are 422s rather than a silent wipe (ADR-F088).
+    """
+
     db_session.add(
         OrganizationProfile(content_md="# Old", org_code="NWT", updated_by=admin_user.id)
     )
@@ -233,14 +240,16 @@ async def test_put_with_explicit_null_clears_the_org_code(
     resp = await client.put(
         "/api/v1/organization-profile",
         headers=_bearer(admin_user),
-        json={"content_md": "# New", "org_code": None},
+        json={"content_md": "# New", "org_code": cleared},
     )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["org_code"] is None
+    assert resp.status_code == 422, resp.text
+
+    kept = (await db_session.execute(select(OrganizationProfile))).scalars().all()
+    assert kept[0].org_code == "NWT"
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("bad", ["nwt", "N", "TOOLONGCODE", "NW T", "NW-T", "NW.T", ""])
+@pytest.mark.parametrize("bad", ["nwt", "N", "TOOLONGCODE", "NW T", "NW-T", "NW.T"])
 async def test_put_rejects_a_malformed_org_code(
     client: AsyncClient, admin_user: User, bad: str
 ) -> None:

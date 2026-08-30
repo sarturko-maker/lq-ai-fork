@@ -1,17 +1,18 @@
 """Migration-0100 up→down→up probe (a script, NOT a pytest module).
 
-The ``_`` prefix keeps pytest from collecting it. It exists because the
-interesting half of a backfill migration is what it does to rows that already
-exist, which no unit test can observe: seed matters at 0099, upgrade, read the
-series back, downgrade, confirm nothing but the new columns went away, upgrade
-again, confirm the series is identical.
+Evidence tooling for INTAKE-4a, kept out of ``api/tests/`` so nothing collects
+or imports it. It exists because the interesting half of a BACKFILL migration is
+what it does to rows that already exist, which no unit test can observe: seed
+matters at 0099, upgrade, read the series back, downgrade, confirm nothing but
+the new columns went away, upgrade again, confirm the series is identical.
 
 **Run it against a THROWAWAY pgvector container only** — never the dev database
-(CLAUDE.md § Dev-environment hard rules). It writes rows.
+(CLAUDE.md § Dev-environment hard rules). It writes rows. See ``README.md`` in
+this directory for the full recipe and the recorded run.
 
-    DATABASE_URL=... python tests/_mig0100_probe.py seed   # at 0099
-    DATABASE_URL=... python tests/_mig0100_probe.py check  # after 0100
-    DATABASE_URL=... python tests/_mig0100_probe.py gone   # after the downgrade
+    DATABASE_URL=... python migration_0100_probe.py seed   # while at 0099
+    DATABASE_URL=... python migration_0100_probe.py check  # after 0100
+    DATABASE_URL=... python migration_0100_probe.py gone   # after the downgrade
 """
 
 from __future__ import annotations

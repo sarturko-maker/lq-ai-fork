@@ -81,7 +81,7 @@ GENERIC_AREA_CODE = "GEN"
 #: The shipped profile manifests (``profiles/<name>/profile.yaml`` ``code:``) are
 #: the source of truth for the areas that HAVE a manifest; this map additionally
 #: covers the areas migration 0053 seeds without one. A drift-guard test
-#: (``tests/profiles/test_profile_manifests.py``) asserts the two agree.
+#: (``tests/test_profile_loader.py``) asserts the two agree.
 STANDARD_AREA_CODES: dict[str, str] = {
     "commercial": "COM",
     "disputes": "DIS",

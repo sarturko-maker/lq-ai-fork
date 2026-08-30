@@ -170,7 +170,9 @@
 	async function saveOrgProfile() {
 		return organizationProfileApi.updateOrganizationProfile({
 			content_md: brief,
-			org_code: orgCode === '' ? null : orgCode
+			// Blank = "leave it as it is". The code can be set but never cleared —
+			// matters already carry it in their references (ADR-F088).
+			...(orgCode === '' ? {} : { org_code: orgCode })
 		});
 	}
 

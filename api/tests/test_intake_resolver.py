@@ -141,6 +141,9 @@ async def _seed_existing_matter(
     reference: str,
     outbound_message_id: str = "our-outbound-1",
     roster_email: str | None = ROSTER_SENDER,
+    roster_trust: str = "confirmed",
+    roster_aliases: list[str] | None = None,
+    inbound_message_id: str | None = None,
 ) -> tuple[Project, IntakeThread, AgentThread]:
     """One matter that already exists, with an intake thread, an agent conversation,
     one outbound message we sent, and (optionally) a roster entry."""
@@ -182,15 +185,30 @@ async def _seed_existing_matter(
             body_text="Our reply.",
         )
     )
-    if roster_email is not None:
+    if inbound_message_id is not None:
+        db_session.add(
+            IntakeMessage(
+                thread_id=thread.id,
+                provider_message_id=inbound_message_id,
+                direction="in",
+                from_addr=ROSTER_SENDER,
+                to_addrs=["legal-intake@example.com"],
+                subject="Original subject",
+                body_text="Their first message.",
+            )
+        )
+    if roster_email is not None or roster_aliases is not None:
+        aliases = (
+            roster_aliases if roster_aliases is not None else ["Jane Counterparty", roster_email]
+        )
         db_session.add(
             MatterParticipant(
                 project_id=project.id,
                 user_id=owner.id,
                 display_name="Jane Counterparty",
-                aliases=["Jane Counterparty", roster_email],
+                aliases=aliases,
                 side="counterparty",
-                trust="confirmed",
+                trust=roster_trust,
             )
         )
     await db_session.flush()
@@ -388,6 +406,88 @@ async def test_layer2_does_not_attach_on_unusable_headers(
     assert res.json()["project_id"] != str(project.id)
 
 
+async def test_layer2_does_not_attach_on_an_INBOUND_id(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    mailbox: IntakeMailbox,
+    owner_user: User,
+    practice_area: PracticeArea,
+) -> None:
+    """Quoting back an id the SENDER minted proves nothing — no attach.
+
+    Only ids WE issued (``direction='out'``) show that the sender actually
+    received something from this inbox. An inbound id is the sender's own
+    choice, so matching it would let anyone who ever wrote in re-quote their
+    earlier id and be filed into the matter it opened, with layer-2 privileges
+    (no Roster check). Layer 3 still applies afterwards — with no tag here,
+    that means a new matter.
+    """
+
+    project, _t, _a = await _seed_existing_matter(
+        db_session,
+        mailbox=mailbox,
+        owner=owner_user,
+        practice_area=practice_area,
+        reference="NWT-XEN-0013",
+        outbound_message_id=f"out-{uuid.uuid4().hex[:6]}",
+        inbound_message_id="their-own-inbound-1",
+    )
+
+    res = await _post(
+        client,
+        _envelope(
+            provider_thread_id=f"new-{uuid.uuid4().hex[:8]}",
+            headers={"References": "<their-own-inbound-1>"},
+            from_addr=ROSTER_SENDER,
+        ),
+    )
+    assert res.status_code == 200
+    assert res.json()["project_id"] != str(project.id)
+
+
+async def test_layer2_matches_our_outbound_id_at_the_end_of_a_long_chain(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    mailbox: IntakeMailbox,
+    owner_user: User,
+    practice_area: PracticeArea,
+) -> None:
+    """A 12-hop ``References`` chain still carries our id — it is the NEWEST.
+
+    Senders append, so our reply's id sits at the END. The header cap trims from
+    the head for exactly this reason; at the old 500-char cap this chain lost its
+    tail and the attach silently stopped working on long threads.
+    """
+
+    ours = "our-reply-on-a-long-thread@fixture.example.com"
+    project, _t, agent_thread = await _seed_existing_matter(
+        db_session,
+        mailbox=mailbox,
+        owner=owner_user,
+        practice_area=practice_area,
+        reference="NWT-XEN-0014",
+        outbound_message_id=ours,
+    )
+
+    chain = [f"<hop-{i:02d}-{'x' * 30}@meridian-supply-group.example>" for i in range(11)]
+    chain.append(f"<{ours}>")
+    header = " ".join(chain)
+    assert len(header) > 500, "the fixture must exceed the ORIGINAL cap to be meaningful"
+
+    res = await _post(
+        client,
+        _envelope(
+            provider_thread_id=f"new-{uuid.uuid4().hex[:8]}",
+            headers={"References": header},
+        ),
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["project_id"] == str(project.id)
+    landed = await _thread_for(db_session, uuid.UUID(body["thread_id"]))
+    assert landed.agent_thread_id == agent_thread.id
+
+
 async def test_threading_headers_are_persisted_for_later_matching(
     client: AsyncClient, db_session: AsyncSession, mailbox: IntakeMailbox
 ) -> None:
@@ -470,6 +570,112 @@ async def test_layer3_plus_tagged_recipient_from_a_roster_sender_attaches(
             from_addr=ROSTER_SENDER,
             # The provider lower-cases the stored recipient (probed live).
             to=["legal-intake+nwt-xen-0004@example.com"],
+        ),
+    )
+    assert res.status_code == 200
+    assert res.json()["project_id"] == str(project.id)
+
+
+async def test_layer3_does_not_match_a_display_name_alias(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    mailbox: IntakeMailbox,
+    owner_user: User,
+    practice_area: PracticeArea,
+) -> None:
+    """A roster alias that is a NAME, not an address, can never gate an attach.
+
+    ADR-F048 aliases are tracked-change author strings, routinely display names.
+    A sender whose address happened to normalise to such a string must not pass
+    an identity check.
+    """
+
+    project, _t, _a = await _seed_existing_matter(
+        db_session,
+        mailbox=mailbox,
+        owner=owner_user,
+        practice_area=practice_area,
+        reference="NWT-XEN-0015",
+        roster_aliases=["Legal", "J. Smith", "Jane Counterparty"],
+    )
+
+    res = await _post(
+        client,
+        _envelope(
+            provider_thread_id=f"new-{uuid.uuid4().hex[:8]}",
+            subject="Re: something [NWT-XEN-0015]",
+            from_addr="Legal",
+        ),
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["project_id"] != str(project.id)
+    landed = await _thread_for(db_session, uuid.UUID(body["thread_id"]))
+    assert landed.claimed_reference == "NWT-XEN-0015"
+
+
+async def test_layer3_does_not_accept_an_agent_inferred_roster_row(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    mailbox: IntakeMailbox,
+    owner_user: User,
+    practice_area: PracticeArea,
+) -> None:
+    """``trust='inferred'`` cannot open the gate — it came from untrusted metadata.
+
+    The agent infers roster rows from document author strings, which an attacker
+    supplies. If an inferred row authorised an attach, the loop closes: send a
+    .docx whose author string you chose, then quote the reference.
+    """
+
+    project, _t, _a = await _seed_existing_matter(
+        db_session,
+        mailbox=mailbox,
+        owner=owner_user,
+        practice_area=practice_area,
+        reference="NWT-XEN-0016",
+        roster_trust="inferred",
+    )
+
+    res = await _post(
+        client,
+        _envelope(
+            provider_thread_id=f"new-{uuid.uuid4().hex[:8]}",
+            subject="Re: something [NWT-XEN-0016]",
+            from_addr=ROSTER_SENDER,
+        ),
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["project_id"] != str(project.id)
+    landed = await _thread_for(db_session, uuid.UUID(body["thread_id"]))
+    assert landed.claimed_reference == "NWT-XEN-0016"
+
+
+async def test_layer3_accepts_the_same_person_once_a_human_confirms_them(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    mailbox: IntakeMailbox,
+    owner_user: User,
+    practice_area: PracticeArea,
+) -> None:
+    """The mirror of the test above: confirmed is exactly what unlocks it."""
+
+    project, _t, _a = await _seed_existing_matter(
+        db_session,
+        mailbox=mailbox,
+        owner=owner_user,
+        practice_area=practice_area,
+        reference="NWT-XEN-0017",
+        roster_trust="confirmed",
+    )
+
+    res = await _post(
+        client,
+        _envelope(
+            provider_thread_id=f"new-{uuid.uuid4().hex[:8]}",
+            subject="Re: something [NWT-XEN-0017]",
+            from_addr=ROSTER_SENDER,
         ),
     )
     assert res.status_code == 200

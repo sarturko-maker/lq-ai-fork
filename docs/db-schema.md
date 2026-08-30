@@ -1905,8 +1905,10 @@ CREATE TABLE practice_areas (
     name               TEXT NOT NULL,
     -- 0100 (ADR-F088): the area's matter-reference code ('COM'); NULL until the
     -- area's first matter derives one. Shipped defaults come from the profile
-    -- manifests (`code:`); admin-editable. CHECK '^[A-Z0-9]{2,6}$'; UNIQUE over
-    -- the non-NULL values (uq_practice_areas_area_code).
+    -- manifests, where `code:` is now REQUIRED on every `kind: area` manifest
+    -- (fail-loud at boot; unique across manifests; `GEN` is reserved).
+    -- Admin-editable. CHECK '^[A-Z0-9]{2,6}$'; UNIQUE over the non-NULL values
+    -- (uq_practice_areas_area_code).
     area_code          TEXT,
     unit_label         TEXT NOT NULL,            -- unit-of-work noun (ADR-F004: data, not code)
     configured         BOOLEAN NOT NULL DEFAULT false,  -- derived from profile in S3

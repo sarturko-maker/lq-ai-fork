@@ -26,7 +26,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -75,16 +75,35 @@ class OrganizationProfileUpdateRequest(BaseModel):
     exists yet, update in place otherwise (preserving the row id so
     audit history correlates).
 
-    ``org_code`` (INTAKE-4a, ADR-F088) uses ``exclude_unset`` semantics so the
-    existing House Brief form — which sends only ``content_md`` — cannot wipe
-    the code by omission: key ABSENT leaves it unchanged, key present with
-    ``null`` clears it, key present with a value sets it. The value is
-    REJECTED, never up-cased or trimmed into shape (CLAUDE.md: validate at the
-    boundary, reject don't sanitize) — the admin form up-cases as you type.
+    ``org_code`` (INTAKE-4a, ADR-F088) uses ``exclude_unset`` semantics: key
+    ABSENT leaves the stored code unchanged (so the House Brief form, which also
+    sends ``content_md``, cannot wipe it by omission), key present with a value
+    sets it. There is deliberately NO way to CLEAR it here — an explicit
+    ``null`` or an empty string is a 422, the same posture
+    ``PracticeAreaConfigUpdate`` takes for ``area_code``: references already
+    minted carry the code, so clearing it would strand them behind a prefix no
+    surface can explain any more. The value is REJECTED, never up-cased or
+    trimmed into shape (CLAUDE.md: validate at the boundary, reject don't
+    sanitize) — the admin form up-cases as you type.
     """
 
     content_md: str = Field(min_length=0, max_length=HOUSE_BRIEF_MAX_CHARS)
     org_code: str | None = Field(default=None, pattern=CODE_PATTERN)
+
+    @field_validator("org_code")
+    @classmethod
+    def _reject_explicit_null(cls, value: str | None) -> str:
+        """An explicit JSON ``null`` matches the ``None`` arm of the union and
+        would skip ``pattern`` entirely (the SETUP-4b trap). Validators do not
+        run for UNSET defaults, so ``None``-as-partial-update-sentinel survives;
+        only a PROVIDED null is rejected here, at the boundary."""
+
+        if value is None:
+            raise ValueError(
+                "must be a 2-6 character code of A-Z and 0-9 when provided "
+                "(null is not allowed — a code cannot be cleared once matters carry it)"
+            )
+        return value
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +181,9 @@ async def put_organization_profile(
     so admins can trace who changed the Profile and when.
     """
 
-    # INTAKE-4a (ADR-F088): key-absent leaves org_code alone, key-present-null
-    # clears it (the House Brief form sends only content_md and must not wipe it).
+    # INTAKE-4a (ADR-F088): key-absent leaves org_code alone. It can only ever be
+    # SET here — null/"" are 422s above — so a form that omits the field (or sends
+    # a blank one) can never wipe a code that minted references already carry.
     org_code_set = "org_code" in payload.model_fields_set
 
     row = await _load_singleton(db)

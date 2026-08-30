@@ -122,18 +122,48 @@ shipped unused.
 | # | Signal | May attach alone? | Behaviour |
 |---|---|---|---|
 | 1 | Same `(mailbox, provider_thread_id)` | yes | continue the thread (unchanged from INTAKE-1) |
-| 2 | `References`/`In-Reply-To` names a message we hold **on this mailbox** | yes | NEW `intake_threads` row on the SAME matter, inheriting its `agent_thread_id` |
+| 2 | `References`/`In-Reply-To` names a message **we SENT** (`direction='out'`) from this mailbox | yes | NEW `intake_threads` row on the SAME matter, inheriting its `agent_thread_id` |
 | 3 | `[ORG-AREA-NNNN]` subject tag **or** a plus-tagged recipient | only if the sender is on that matter's Roster | otherwise: new matter + a recorded `claimed_reference` |
 | 4 | Agent suggestion | no | INTAKE-5 |
 | 5 | Human "attach to Matter X" | authoritative | INTAKE-5 |
 
-Layer 2 is strong because a message id we issued means the sender was genuinely in a
-conversation with this inbox; it is scoped to the mailbox, which is the owner/area fence.
-Layer 3 is weak because it is text a stranger types — including the plus-address, which
+**Layer 2 matches OUTBOUND ids only.** What makes it strong is not that we recognise the
+id but that WE MINTED it: an id from one of our own replies can only be in a sender's
+`References` chain because they actually received that reply. An INBOUND id proves nothing
+— the sender chose it themselves, so anyone who ever wrote to this inbox could quote their
+own earlier id back and be filed into whatever matter it opened, with layer-2 privileges
+(no Roster check). Matching inbound ids would quietly demote the layer to layer-3 strength
+while keeping layer-2 trust. It is fenced twice besides: the mailbox (this queue's threads)
+and the matter's owner (belt and braces for a mailbox re-bound to a new owner).
+
+**Layer 3 is weak because it is text a stranger types** — including the plus-address, which
 is a recipient a sender chooses (probed live 2026-08-30: plus-addressed mail reaches the
-base inbox, lower-cased by the provider). Roster membership (ADR-F048) is the gate, matched
-in Python over the JSONB aliases, case- and display-name-insensitively on both sides — never
-as a SQL predicate built from untrusted text.
+base inbox, lower-cased by the provider). Roster membership (ADR-F048) is the gate, and it
+is narrow on three axes, because it is the only thing between a stranger's subject line and
+a matter that may hold privileged material:
+
+* **addresses only** — a roster alias is a match STRING, and ADR-F048 stores the
+  tracked-change author strings a person writes under, which are routinely display names
+  (`"Legal"`, `"J. Smith"`). Both sides must look like an address before they are compared,
+  or a colliding display name becomes an identity check;
+* **human-confirmed participants only** — a `trust='inferred'` row was written by the agent
+  from document metadata, i.e. derived from the same untrusted material an attacker
+  supplies. Letting it open the gate closes the loop: send a `.docx` whose author string you
+  chose, get yourself onto the roster, then quote the reference. An inferred participant
+  remains a real roster entry everywhere else; it just cannot authorise an attach;
+* **active rows only** — a retired participant was taken off the matter deliberately.
+
+The comparison itself happens in Python over the JSONB aliases, never as a SQL predicate
+built from untrusted text.
+
+**`References` is capped at 2,000 characters and trimmed from the HEAD.** It is the one
+allowlisted header that grows without bound — every hop appends the message it answered —
+and the one layer 2 reads. The original 500-char cap overflowed after roughly eight
+exchanges, and because senders APPEND, a head-first trim discarded the NEWEST ids: exactly
+the ones likely to be ours. The api and the bridge both cap it at 2,000 (matching the
+`intake_messages.references_header` CHECK) and keep the tail; the bounds drift-guard test
+holds the two services in step. A trim can bisect the oldest `<id>` token, which the parser
+then simply does not see — it requires both angle brackets.
 
 **Cross-owner is silence, not an error.** A reference naming a matter this queue does not
 own behaves EXACTLY like a reference naming nothing: same 200, same new matter, same
@@ -172,6 +202,12 @@ Code refuses to merge; the agent can raise it with the lawyer.
   - **The derivation logic is duplicated** between `app.matters.reference` and migration
     0100, because migrations in this repo import no app code. A parity test
     (`tests/matters/test_reference_migration_parity.py`) fails the build on drift.
+  - **`code:` is now a REQUIRED field on every `kind: area` profile manifest** (and
+    forbidden on `kind: blank`, whose identity comes from the apply request). A shipped
+    manifest without one fails the fail-loud loader at API boot, as any other missing area
+    field does. Two manifests may not claim the same code, and none may claim the reserved
+    `GEN`. Anyone adding a practice-area profile must pick a code and add it to
+    `STANDARD_AREA_CODES` — `tests/test_profile_loader.py` enforces both halves.
   - An admin who changes an area's code changes only FUTURE matters; the series continues
     under the old code's counter, so nothing collides but the filing series has two
     prefixes. Documented in the admin UI's help text.

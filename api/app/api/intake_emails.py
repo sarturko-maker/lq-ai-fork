@@ -70,6 +70,8 @@ from app.errors import Conflict, NotFound
 from app.ingest import ingest_bytes
 from app.matters.reference import allocate_reference
 from app.matters.stamping import (
+    MAX_PARSED_TAGS,
+    looks_like_address,
     normalise_address,
     parse_plus_tags,
     parse_reference_tags,
@@ -124,7 +126,7 @@ async def _select_thread(
 # privileged material.
 #
 #   1  same (mailbox, provider_thread_id)   — the provider's own threading
-#   2  References/In-Reply-To names a message we hold on this mailbox
+#   2  References/In-Reply-To names a message WE SENT from this mailbox
 #   3  [ORG-AREA-NNNN] subject tag or a plus-tagged recipient, Roster-gated
 #
 # Cross-owner is silence, not an error: a reference belonging to someone else's
@@ -133,8 +135,11 @@ async def _select_thread(
 # used to probe whether a given reference exists.
 # ---------------------------------------------------------------------------
 
-#: How many claimed references we are willing to look up for one message.
-_MAX_CLAIM_LOOKUPS = 3
+#: How many claimed references we are willing to look up for one message. The
+#: parser already caps what it hands us (``MAX_PARSED_TAGS``); restating a
+#: SMALLER number here would silently ignore tags the parser deliberately kept,
+#: so the two are the same bound by construction.
+_MAX_CLAIM_LOOKUPS = MAX_PARSED_TAGS
 
 
 @dataclass(frozen=True)
@@ -181,11 +186,19 @@ async def _resolve_by_threading_headers(
     owner_user_id: uuid.UUID,
     headers: dict[str, str],
 ) -> uuid.UUID | None:
-    """Layer 2 — a message id we already hold, in this mailbox, with a matter.
+    """Layer 2 — a message id WE ISSUED, in this mailbox, on this owner's matter.
 
-    Matches inbound AND outbound rows: the strong signal is simply that the id
-    is one WE know, which means the sender was actually in a conversation with
-    this inbox. Doubly fenced — ``mailbox_id`` (this queue's own threads) AND the
+    ``direction == 'out'`` is the whole strength of this layer. What makes the
+    signal strong is not that we recognise the id but that WE MINTED it: an id
+    from one of our own outbound replies can only be in a sender's
+    ``References`` chain because they actually received that reply. An INBOUND
+    id proves nothing — the sender chose it themselves, so anyone who once wrote
+    to this inbox (or simply guesses the shape a provider mints) could quote
+    their own earlier id back and be filed into whatever matter it opened.
+    Matching those would quietly demote layer 2 to layer-3 strength while
+    keeping layer-2 privileges (attaching with no Roster check).
+
+    Doubly fenced besides — ``mailbox_id`` (this queue's own threads) AND the
     matter's owner (this queue's owner). The second is belt and braces for the
     case where a mailbox was re-bound to a different owner after producing
     matters: an attach must never file new mail into someone else's matter.
@@ -201,6 +214,7 @@ async def _resolve_by_threading_headers(
             .join(Project, Project.id == IntakeThread.project_id)
             .where(
                 IntakeMessage.provider_message_id.in_(candidates),
+                IntakeMessage.direction == "out",
                 IntakeThread.mailbox_id == mailbox_id,
                 Project.owner_id == owner_user_id,
             )
@@ -211,52 +225,83 @@ async def _resolve_by_threading_headers(
 
 
 async def _sender_on_roster(db: AsyncSession, *, project_id: uuid.UUID, from_addr: str) -> bool:
-    """Whether the sender's address is an ACTIVE roster alias on this matter.
+    """Whether the sender is a HUMAN-CONFIRMED roster member of this matter.
 
-    Matched in Python over the JSONB alias lists (ADR-F048: aliases are
-    untrusted text and never reach a SQL predicate), case- and display-name-
+    This is the only thing standing between a stranger's subject tag and a
+    matter that may hold privileged material, so it is deliberately narrow on
+    three axes:
+
+    * **Addresses only.** A roster alias is a match STRING, not necessarily an
+      address — ADR-F048 stores the tracked-change author strings a person
+      writes under, which are routinely display names (``"Legal"``,
+      ``"J. Smith"``). Comparing a sender against those would let anyone whose
+      display name happens to collide pass an identity check, so both sides
+      must look like an address (:func:`looks_like_address`) before they are
+      compared at all.
+    * **Confirmed participants only.** ``trust='inferred'`` rows were written by
+      the agent from document metadata — i.e. derived from the same untrusted
+      material an attacker can supply (a .docx whose author string they chose).
+      Letting an inferred row open this gate would close the loop: send a
+      document, get yourself onto the roster, then quote the reference. Only a
+      human-confirmed row counts. (An inferred participant is still a real
+      roster entry everywhere else; it just cannot authorise an attach.)
+    * **Active rows only.** A retired participant (``superseded_at``) has been
+      taken off the matter deliberately.
+
+    Matched in Python over the JSONB alias lists — aliases are untrusted text
+    and never reach a SQL predicate (ADR-F048) — case- and display-name-
     insensitively on both sides.
     """
 
     sender = normalise_address(from_addr)
-    if not sender:
+    if not looks_like_address(sender):
         return False
     alias_lists = (
         await db.execute(
             select(MatterParticipant.aliases).where(
                 MatterParticipant.project_id == project_id,
                 MatterParticipant.superseded_at.is_(None),
+                MatterParticipant.trust == "confirmed",
             )
         )
     ).scalars()
     for aliases in alias_lists:
         for alias in aliases or []:
-            if isinstance(alias, str) and normalise_address(alias) == sender:
+            if not isinstance(alias, str):
+                continue
+            candidate = normalise_address(alias)
+            if looks_like_address(candidate) and candidate == sender:
                 return True
     return False
 
 
 async def _resolve_by_claimed_reference(
     db: AsyncSession, *, owner_user_id: uuid.UUID, envelope: InboundEmailEnvelope
-) -> tuple[uuid.UUID | None, str | None, str]:
+) -> tuple[uuid.UUID | None, str, str | None]:
     """Layer 3 — a subject tag or plus-tagged recipient, gated on the Roster.
 
-    Returns ``(project_id, claimed_reference, layer)``. A claim that resolves to
-    nothing THIS queue owns, and a claim whose sender is not on the roster, are
-    treated identically: no attach, and the claim is recorded for the agent to
-    raise with the lawyer. That sameness is the anti-probe property.
+    Returns ``(project_id, layer, claimed_reference)``, where ``layer`` names the
+    signal that actually decided (``subject_tag`` / ``plus_tag`` / ``none``). A
+    claim that resolves to nothing THIS queue owns, and a claim whose sender is
+    not on the roster, are treated identically: no attach, and the claim is
+    recorded for the agent to raise with the lawyer. That sameness is the
+    anti-probe property.
     """
 
-    tags = parse_reference_tags(envelope.thread.subject)
-    layer = "subject_tag" if tags else ""
+    # (reference, where it came from) — the origin travels with each claim so the
+    # log names the signal that ACTUALLY decided, not merely the first one present.
+    claims: list[tuple[str, str]] = [
+        (tag, "subject_tag") for tag in parse_reference_tags(envelope.thread.subject)
+    ]
+    seen = {tag for tag, _ in claims}
     for tag in parse_plus_tags(list(envelope.message.to) + list(envelope.message.cc)):
-        if tag not in tags:
-            tags.append(tag)
-            layer = layer or "plus_tag"
-    if not tags:
-        return None, None, "none"
+        if tag not in seen:
+            claims.append((tag, "plus_tag"))
+            seen.add(tag)
+    if not claims:
+        return None, "none", None
 
-    for tag in tags[:_MAX_CLAIM_LOOKUPS]:
+    for tag, origin in claims[:_MAX_CLAIM_LOOKUPS]:
         project_id = (
             await db.execute(
                 select(Project.id).where(
@@ -268,8 +313,9 @@ async def _resolve_by_claimed_reference(
         if project_id is None:
             continue
         if await _sender_on_roster(db, project_id=project_id, from_addr=envelope.message.from_addr):
-            return project_id, None, layer or "subject_tag"
-    return None, tags[0], layer or "subject_tag"
+            return project_id, origin, None
+    first_tag, first_origin = claims[0]
+    return None, first_origin, first_tag
 
 
 async def resolve_inbound_attachment(
@@ -294,7 +340,7 @@ async def resolve_inbound_attachment(
             layer="threading_headers",
         )
 
-    project_id, claimed, layer = await _resolve_by_claimed_reference(
+    project_id, layer, claimed = await _resolve_by_claimed_reference(
         db, owner_user_id=owner_user_id, envelope=envelope
     )
     if project_id is not None:
@@ -487,6 +533,18 @@ async def ingest_email(
             )
             # INTAKE-4a (ADR-F088): an intake-born matter gets its reference the
             # same way a cockpit-created one does — one allocator, one series.
+            #
+            # LOCK WINDOW, deliberately accepted: the allocator holds a row lock
+            # on this area's counter until THIS request commits, which is after
+            # the attachment loop below has uploaded to object storage. Two
+            # first-messages arriving on the same area therefore serialise behind
+            # each other's uploads. It is bounded by the envelope caps (at most
+            # 10 attachments, 50 MB decoded per envelope — app.schemas.intake)
+            # and by intake volumes measured in emails per hour, and the
+            # alternative — flushing the matter with a NULL reference and
+            # stamping it just before commit — buys a shorter lock at the price
+            # of a matter that briefly exists without one. If intake ever runs
+            # hot enough for this to bite, make that trade then, not now.
             reference = await allocate_reference(db, practice_area_id=practice_area_id)
             project = Project(
                 owner_id=owner_user_id,

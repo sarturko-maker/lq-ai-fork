@@ -13,6 +13,7 @@ from app.matters.stamping import (
     MAX_PARSED_SUBJECT_CHARS,
     MAX_PARSED_TAGS,
     has_reference_tag,
+    looks_like_address,
     normalise_address,
     parse_plus_tag,
     parse_plus_tags,
@@ -197,3 +198,59 @@ def test_parse_threading_headers_without_in_reply_to() -> None:
 )
 def test_normalise_address(value: str, expected: str) -> None:
     assert normalise_address(value) == expected
+
+
+# ---------------------------------------------------------------------------
+# looks_like_address — the gate that keeps display names out of an identity check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "jane@example.com",
+        "j@x",
+        "jane.doe+tag@sub.example.co.uk",
+    ],
+)
+def test_looks_like_address_accepts_addresses(value: str) -> None:
+    assert looks_like_address(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "Legal",
+        "J. Smith",
+        "Jane Counterparty",
+        "jane example.com",  # whitespace
+        "jane@",
+        "@example.com",
+        "jane@a@b",  # two @ — not an addr-spec
+        "a" * 400 + "@example.com",  # past the address bound
+    ],
+)
+def test_looks_like_address_rejects_everything_else(value: str) -> None:
+    """Roster aliases are match STRINGS (ADR-F048), routinely display names.
+
+    Comparing a sender to one of those would turn a name collision into an
+    identity check, so nothing that is not address-shaped may reach the
+    comparison at all.
+    """
+
+    assert looks_like_address(value) is False
+
+
+def test_a_display_name_alias_cannot_equal_a_normalised_sender() -> None:
+    """The end-to-end shape of the guard, in two lines.
+
+    ``normalise_address`` alone is happy to hand back ``"legal"`` for a sender
+    that is literally ``Legal`` — it is a normaliser, not a validator. The
+    address check is what makes the pair safe to compare.
+    """
+
+    sender = normalise_address("Legal")
+    alias = normalise_address("Legal")
+    assert sender == alias  # equal...
+    assert not looks_like_address(sender)  # ...but never compared
