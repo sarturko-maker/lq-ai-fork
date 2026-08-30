@@ -72,6 +72,11 @@ class PracticeArea(Base):
             "OR default_budget_profile IN ('economy', 'balanced', 'generous')",
             name="chk_practice_areas_budget_profile",
         ),
+        # INTAKE-4a (ADR-F088): the SQL mirror of app.matters.reference.CODE_PATTERN.
+        CheckConstraint(
+            "area_code IS NULL OR area_code ~ '^[A-Z0-9]{2,6}$'",
+            name="chk_practice_areas_area_code",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -81,6 +86,13 @@ class PracticeArea(Base):
     )
     key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    # INTAKE-4a (ADR-F088, migration 0100): the area's short code — the middle
+    # segment of every matter reference filed under it (``COM`` in
+    # ``NWT-COM-0042``). Admin-editable; shipped defaults come from the profile
+    # manifests (``code:``). NULL only until the first allocation under the area,
+    # which derives and persists one (``app.matters.reference.assign_area_code``).
+    # UNIQUE over the non-NULL values (partial index, migration-side).
+    area_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     # The unit-of-work noun the UI renders ("Matter" / "Programme" / "Deal")
     # — data, not code, per ADR-F004 (declarative area shapes, one renderer).
     unit_label: Mapped[str] = mapped_column(Text, nullable=False)

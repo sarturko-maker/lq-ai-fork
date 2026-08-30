@@ -34,6 +34,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Text,
     UniqueConstraint,
@@ -163,6 +164,12 @@ class IntakeThread(Base):
             f"outcome IS NULL OR {_in_set('outcome', _THREAD_OUTCOMES)}",
             name="chk_intake_threads_outcome",
         ),
+        # INTAKE-4a (ADR-F088): mirrors app.matters.reference.REFERENCE_PATTERN.
+        CheckConstraint(
+            "claimed_reference IS NULL OR (char_length(claimed_reference) <= 40 "
+            "AND claimed_reference ~ '^[A-Z0-9]{2,6}-[A-Z0-9]{2,6}-[0-9]{4,}$')",
+            name="chk_intake_threads_claimed_reference",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -196,6 +203,14 @@ class IntakeThread(Base):
     # (never free prose, never inferred from model text). NULL until a run concludes.
     outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
     outcome_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # INTAKE-4a (ADR-F088, migration 0100): a matter reference an inbound sender
+    # CLAIMED — in a subject tag or a plus-addressed recipient — that did NOT earn
+    # an attach (the reference resolves to nothing here, or the sender is not on
+    # that matter's roster). Untrusted, format-checked, never acted on by code:
+    # it is rendered into the intake prompt (through the existing sanitisers) so
+    # the agent can flag "someone says this belongs to X" for the lawyer. NULL
+    # whenever a claim was honoured or none was made.
+    claimed_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'received'"))
     last_message_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_inbound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -246,6 +261,15 @@ class IntakeMessage(Base):
             "body_text IS NULL OR char_length(body_text) <= 512000",
             name="chk_intake_messages_body_text_len",
         ),
+        CheckConstraint(
+            "in_reply_to IS NULL OR char_length(in_reply_to) <= 500",
+            name="chk_intake_messages_in_reply_to_len",
+        ),
+        CheckConstraint(
+            "references_header IS NULL OR char_length(references_header) <= 2000",
+            name="chk_intake_messages_references_len",
+        ),
+        Index("ix_intake_messages_provider_message_id", "provider_message_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -278,6 +302,13 @@ class IntakeMessage(Base):
     attachment_filenames: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    # INTAKE-4a (ADR-F088, migration 0100): the two RFC 5322 threading headers,
+    # forwarded by the bridge inside the envelope's allowlisted ``headers`` map.
+    # Persisted so the layer-2 resolver can match a reply that arrives on a NEW
+    # provider thread back to a message we already hold: the ids in here are
+    # compared to ``provider_message_id`` values, never parsed for meaning.
+    in_reply_to: Mapped[str | None] = mapped_column(Text, nullable=True)
+    references_header: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Provider-CLAIMED send time (validated, never trusted for ordering — the
     # thread's last_inbound_at is stamped from the server clock).
     provider_timestamp: Mapped[datetime | None] = mapped_column(

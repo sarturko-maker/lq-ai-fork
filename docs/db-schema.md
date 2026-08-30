@@ -201,6 +201,9 @@ CREATE TABLE projects (
     privileged               BOOLEAN NOT NULL DEFAULT FALSE,
     minimum_inference_tier   SMALLINT,
     is_sandbox               BOOLEAN NOT NULL DEFAULT FALSE,  -- 0022: system-managed try-it sandbox
+    practice_area_id         UUID REFERENCES practice_areas(id) ON DELETE SET NULL,  -- 0054 (F1-S3)
+    intake_state             TEXT,  -- 0098 (ADR-F086): NULL = normal matter; else born from email
+    reference                TEXT,  -- 0100 (ADR-F088): the matter reference 'ORG-AREA-NNNN', immutable
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     archived_at              TIMESTAMPTZ,  -- soft-delete; NULL means active
@@ -215,8 +218,22 @@ CREATE TABLE projects (
     ),
     CONSTRAINT chk_projects_slug_len CHECK (
         char_length(slug) > 0 AND char_length(slug) <= 80
+    ),
+    -- 0100 (ADR-F088): the SQL mirror of app.matters.reference.REFERENCE_PATTERN.
+    CONSTRAINT chk_projects_reference_format CHECK (
+        reference IS NULL OR (
+            reference ~ '^[A-Z0-9]{2,6}-[A-Z0-9]{2,6}-[0-9]{4,}$'
+            AND char_length(reference) <= 40
+        )
     )
 );
+
+-- 0100 (ADR-F088): the reference is unique deployment-wide. This deployment is
+-- single-tenant (there is no org_id anywhere), so global IS per-org. NULL for
+-- sandboxes (not matters) and for rows predating the backfill.
+CREATE UNIQUE INDEX uq_projects_reference
+    ON projects (reference)
+    WHERE reference IS NOT NULL;
 
 CREATE INDEX idx_projects_owner_active
     ON projects (owner_id, created_at DESC)
@@ -685,6 +702,9 @@ it to every attached skill whose frontmatter does not opt out
 CREATE TABLE organization_profile (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     content_md  TEXT NOT NULL DEFAULT '',
+    -- 0100 (ADR-F088): the tenant's short code, first segment of every matter
+    -- reference. NULL = not set; the allocator falls back to the neutral 'ORG'.
+    org_code    TEXT,  -- CHECK org_code IS NULL OR org_code ~ '^[A-Z0-9]{2,6}$'
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_by  UUID REFERENCES users(id) ON DELETE SET NULL  -- fk_org_profile_updated_by
@@ -1883,6 +1903,13 @@ CREATE TABLE practice_areas (
     id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     key                TEXT NOT NULL UNIQUE,     -- stable machine key ('commercial', …)
     name               TEXT NOT NULL,
+    -- 0100 (ADR-F088): the area's matter-reference code ('COM'); NULL until the
+    -- area's first matter derives one. Shipped defaults come from the profile
+    -- manifests, where `code:` is now REQUIRED on every `kind: area` manifest
+    -- (fail-loud at boot; unique across manifests; `GEN` is reserved).
+    -- Admin-editable. CHECK '^[A-Z0-9]{2,6}$'; UNIQUE over the non-NULL values
+    -- (uq_practice_areas_area_code).
+    area_code          TEXT,
     unit_label         TEXT NOT NULL,            -- unit-of-work noun (ADR-F004: data, not code)
     configured         BOOLEAN NOT NULL DEFAULT false,  -- derived from profile in S3
     position           INTEGER NOT NULL,
@@ -1989,6 +2016,109 @@ CREATE INDEX idx_agent_run_steps_parent ON agent_run_steps(parent_step_id)
 ```
 
 ---
+
+## Fork: email legal intake (INTAKE, ADR-F086/F088)
+
+Migrations `0098` (the three tables + `projects.intake_state`), `0099` (the thread
+outcome + the inbound message's own content) and `0100` (the matter reference +
+stamping substrate). The mail-bridge microservice is the sole holder of mailbox
+credentials; `api` never sees them. Everything a sender controls in here is
+UNTRUSTED: boundary-validated at `app/schemas/intake.py`, fenced as DATA in the
+agent prompt, never logged or audited.
+
+### `intake_mailboxes` / `intake_threads` / `intake_messages` (0098–0100)
+
+```sql
+-- One admin-bound mailbox → one practice area → one owner user (the queue owner,
+-- who owns every matter it produces and gives every approval).
+CREATE TABLE intake_mailboxes (
+    id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider               TEXT NOT NULL DEFAULT 'agentmail',
+    inbox_id               TEXT NOT NULL,
+    address                TEXT NOT NULL,
+    practice_area_id       UUID NOT NULL REFERENCES practice_areas(id) ON DELETE RESTRICT,
+    owner_user_id          UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    default_budget_profile TEXT,          -- lean-by-default; validated at the Pydantic boundary
+    max_steps              INTEGER,       -- CHECK 1..600
+    active                 BOOLEAN NOT NULL DEFAULT true,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at             TIMESTAMPTZ    -- soft delete; live-row uniqueness is a partial index
+);
+
+-- One provider email thread. EVERY thread is a matter (ADR-F086 Amendment A1):
+-- `project_id` is created eagerly at first ingest, `agent_thread_id` is reused so
+-- follow-ups continue the SAME agent conversation.
+CREATE TABLE intake_threads (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mailbox_id         UUID NOT NULL REFERENCES intake_mailboxes(id) ON DELETE CASCADE,
+    provider_thread_id TEXT NOT NULL,
+    project_id         UUID REFERENCES projects(id) ON DELETE SET NULL,
+    agent_thread_id    UUID REFERENCES agent_threads(id) ON DELETE SET NULL,
+    subject            TEXT NOT NULL DEFAULT '',
+    label              TEXT,           -- 0098: free-form agent tag; display/grouping only
+    outcome            TEXT,           -- 0099: CHECK IN ('dealt_with','needs_human')
+    outcome_note       TEXT,
+    -- 0100 (ADR-F088): a matter reference the SENDER claimed (subject tag or
+    -- plus-addressed recipient) that did NOT earn an attach. Format-checked,
+    -- surfaced to the agent as a note, never acted on by code.
+    claimed_reference  TEXT,
+    status             TEXT NOT NULL DEFAULT 'received',
+    last_message_id    TEXT,
+    last_inbound_at    TIMESTAMPTZ,
+    auth_state         TEXT NOT NULL DEFAULT 'unknown',
+    message_count      INTEGER NOT NULL DEFAULT 0,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_intake_threads_mailbox_provider_thread UNIQUE (mailbox_id, provider_thread_id)
+);
+
+-- One inbound/outbound message. The UNIQUE below is the idempotency anchor:
+-- duplicate webhook/websocket delivery is a no-op.
+CREATE TABLE intake_messages (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    thread_id            UUID NOT NULL REFERENCES intake_threads(id) ON DELETE CASCADE,
+    provider_message_id  TEXT NOT NULL,
+    direction            TEXT NOT NULL,      -- CHECK IN ('in','out')
+    from_addr            TEXT,               -- 0099: the message's own content, so the
+    to_addrs             JSONB NOT NULL DEFAULT '[]'::jsonb,  -- worker (payload = thread id
+    subject              TEXT,               -- only) can rebuild the fenced prompt block
+    body_text            TEXT,
+    attachment_filenames JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- 0100 (ADR-F088): the two allowlisted RFC 5322 threading headers, persisted so
+    -- a reply arriving on a NEW provider thread can be matched to a message we hold
+    -- (resolver layer 2). Opaque strings — compared, never interpreted.
+    in_reply_to          TEXT,               -- CHECK length <= 500
+    references_header    TEXT,               -- CHECK length <= 2000
+    provider_timestamp   TIMESTAMPTZ,        -- provider-CLAIMED; never trusted for ordering
+    run_id               UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_intake_messages_thread_provider_message UNIQUE (thread_id, provider_message_id)
+);
+
+CREATE INDEX ix_intake_messages_provider_message_id ON intake_messages (provider_message_id);
+```
+
+### `matter_reference_counters` (0100, ADR-F088)
+
+The allocator behind `projects.reference`. One row per area CODE — not per area id:
+the code is what appears in the reference, so keying on it is what guarantees the
+string is unique even if a code were ever re-minted on a different area. Matters
+filed under no practice area allocate under the reserved code `GEN`, for which no
+`practice_areas` row exists — hence a plain code column, not an FK.
+
+```sql
+CREATE TABLE matter_reference_counters (
+    area_code  TEXT PRIMARY KEY,   -- CHECK '^[A-Z0-9]{2,6}$'
+    next_value BIGINT NOT NULL DEFAULT 1,  -- CHECK >= 1
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+Taken with `SELECT … FOR UPDATE` inside the caller's transaction
+(`app/matters/reference.py`), so the number and the matter row it lands on commit —
+or roll back — together, and two concurrent creations get consecutive numbers.
 
 ## M4+ tables (sketched, land at the indicated milestone)
 

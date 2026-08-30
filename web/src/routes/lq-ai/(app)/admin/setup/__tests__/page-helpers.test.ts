@@ -74,14 +74,20 @@ describe('isValidSlug', () => {
 describe('wizardSteps', () => {
 	it('an area profile has no "name" step', () => {
 		const keys = wizardSteps('area').map((s) => s.key);
-		expect(keys).toEqual(['profile', 'brief', 'review', 'done']);
+		expect(keys).toEqual(['profile', 'code', 'brief', 'review', 'done']);
 	});
 	it('a blank profile inserts the "name" step', () => {
 		const keys = wizardSteps('blank').map((s) => s.key);
-		expect(keys).toEqual(['profile', 'name', 'brief', 'review', 'done']);
+		expect(keys).toEqual(['profile', 'name', 'code', 'brief', 'review', 'done']);
 	});
 	it('before a profile is chosen shows the area-shaped skeleton', () => {
-		expect(wizardSteps(null).map((s) => s.key)).toEqual(['profile', 'brief', 'review', 'done']);
+		expect(wizardSteps(null).map((s) => s.key)).toEqual([
+			'profile',
+			'code',
+			'brief',
+			'review',
+			'done'
+		]);
 	});
 });
 
@@ -111,21 +117,32 @@ describe('buildApplyBody', () => {
 
 describe('canProceed', () => {
 	it('profile step gates on a selection', () => {
-		expect(canProceed('profile', { selectedProfile: null, identity: COMPLETE_ID })).toBe(false);
-		expect(canProceed('profile', { selectedProfile: AREA, identity: COMPLETE_ID })).toBe(true);
+		expect(canProceed('profile', { selectedProfile: null, identity: COMPLETE_ID, orgCode: '' })).toBe(false);
+		expect(canProceed('profile', { selectedProfile: AREA, identity: COMPLETE_ID, orgCode: '' })).toBe(true);
 	});
 	it('name step gates on a complete blank identity', () => {
 		expect(
 			canProceed('name', {
 				selectedProfile: BLANK,
-				identity: { targetKey: '', name: '', unitLabel: '' }
+				identity: { targetKey: '', name: '', unitLabel: '' },
+				orgCode: ''
 			})
 		).toBe(false);
-		expect(canProceed('name', { selectedProfile: BLANK, identity: COMPLETE_ID })).toBe(true);
+		expect(canProceed('name', { selectedProfile: BLANK, identity: COMPLETE_ID, orgCode: '' })).toBe(true);
+	});
+	it('the code step gates on a WELL-FORMED org code (blank is fine)', () => {
+		// INTAKE-4a (ADR-F088): the code is optional, but a malformed one must not
+		// travel to a 422 — the server rejects, it never up-cases for us.
+		const base = { selectedProfile: AREA, identity: COMPLETE_ID };
+		expect(canProceed('code', { ...base, orgCode: '' })).toBe(true);
+		expect(canProceed('code', { ...base, orgCode: 'NWT' })).toBe(true);
+		expect(canProceed('code', { ...base, orgCode: 'nwt' })).toBe(false);
+		expect(canProceed('code', { ...base, orgCode: 'N' })).toBe(false);
+		expect(canProceed('code', { ...base, orgCode: 'TOOLONGCODE' })).toBe(false);
 	});
 	it('brief and review are permissive (apply owns the mutation)', () => {
-		expect(canProceed('brief', { selectedProfile: AREA, identity: COMPLETE_ID })).toBe(true);
-		expect(canProceed('review', { selectedProfile: AREA, identity: COMPLETE_ID })).toBe(true);
+		expect(canProceed('brief', { selectedProfile: AREA, identity: COMPLETE_ID, orgCode: '' })).toBe(true);
+		expect(canProceed('review', { selectedProfile: AREA, identity: COMPLETE_ID, orgCode: '' })).toBe(true);
 	});
 });
 

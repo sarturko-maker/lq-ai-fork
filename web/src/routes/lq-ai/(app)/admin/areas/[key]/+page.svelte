@@ -62,6 +62,12 @@
 		updateSubagent,
 		type SubagentDraft
 	} from './page-helpers';
+	// INTAKE-4a (ADR-F088): one definition of the short-code rules, shared with the
+	// House Brief page and the setup wizard.
+	import {
+		normalizeOrgCodeInput,
+		validateOrgCode
+	} from '../../house-brief/page-helpers';
 
 	const SELECT_CLASS =
 		'h-8 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30';
@@ -172,6 +178,9 @@
 	let loadedKey = $state<string | null>(null);
 	let draftName = $state('');
 	let draftUnitLabel = $state('');
+	// INTAKE-4a (ADR-F088): the area's matter-reference code — the middle segment
+	// of every reference filed under it.
+	let draftAreaCode = $state('');
 	let draftDoctrine = $state('');
 	let draftTierFloor = $state('');
 	// '' = Inherit deployment default (SETUP-5a, ADR-F063).
@@ -189,6 +198,7 @@
 		if (area && area.key !== loadedKey) {
 			loadedKey = area.key;
 			draftName = area.name;
+			draftAreaCode = area.area_code ?? '';
 			draftUnitLabel = area.unit_label;
 			draftDoctrine = area.profile_md ?? '';
 			draftTierFloor = area.default_tier_floor === null ? '' : String(area.default_tier_floor);
@@ -201,6 +211,10 @@
 	// B-5 — the roster's client-side validity + dirty gates (Save enabled only when
 	// clean of errors AND changed). The server's own build_area_subagents validation
 	// (HTTP 400) stays authoritative and is surfaced verbatim via `rosterError`.
+	// INTAKE-4a: '' is legitimate here (the code is derived on first use), so only
+	// a MALFORMED value blocks the save.
+	const areaCodeError = $derived(validateOrgCode(draftAreaCode));
+
 	const rosterErrorList = $derived(area ? rosterErrors(draftSubagents, area.bound_skills) : []);
 	const rosterIsDirty = $derived(area ? rosterDirty(area.agent_config, draftSubagents) : false);
 
@@ -208,6 +222,7 @@
 		if (!area) return;
 		const patch = diffPatch(area, {
 			name: draftName,
+			area_code: draftAreaCode,
 			unit_label: draftUnitLabel,
 			profile_md: draftDoctrine,
 			default_tier_floor: draftTierFloor,
@@ -220,6 +235,7 @@
 			const updated = await practiceAreasApi.updatePracticeArea(area.key, patch);
 			applyUpdated(updated);
 			draftName = updated.name;
+			draftAreaCode = updated.area_code ?? '';
 			draftUnitLabel = updated.unit_label;
 			draftDoctrine = updated.profile_md ?? '';
 			draftTierFloor =
@@ -509,6 +525,24 @@
 			<FormControl id="lq-area-name" label="Name">
 				<Input id="lq-area-name" bind:value={draftName} data-testid="lq-admin-area-name" />
 			</FormControl>
+			<FormControl
+				id="lq-area-code"
+				label="Matter reference code"
+				optional
+				error={areaCodeError}
+				help={`2–6 letters or digits — the middle segment of every matter reference filed under this area (e.g. ${draftAreaCode || 'XXX'} in a reference like NWT-${draftAreaCode || 'XXX'}-0042). Editing it changes only NEW matters; references already issued keep the code they were minted with.`}
+			>
+				<Input
+					id="lq-area-code"
+					value={draftAreaCode}
+					oninput={(e) => (draftAreaCode = normalizeOrgCodeInput(e.currentTarget.value))}
+					class="max-w-[12rem] font-mono uppercase"
+					maxlength={6}
+					aria-invalid={!!areaCodeError}
+					placeholder="COM"
+					data-testid="lq-admin-area-code"
+				/>
+			</FormControl>
 			<FormControl id="lq-area-unit-label" label="Unit label">
 				<Input
 					id="lq-area-unit-label"
@@ -563,7 +597,7 @@
 			{/if}
 			<Button
 				type="button"
-				disabled={editSaving}
+				disabled={editSaving || !!areaCodeError}
 				onclick={saveEdit}
 				data-testid="lq-admin-area-save"
 			>

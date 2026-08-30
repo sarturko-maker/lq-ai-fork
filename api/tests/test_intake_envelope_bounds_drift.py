@@ -41,6 +41,10 @@ _PAIRS = {
     "MAX_AGGREGATE_ATTACHMENT_BYTES": intake.MAX_AGGREGATE_ATTACHMENT_DECODED_BYTES,
     "MAX_BODY_TEXT_CHARS": intake.MAX_BODY_TEXT_CHARS,
     "MAX_ADDR_CHARS": intake._ADDR_MAX_CHARS,
+    # INTAKE-4a (ADR-F088): the two header caps. ``References`` has its own,
+    # larger one because it grows without bound and the layer-2 resolver reads it.
+    "MAX_HEADER_VALUE_CHARS": intake._HEADER_VALUE_MAX_CHARS,
+    "MAX_REFERENCES_VALUE_CHARS": intake._REFERENCES_VALUE_MAX_CHARS,
 }
 
 

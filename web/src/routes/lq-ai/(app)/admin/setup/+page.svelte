@@ -42,7 +42,10 @@
 		buildApplyBody,
 		canProceed,
 		describeApplyOutcome,
+		exampleReference,
 		isValidSlug,
+		normalizeOrgCodeInput,
+		validateOrgCode,
 		rosterNames,
 		wizardSteps,
 		type BlankIdentity,
@@ -71,6 +74,13 @@
 	let briefError = $state<string | null>(null);
 	let briefSaved = $state(false);
 
+	// ----- Matter references step (INTAKE-4a, ADR-F088) -----
+	// Same singleton row as the House Brief, so ONE save function writes both.
+	let orgCode = $state('');
+	let codeSaving = $state(false);
+	let codeError = $state<string | null>(null);
+	let codeSaved = $state(false);
+
 	// ----- apply -----
 	let applying = $state(false);
 	let applyError = $state<string | null>(null);
@@ -78,7 +88,8 @@
 
 	const steps = $derived(wizardSteps(selectedProfile?.kind ?? null));
 	const currentStep = $derived((steps[stepIndex]?.key ?? 'profile') as WizardStepKey);
-	const gateOk = $derived(canProceed(currentStep, { selectedProfile, identity }));
+	const gateOk = $derived(canProceed(currentStep, { selectedProfile, identity, orgCode }));
+	const orgCodeError = $derived(validateOrgCode(orgCode));
 	const roster = $derived(detail ? rosterNames(detail.agent_config) : []);
 	const hitlTools = $derived(detail ? Object.keys(detail.hitl).filter((k) => detail!.hitl[k]) : []);
 	const keyError = $derived(
@@ -106,6 +117,7 @@
 			]);
 			profiles = list.profiles;
 			brief = org.content_md;
+			orgCode = org.org_code ?? '';
 		} catch (e) {
 			loadError = describeMutationError(e, 'Failed to load the setup wizard.');
 		} finally {
@@ -153,19 +165,48 @@
 		if (i >= 0 && i < stepIndex) stepIndex = i;
 	}
 
+	/** Both wizard fields live on the ``organization_profile`` singleton, so each
+	 *  save writes the pair — otherwise saving one would send a stale other. */
+	async function saveOrgProfile() {
+		return organizationProfileApi.updateOrganizationProfile({
+			content_md: brief,
+			// Blank = "leave it as it is". The code can be set but never cleared —
+			// matters already carry it in their references (ADR-F088).
+			...(orgCode === '' ? {} : { org_code: orgCode })
+		});
+	}
+
 	async function saveBrief() {
 		if (briefSaving) return;
 		briefSaving = true;
 		briefError = null;
 		briefSaved = false;
 		try {
-			const resp = await organizationProfileApi.updateOrganizationProfile({ content_md: brief });
+			const resp = await saveOrgProfile();
 			brief = resp.content_md;
+			orgCode = resp.org_code ?? '';
 			briefSaved = true;
 		} catch (e) {
 			briefError = describeMutationError(e, 'Failed to save the House Brief.');
 		} finally {
 			briefSaving = false;
+		}
+	}
+
+	async function saveOrgCode() {
+		if (codeSaving || orgCodeError) return;
+		codeSaving = true;
+		codeError = null;
+		codeSaved = false;
+		try {
+			const resp = await saveOrgProfile();
+			brief = resp.content_md;
+			orgCode = resp.org_code ?? '';
+			codeSaved = true;
+		} catch (e) {
+			codeError = describeMutationError(e, 'Failed to save the org code.');
+		} finally {
+			codeSaving = false;
 		}
 	}
 
@@ -343,6 +384,57 @@
 							{/each}
 						</select>
 					</FormControl>
+				</div>
+			{:else if currentStep === 'code'}
+				<!-- ───────── Step: matter references (INTAKE-4a, ADR-F088) ───────── -->
+				<SectionHeader
+					size="section"
+					title="Matter references"
+					subtitle="Every matter this deployment opens gets a short reference your team can say out loud and put in an email subject line. Set the org part once — the practice area supplies the middle part, and the number runs per area."
+				/>
+				<div class="mt-4 flex flex-col gap-3">
+					<FormControl
+						id="lq-setup-org-code"
+						label="Org code"
+						optional
+						error={orgCodeError}
+						help={`2–6 letters or digits — your company's own short code. Matters will read ${exampleReference(orgCode)}. Leave it blank and they read ORG-… until you set one; changing it later only affects new matters.`}
+					>
+						<Input
+							id="lq-setup-org-code"
+							value={orgCode}
+							oninput={(e) => (orgCode = normalizeOrgCodeInput(e.currentTarget.value))}
+							class="max-w-[12rem] font-mono uppercase"
+							maxlength={6}
+							disabled={codeSaving}
+							aria-invalid={!!orgCodeError}
+							placeholder="NWT"
+							data-testid="lq-setup-org-code"
+						/>
+					</FormControl>
+					{#if codeError}
+						<Alert intent="error">{codeError}</Alert>
+					{/if}
+					{#if codeSaved}
+						<Alert intent="info">Org code saved.</Alert>
+					{/if}
+					<div>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							disabled={codeSaving || !!orgCodeError}
+							onclick={saveOrgCode}
+							data-testid="lq-setup-org-code-save"
+						>
+							{codeSaving ? 'Saving…' : 'Save org code'}
+						</Button>
+					</div>
+					<p class="text-xs text-muted-foreground">
+						You can change this any time on the
+						<a href="/lq-ai/admin/house-brief" class="underline">House Brief page</a>. References
+						already issued keep the code they were minted with.
+					</p>
 				</div>
 			{:else if currentStep === 'brief'}
 				<!-- ───────── Step: House Brief ───────── -->

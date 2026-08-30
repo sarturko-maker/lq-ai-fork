@@ -264,3 +264,205 @@ With this, every semantic the mail-bridge depends on has been observed live: sub
 download (presigned URL → bytes, sha256-verified), cold `send`, `reply` threading by
 message_id, and thread fetch. Remaining unobserved: >1 MB payload truncation, webhook (Svix)
 delivery — both prod-path items for the bridge slice's own tests.
+
+## INTAKE-4 probe (2026-08-30): Message-ID / custom headers / plus-address
+
+**Date:** 2026-08-30 · **SDK:** `agentmail==0.5.9` (pydantic 2.13.5, unchanged since INTAKE-2) ·
+**Inbox:** `oscar-lq@agentmail.to` · **Maintainer address used:** `s.arturko@googlemail.com`
+(the address the INTAKE-2 addendum's external send came from — not explicitly recorded above,
+recovered from `events-captured.jsonl`'s raw `from`/DKIM lines). Run against
+`docker compose exec mail-bridge` (container up 11h, unmodified). No API key or bridge token
+was printed at any point; only message ids, header names/values we ourselves set, and HTTP
+status codes are recorded below.
+
+### SDK signatures (ground truth, `inspect.signature` inside the running container)
+
+```
+AsyncMessagesClient.send(self, inbox_id, *, labels=..., reply_to=..., to=..., cc=..., bcc=...,
+    subject=..., text=..., html=..., attachments=..., headers: Optional[Dict[str, str]] = ...,
+    idempotency_key=None, request_options=None) -> SendMessageResponse
+
+AsyncMessagesClient.reply(self, inbox_id, message_id, *, labels=..., reply_to=..., to=..., cc=...,
+    bcc=..., reply_all=..., text=..., html=..., attachments=..., headers: Optional[Dict[str, str]] = ...,
+    idempotency_key=None, request_options=None) -> SendMessageResponse
+
+AsyncMessagesClient.get(self, inbox_id, message_id, *, request_options=None) -> Message
+AsyncMessagesClient.list(self, inbox_id, *, limit=None, page_token=None, labels=None, before=None,
+    after=None, ascending=None, include_spam=None, include_blocked=None,
+    include_unauthenticated=None, include_trash=None, from_=None, to=None, subject=None,
+    request_options=None) -> ListMessagesResponse
+```
+
+`Message.model_fields` (declared): `inbox_id, thread_id, message_id, labels, timestamp, from_,
+reply_to, to, cc, bcc, subject, preview, text, html, extracted_text, extracted_html, attachments,
+in_reply_to, references, headers, size, updated_at, created_at`. `SendMessageResponse` declares
+only `message_id, thread_id` — no `headers` or `in_reply_to` echoed on the send response itself
+(confirms you must `messages.get` the returned id to see what stuck).
+
+Both `send` and `reply` take `headers: Optional[Dict[str, str]]` and `reply_to:
+Union[str, List[str], None]` — no dedicated `message_id`/`in_reply_to`/`references` parameter on
+either call (those are read-only, provider-derived, on the `Message` you get back).
+
+### Docs findings
+
+- `https://docs.agentmail.to/api-reference/inboxes/messages/send` and
+  `.../messages/reply`: both document a `headers` field, "map from string to string" / "Headers
+  to include in message" — matches the SDK. Neither page documents `message_id`, `in_reply_to`,
+  or `references` as request-body fields (the SDK signatures above corroborate: they simply
+  aren't parameters).
+- `https://docs.agentmail.to/introduction/inboxes` and the inbox-create reference: **no mention
+  of plus-addressing, sub-addressing, aliasing, or catch-all/wildcard routing anywhere** in the
+  fetched pages. This is an absence-of-evidence, not a documented "unsupported" — AgentMail may
+  simply not document the receiving-MTA's subaddressing behaviour either way.
+
+### Experiment 1 — custom `Message-ID` + custom header via `send`
+
+Sent (`inboxes.messages.send`) from `oscar-lq@agentmail.to` to `s.arturko@googlemail.com` with
+`headers={"Message-ID": "<m.NWT-COM-0001.probe-intake4-abc123@oscar-lq.agentmail.to>",
+"X-Matter-Ref": "NWT-COM-0001"}`.
+
+| | |
+|---|---|
+| Requested custom Message-ID | `<m.NWT-COM-0001.probe-intake4-abc123@oscar-lq.agentmail.to>` |
+| `SendMessageResponse.message_id` (provider's own) | `<010001a051dfbf29-423df461-...-000000@email.amazonses.com>` (SES-minted, as in INTAKE-2) |
+| Provider id == our custom id? | **No.** |
+| `messages.get(inbox, provider_id).message_id` | Same SES id as above — unchanged by our header |
+| `messages.get(...).headers` | `{'X-Matter-Ref': 'NWT-COM-0001', 'Message-ID': '<m.NWT-COM-0001.probe-intake4-abc123@oscar-lq.agentmail.to>'}` — **both custom values are stored and echoed back verbatim** |
+| `messages.get(...).in_reply_to` / `.references` | `None` / `None` (this was a cold send, not a reply — expected) |
+
+**Reading:** AgentMail accepts and stores an arbitrary `headers` dict, including a key literally
+named `Message-ID`, and returns it unchanged from `messages.get`. But the SDK's own canonical
+`message_id` field — the one everything else in the codebase (idempotency, `reply()`'s target,
+INTAKE-2's whole threading model) keys off — stays the SES-generated id regardless. **Not
+verified**: whether the recipient's actual raw RFC-5322 `Message-ID:` header (what a reply's
+`In-Reply-To`/`References` would echo) is our custom value, the SES value, or both duplicated —
+that requires inspecting the raw message as received by an external mail client, out of scope
+for this probe (no external inbox instrumented). Treat "custom Message-ID becomes the wire
+header a reply will reference" as **unconfirmed**, not proven.
+
+### Experiment 2 — plus-address delivery + `reply_to` plus-address
+
+**2a — self-send to `oscar-lq+NWT-COM-0001@agentmail.to`:** accepted; `SendMessageResponse`
+returned normally; the *sent* copy's `.to` came back as `['oscar-lq+nwt-com-0001@agentmail.to']`
+(lower-cased) with `labels: ['sent']`. Polled `messages.list(ascending=False)` every 5s for 60s:
+**no `received` row ever appeared addressed to the plus-tag** — the only `received` rows in that
+window (from earlier real traffic) all show `to: ['oscar-lq@agentmail.to']` (no tag).
+
+**This result is inconclusive, not negative.** INTAKE-2 already established that AgentMail never
+re-ingests ANY self-send as inbound (`message.received` never fires for a send from an inbox to
+itself, tag or no tag) — so a self-send can't distinguish "plus-address delivers to the base
+inbox" from "self-sends never arrive as received at all." The same structural limitation that
+forced INTAKE-2 to rely on a maintainer-sent external Gmail message applies here: **a real
+external sender targeting the plus-address is required for a conclusive answer**, and none was
+available in this probe run.
+
+**Additional signal (control-plane, not receiving-path):** `inboxes.get("oscar-lq+NWT-COM-
+0001@agentmail.to")` → **404**; `inboxes.get("oscar-lq@agentmail.to")` → 200. AgentMail's inbox
+object model (`inbox_id == address`, per INTAKE-2) does **not** recognise the plus-tagged address
+as an inbox at all — there is no aliasing at the inbox-CRUD layer. This is suggestive that
+plus-addressing is not a first-class AgentMail concept, but it does not by itself prove the SMTP
+receiving side rejects or mis-routes such mail (Gmail-style subaddressing is normally stripped
+by the MTA *before* inbox lookup, which this control-plane check cannot see).
+
+**2b — `reply_to` field, does it accept a plus-address:** yes. Sent with
+`reply_to="oscar-lq+NWT-COM-0001@agentmail.to"`; `messages.get(...).reply_to` came back as
+`['oscar-lq+nwt-com-0001@agentmail.to']`. The field exists, takes a plus-tagged address with no
+validation error, and is stored/returned faithfully. Whether a recipient's mail client actually
+honours `Reply-To` on send is client-side behaviour outside AgentMail's control either way (RFC
+5322 semantics, not a provider question).
+
+### Experiment 3 — In-Reply-To / References field names + existing wiring
+
+No new live send was needed here — INTAKE-2 Step 5 already exercised `reply()` and captured
+`in_reply_to`/`references` populated correctly on the reply, and the Message model fields are
+confirmed above via `inspect`. Cross-checked against the actual code:
+
+- **Field names, confirmed via `Message.model_fields`:** `in_reply_to: Optional[str]` (singular
+  string, the parent's `message_id`) and `references: Optional[List[str]]` (a list, not a raw
+  header string) — both are **typed SDK fields**, populated by AgentMail's own parse of the
+  inbound RFC-5322 headers, **not** sourced from the generic `headers` dict (which INTAKE-2
+  already found empty (`{}`) even on a genuine inbound message, and which experiment 1 above
+  shows is only populated when *we* explicitly pass `headers=` on an outbound send).
+- **`messages.get` includes them:** yes — both fields are declared on `Message` and returned by
+  `messages.get` (verified structurally via `model_fields`; INTAKE-2 verified them populated
+  live on a reply's `Message`).
+- **mail-bridge already forwards them — this is the interesting finding.**
+  `mail-bridge/app/normalize.py::_bound_headers()` (INTAKE-2 code, already shipped) reads
+  `message.in_reply_to` and `message.references` off the typed SDK fields (explicitly NOT the
+  raw `headers` dict, per its own docstring) and writes them into the envelope's
+  `message.headers["In-Reply-To"]` / `["References"]`. `api/app/schemas/intake.py`'s
+  `ALLOWED_HEADER_KEYS` allowlist already includes exactly `{"Auto-Submitted", "Precedence",
+  "In-Reply-To", "References"}`, so the envelope validates and reaches the landing endpoint
+  intact.
+  **But `api/app/api/intake_emails.py::ingest_email` never reads `envelope.message.headers` at
+  all** — the `IntakeMessage` row it inserts sets `thread_id, provider_message_id, direction,
+  from_addr, to_addrs, subject, body_text, provider_timestamp` and nothing else; `headers` is
+  validated then silently discarded. `IntakeMessage` (`api/app/models/intake.py`) also has **no
+  column** to hold it. So: the wire-format plumbing for layer 2 (`References` reaching the api)
+  is 100% built already from INTAKE-2; **what's missing for INTAKE-4 is entirely at the landing
+  endpoint and schema**: (1) a way to persist/read `envelope.message.headers.get("References")` /
+  `.get("In-Reply-To")` at ingest, (2) an outbound `provider_message_id` column on
+  `IntakeMessage` for `direction='out'` rows (doesn't exist yet — `MailSender.reply()` in
+  `mail-bridge/app/sender.py` returns `provider_message_id` today but nothing in `api/` calls it
+  or stores it), and (3) per the plan, `UNIQUE(thread_id, provider_message_id)` is
+  thread-scoped — a layer-2 lookup by `References` needs to search **across all threads**, which
+  works against that constraint's underlying index but would benefit from its own plain index on
+  `provider_message_id` alone (cross-thread lookup today would do a full-table equality scan
+  without one).
+
+### Verdicts (answering the three questions)
+
+1. **Custom Message-ID / custom headers: partially honoured, don't rely on the Message-ID
+   sticking as the canonical id.** `send`/`reply` both accept an arbitrary `headers: Dict[str,
+   str]`; whatever you pass — including a key named `Message-ID` — is stored and echoed back
+   verbatim by `messages.get`. But `SendMessageResponse.message_id` / `Message.message_id`
+   (the field the whole codebase keys idempotency and `reply()` off) stays the SES-minted id
+   regardless of what you pass in `headers["Message-ID"]`, and whether the *wire* RFC-5322
+   `Message-ID:` a recipient's client would see and reference in a reply is our custom value was
+   not verifiable in this probe. **Recommendation for INTAKE-4:** do NOT depend on a
+   caller-chosen Message-ID surviving as the id a counterparty's `References` will contain — this
+   is exactly the plan's documented fallback case. Persist the **provider-assigned**
+   `message_id` returned from `reply()`/`send()` on the outbound `intake_messages` row and match
+   layer 2 on that opaque id. A custom `X-Matter-Ref` header, however, IS reliably stored (proven
+   above) and could be sent as a redundant belt-and-braces signal alongside the subject tag —
+   but since `headers` isn't guaranteed to survive to the wire for the *recipient's mail client*
+   either (only proven round-trip through AgentMail's own storage, not through an external
+   inbox), treat it as no stronger than the subject tag (layer 3, weak) unless separately
+   verified with an external round trip.
+
+2. **Plus-addressing: inconclusive — self-send structurally cannot answer this question, and a
+   control-plane signal (404 on `inboxes.get` for the tagged address) leans toward "not
+   supported" but doesn't prove the receiving path.** `reply_to` DOES accept and store a
+   plus-tagged address (field exists, works). **Recommendation for INTAKE-4:** the 10-minute
+   plus-addressing probe the plan calls out is **still open** — it needs the same kind of
+   maintainer action INTAKE-2 needed for `message.received` (an external send, this time to
+   `oscar-lq+NWT-COM-0001@agentmail.to`) before this is decided either way. Given the 404 and the
+   total absence of plus-addressing from AgentMail's docs, default to **not** relying on
+   plus-addressing for INTAKE-4a/b unless that follow-up send confirms delivery; the subject-tag
+   (layer 3) + References (layer 2) combination in ADR-F088 does not need it to work.
+
+3. **In-Reply-To / References: dedicated typed fields (`in_reply_to: str | None`,
+   `references: list[str] | None`) on `Message`, confirmed via `model_fields` and already
+   populated live in INTAKE-2's reply test — and the mail-bridge ALREADY forwards them into the
+   envelope's `message.headers["In-Reply-To"]`/`["References"]` today (shipped in INTAKE-2,
+   `normalize.py::_bound_headers`), already inside the api's `ALLOWED_HEADER_KEYS` allowlist.**
+   **What's actually missing for INTAKE-4 is entirely on the api side**, not the bridge: (a)
+   `ingest_email` in `intake_emails.py` must read `envelope.message.headers.get("References")` /
+   `.get("In-Reply-To")` (currently ignored), (b) `IntakeMessage` needs a way to persist the
+   **outbound** `provider_message_id` per row (the column exists for inbound rows already;
+   `MailSender.reply()` already returns it, nothing stores it), and (c) the layer-2 lookup needs
+   a query across all threads by `provider_message_id`, which the current
+   `UNIQUE(thread_id, provider_message_id)` constraint doesn't index for on its own — worth its
+   own index if this becomes a hot lookup.
+
+### Plus-address — RESOLVED (external send, 2026-08-30 08:58 UTC)
+
+An external message (Gmail → `oscar-lq+NWT-COM-0001@agentmail.to`, subject
+`Plus-address delivery probe [NWT-COM-0001]`) was delivered to the base inbox, forwarded by the
+bridge, and processed as intake thread `9a08f4c2…` (outcome `handled`). The stored recipient is
+`oscar-lq+nwt-com-0001@agentmail.to` — the tag survives (lowercased by the provider, so the
+resolver must compare case-insensitively). Verdict: **plus-addressing is supported**. INTAKE-4b
+should set `reply_to` = `<inbox-local>+<ORG-AREA-NNNN>@<domain>` on every outbound reply and the
+resolver should treat a plus-tag on the recipient address as a strong signal (the recipient
+address is set by us, not by the sender; it is still combined with layer 2/3 rules — a stranger
+can type it, so it ranks like the subject tag: Roster-gated).

@@ -3,6 +3,7 @@ kind: area
 display_name: Commercial
 description: Contract and transactional matters — MSA/NDA review, surgical redlining, negotiation, and cross-document tabular diligence.
 area_key: commercial
+code: COM
 unit_label: Matter
 default_tier_floor: null
 default_budget_profile: null

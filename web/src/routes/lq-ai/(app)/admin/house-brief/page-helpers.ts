@@ -21,6 +21,36 @@ export function validateContentLength(content: string): string | null {
 	return null;
 }
 
+/** INTAKE-4a (ADR-F088): the org code's shape, mirroring the server's
+ *  `CODE_PATTERN` (`app/matters/reference.py`) and its DB CHECK. Two to six
+ *  characters, uppercase letters and digits. */
+export const ORG_CODE_RE = /^[A-Z0-9]{2,6}$/;
+
+/** Up-case as the admin types so the strict server pattern is an affordance,
+ *  not a trap. Non-alphanumerics are dropped as they are typed and the value is
+ *  capped at six characters — the SERVER still rejects anything malformed
+ *  (reject, don't sanitize); this only keeps the field from producing one. */
+export function normalizeOrgCodeInput(raw: string): string {
+	return raw
+		.toUpperCase()
+		.replace(/[^A-Z0-9]/g, '')
+		.slice(0, 6);
+}
+
+/** `null` when the code is acceptable (empty = "not set yet"), else a message. */
+export function validateOrgCode(code: string): string | null {
+	if (code === '') return null;
+	if (!ORG_CODE_RE.test(code)) {
+		return 'The org code must be 2 to 6 characters, letters and digits only (e.g. NWT).';
+	}
+	return null;
+}
+
+/** The example matter reference an org code produces, for the field's help text. */
+export function exampleReference(code: string): string {
+	return `${code || 'ORG'}-COM-0042`;
+}
+
 /** Whether the draft is empty (whitespace-only counts as empty) — drives the
  *  teaching empty-state vs. the markdown preview. */
 export function isContentEmpty(content: string): boolean {
@@ -38,7 +68,10 @@ export { formatDateTime };
  * admin's id as returned by the API (no name-resolution endpoint is wired
  * to this response yet); falls back to omitting the "by" clause if absent.
  */
-export function formatLastUpdated(updatedAt: string | null, updatedBy: string | null): string | null {
+export function formatLastUpdated(
+	updatedAt: string | null,
+	updatedBy: string | null
+): string | null {
 	if (!updatedAt) return null;
 	const when = formatDateTime(updatedAt);
 	return updatedBy ? `Last updated ${when} by ${updatedBy}.` : `Last updated ${when}.`;

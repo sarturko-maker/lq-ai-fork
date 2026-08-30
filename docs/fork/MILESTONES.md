@@ -857,8 +857,14 @@ at the same envelope seam. Slices (tasks #537–#543): INTAKE-0 ADR + re-sequenc
 extraction, bridge-auth'd internal endpoint) · 2 AgentMail probe + mail-bridge (the only
 AgentMail-touching slice; needs API key + dedicated inbox) · 3 the intake run (doctrine skill +
 structural two-outcome tool `dealt_with`/`needs_human`, code-scored 20-email eval; every thread
-IS a matter — promote removed, plan § Amendment A1) · 4 HITL edit/respond (ADR-F087) + approved send ·
-5 cockpit Intake view · 6 E2E acceptance. Research: `docs/fork/plans/research/INTAKE-*.md`.
+IS a matter — promote removed, plan § Amendment A1) · **4a matter reference + stamping substrate**
+(migration 0100, ADR-F088: neutral `ORG-AREA-NNNN` on every matter — counter table + allocator on
+every creation path + backfill; the inbound trust ladder in the landing endpoint — References/
+In-Reply-To attaches, a subject tag or plus-addressed recipient attaches ONLY for a Roster sender,
+everything weaker opens a new matter and leaves the claim as a note; org code on the House Brief
+page + a setup-wizard step, area code on the area page + profile manifests) · 4b HITL edit/respond
+(ADR-F087) + approved send · 5 cockpit Intake view · 6 E2E acceptance.
+Research: `docs/fork/plans/research/INTAKE-*.md`; plan: `docs/fork/plans/INTAKE-4-plan.md`.
 
 ## CUSTODIAN — contract custodian-of-record (PLANNED 2026-07-11; plan: `docs/fork/plans/CUSTODIAN-milestone.md`)
 

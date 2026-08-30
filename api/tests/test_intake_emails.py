@@ -282,6 +282,58 @@ async def test_headers_are_filtered_to_the_allowlist(
     assert res.status_code == 200, res.text
 
 
+@pytest.mark.unit
+def test_references_header_keeps_the_newest_ids_when_it_overflows() -> None:
+    """INTAKE-4a (ADR-F088): ``References`` is trimmed from the HEAD.
+
+    Senders APPEND to this header, so the newest ids — the ones most likely to
+    be ours, and the only ones layer 2 can act on — live at the tail. A 12-hop
+    chain that exceeds the cap must therefore lose its OLDEST entries, not its
+    newest. Its own cap is larger than the other allowlisted headers' for the
+    same reason: it is the one that grows without bound.
+    """
+
+    from app.schemas.intake import (
+        _HEADER_VALUE_MAX_CHARS,
+        _REFERENCES_VALUE_MAX_CHARS,
+        InboundEmailMessage,
+    )
+
+    assert _REFERENCES_VALUE_MAX_CHARS > _HEADER_VALUE_MAX_CHARS
+
+    # 12 hops, each padded so the whole chain comfortably exceeds the cap.
+    chain = [f"<hop-{i:02d}-{'x' * 200}@example.test>" for i in range(12)]
+    message = InboundEmailMessage(
+        provider_message_id="msg-long-chain",
+        from_addr="counterparty@example.test",
+        timestamp="2026-08-30T12:00:00Z",
+        headers={"References": " ".join(chain)},
+    )
+
+    kept = message.headers["References"]
+    assert len(kept) <= _REFERENCES_VALUE_MAX_CHARS
+    # The newest hop survives whole; the oldest is gone.
+    assert chain[-1] in kept
+    assert chain[0] not in kept
+
+
+@pytest.mark.unit
+def test_other_allowlisted_headers_are_still_trimmed_from_the_head() -> None:
+    """Only ``References`` grows by appending, so only it is tail-kept."""
+
+    from app.schemas.intake import _HEADER_VALUE_MAX_CHARS, InboundEmailMessage
+
+    message = InboundEmailMessage(
+        provider_message_id="msg-long-header",
+        from_addr="counterparty@example.test",
+        timestamp="2026-08-30T12:00:00Z",
+        headers={"In-Reply-To": "A" + ("b" * (_HEADER_VALUE_MAX_CHARS + 100))},
+    )
+    kept = message.headers["In-Reply-To"]
+    assert len(kept) == _HEADER_VALUE_MAX_CHARS
+    assert kept.startswith("A")
+
+
 # ---------------------------------------------------------------------------
 # Idempotency + follow-up
 # ---------------------------------------------------------------------------

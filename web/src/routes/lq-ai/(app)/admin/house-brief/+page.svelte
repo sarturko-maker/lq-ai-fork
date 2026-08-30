@@ -30,18 +30,25 @@
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
 
+	import { Input } from '$lib/components/ui/input/index.js';
+
 	import { describeMutationError } from '$lib/lq-ai/admin/page-helpers';
 	import {
 		HOUSE_BRIEF_MAX_CHARS,
+		exampleReference,
 		formatLastUpdated,
 		isContentEmpty,
-		validateContentLength
+		normalizeOrgCodeInput,
+		validateContentLength,
+		validateOrgCode
 	} from './page-helpers';
 
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 
 	let content = $state('');
+	// INTAKE-4a (ADR-F088): the org code, first segment of every matter reference.
+	let orgCode = $state('');
 	let updatedAt = $state<string | null>(null);
 	let updatedBy = $state<string | null>(null);
 
@@ -50,6 +57,7 @@
 	let saveDone = $state(false);
 
 	const lengthError = $derived(validateContentLength(content));
+	const orgCodeError = $derived(validateOrgCode(orgCode));
 	const empty = $derived(isContentEmpty(content));
 	const previewHtml = $derived(empty ? '' : renderModelMarkdown(content));
 	const lastUpdatedLine = $derived(formatLastUpdated(updatedAt, updatedBy));
@@ -60,6 +68,7 @@
 		try {
 			const resp = await organizationProfileApi.getOrganizationProfile();
 			content = resp.content_md;
+			orgCode = resp.org_code ?? '';
 			updatedAt = resp.updated_at;
 			updatedBy = resp.updated_by;
 		} catch (e) {
@@ -71,15 +80,20 @@
 
 	async function save(event: SubmitEvent) {
 		event.preventDefault();
-		if (lengthError || saving) return;
+		if (lengthError || orgCodeError || saving) return;
 		saving = true;
 		saveError = null;
 		saveDone = false;
 		try {
 			const resp = await organizationProfileApi.updateOrganizationProfile({
-				content_md: content
+				content_md: content,
+				// A blank field means "leave it as it is", never "clear it": matters
+				// already carry the code in their references, so the server refuses to
+				// clear one (422 on null/'') and we simply omit the key.
+				...(orgCode === '' ? {} : { org_code: orgCode })
 			});
 			content = resp.content_md;
+			orgCode = resp.org_code ?? '';
 			updatedAt = resp.updated_at;
 			updatedBy = resp.updated_by;
 			saveDone = true;
@@ -146,6 +160,26 @@
 
 		<form class="mt-6 flex flex-col gap-3" novalidate onsubmit={save}>
 			<FormControl
+				id="lq-house-brief-org-code"
+				label="Org code"
+				optional
+				error={orgCodeError}
+				help={`2–6 letters or digits. Every matter gets a reference built from it — e.g. ${exampleReference(orgCode)}. Leave it blank and matters read ORG-… until you set one.`}
+			>
+				<Input
+					id="lq-house-brief-org-code"
+					value={orgCode}
+					oninput={(e) => (orgCode = normalizeOrgCodeInput(e.currentTarget.value))}
+					class="max-w-[12rem] font-mono uppercase"
+					maxlength={6}
+					disabled={saving}
+					aria-invalid={!!orgCodeError}
+					placeholder="NWT"
+					data-testid="lq-admin-house-brief-org-code"
+				/>
+			</FormControl>
+
+			<FormControl
 				id="lq-house-brief-content"
 				label="House Brief"
 				optional
@@ -178,7 +212,7 @@
 			<div>
 				<Button
 					type="submit"
-					disabled={saving || !!lengthError}
+					disabled={saving || !!lengthError || !!orgCodeError}
 					data-testid="lq-admin-house-brief-save"
 				>
 					{saving ? 'Saving…' : 'Save House Brief'}

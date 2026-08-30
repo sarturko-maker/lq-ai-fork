@@ -28,6 +28,10 @@ export interface PracticeArea {
 	/** Stable machine key ('commercial', 'privacy', …) — cockpit URL state. */
 	key: string;
 	name: string;
+	/** INTAKE-4a (ADR-F088): the area's matter-reference code — the middle
+	 *  segment of `ORG-AREA-NNNN` (`COM` → `NWT-COM-0042`). `null` until the
+	 *  area's first matter derives one. */
+	area_code: string | null;
 	/** Unit-of-work noun: 'Matter' / 'Programme' / 'Deal'. */
 	unit_label: string;
 	/** F002 inert-card switch: only configured areas are enterable (derived). */
@@ -78,6 +82,8 @@ export async function listPracticeAreas(): Promise<PracticeAreaListResponse> {
 export interface PracticeAreaCreateBody {
 	key: string;
 	name: string;
+	/** INTAKE-4a: omit to let the server derive one from `name`. */
+	area_code?: string | null;
 	unit_label: string;
 	profile_md?: string | null;
 	default_tier_floor?: number | null;
@@ -89,6 +95,10 @@ export interface PracticeAreaCreateBody {
  *  fields present are applied (exclude_unset server-side). */
 export interface PracticeAreaUpdateBody {
 	name?: string;
+	/** INTAKE-4a (ADR-F088): `^[A-Z0-9]{2,6}$` — rejected (422), never coerced;
+	 *  409 if another area already holds it. Changing it affects only FUTURE
+	 *  matters; references already minted keep the old code. */
+	area_code?: string;
 	unit_label?: string;
 	profile_md?: string | null;
 	default_tier_floor?: number | null;

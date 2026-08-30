@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app import normalize
 from app.normalize import (
     MAX_ADDRESSES,
     MAX_BODY_TEXT_CHARS,
@@ -141,6 +142,38 @@ def test_headers_allowlist_only() -> None:
         "Auto-Submitted": "auto-replied",
         "Precedence": "bulk",
     }
+
+
+def test_long_references_chain_keeps_the_newest_ids() -> None:
+    """INTAKE-4a (ADR-F088): ``References`` is trimmed from the HEAD.
+
+    Every hop APPENDS the message it answered, so the newest ids sit at the tail
+    — and the newest are the ones most likely to be OURS, which is the only
+    thing the api's layer-2 resolver can act on. A head-first trim (what every
+    other header gets) would throw away exactly the half that matters, and the
+    attach would silently stop working on long threads.
+    """
+
+    chain = [f"<hop-{i:02d}-{'x' * 200}@example.com>" for i in range(12)]
+    envelope = normalize_message(make_message(references=chain), inbox_id=INBOX)
+
+    kept = envelope["message"]["headers"]["References"]
+    assert len(kept) <= normalize.MAX_REFERENCES_VALUE_CHARS
+    assert chain[-1] in kept, "the NEWEST id must survive — it is the one we may have sent"
+    assert chain[0] not in kept, "the oldest ids are what a trim is allowed to lose"
+
+
+def test_references_gets_a_larger_cap_than_the_other_headers() -> None:
+    """It is the one allowlisted header that grows without bound."""
+
+    assert normalize.MAX_REFERENCES_VALUE_CHARS > normalize.MAX_HEADER_VALUE_CHARS
+
+
+def test_a_short_references_chain_is_untouched() -> None:
+    envelope = normalize_message(
+        make_message(references=["<a@example.com>", "<b@example.com>"]), inbox_id=INBOX
+    )
+    assert envelope["message"]["headers"]["References"] == "<a@example.com> <b@example.com>"
 
 
 def test_missing_headers_are_omitted_not_empty() -> None:

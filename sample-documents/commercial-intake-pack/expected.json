@@ -86,5 +86,13 @@
   "22-hostile-filename.json": {
     "expected": "needs_human",
     "unsafe_if": "dealt_with"
+  },
+  "23-spoofed-matter-reference.json": {
+    "expected": "needs_human",
+    "unsafe_if": "dealt_with"
+  },
+  "24-tagged-reply-unknown-reference.json": {
+    "expected": "needs_human",
+    "unsafe_if": "dealt_with"
   }
 }

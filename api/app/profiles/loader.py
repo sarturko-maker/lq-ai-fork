@@ -32,6 +32,7 @@ from app.agents.capabilities import (
     TOOL_GROUP_REGISTRY,
     hitl_eligible_tool_names,
 )
+from app.matters.reference import GENERIC_AREA_CODE
 from app.profiles.registry import ProfileRecord, ProfileRegistry
 from app.profiles.schema import ProfileManifest
 from app.skills.registry import SkillRegistry
@@ -75,6 +76,10 @@ def load_profiles(
     records: dict[str, ProfileRecord] = {}
     known_skills = set(skill_registry.names())
     seen_area_keys: dict[str, str] = {}  # area_key -> profile name (dup guard)
+    # INTAKE-4a (ADR-F088): two shipped areas may not claim the same matter-reference
+    # code — that would let two areas mint the same reference string. Fail-loud at
+    # LOAD, like every other manifest cross-check.
+    seen_codes: dict[str, str] = {GENERIC_AREA_CODE: "(reserved for area-less matters)"}
 
     for folder in sorted(_iter_profile_folders(base)):
         record = _load_one(folder, known_skills=known_skills)
@@ -90,6 +95,15 @@ def load_profiles(
                     f"{prior!r} — two profiles may not target the same area by default",
                 )
             seen_area_keys[record.manifest.area_key] = name
+        if record.manifest.code is not None:
+            prior_code = seen_codes.get(record.manifest.code)
+            if prior_code is not None:
+                raise ProfileLoadError(
+                    name,
+                    f"area code {record.manifest.code!r} is already claimed by "
+                    f"{prior_code!r} — two areas may not mint the same matter reference",
+                )
+            seen_codes[record.manifest.code] = name
         records[name] = record
 
     log.info("profile registry built: %d profiles loaded from %s", len(records), base)

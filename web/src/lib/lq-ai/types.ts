@@ -160,6 +160,13 @@ export interface Project {
 	 * ``include_sandbox=true`` / ``only_sandbox=true``.
 	 */
 	is_sandbox?: boolean;
+	/**
+	 * INTAKE-4a (ADR-F088) — the matter's neutral reference `ORG-AREA-NNNN`
+	 * (e.g. `NWT-COM-0042`), allocated once at creation and IMMUTABLE. Read-only
+	 * on the wire: no create/update body accepts it. `null` for the sandbox (not
+	 * a matter) and for rows predating the backfill.
+	 */
+	reference?: string | null;
 	created_at: string;
 	updated_at: string;
 }

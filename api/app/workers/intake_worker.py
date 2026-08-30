@@ -222,6 +222,9 @@ async def process_intake_thread(
             message_count=thread.message_count,
             attachment_filenames=[str(n) for n in (message.attachment_filenames or [])],
             body_text=message.body_text or "",
+            # INTAKE-4a (ADR-F088): an unhonoured reference claim recorded by the
+            # landing resolver — surfaced to the agent, never acted on by code.
+            claimed_reference=thread.claimed_reference,
         )
         prompt = build_intake_prompt(view)
 

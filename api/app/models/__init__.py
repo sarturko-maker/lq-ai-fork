@@ -35,7 +35,13 @@ from app.models.org_skill import OrgSkillVersion
 from app.models.organization_profile import OrganizationProfile
 from app.models.playbook import Playbook, PlaybookExecution, PlaybookPosition
 from app.models.practice_area import PracticeArea, PracticeAreaKnowledgeBase, PracticeAreaSkill
-from app.models.project import MatterMemoryEntry, Project, ProjectFile, ProjectSkill
+from app.models.project import (
+    MatterMemoryEntry,
+    MatterReferenceCounter,
+    Project,
+    ProjectFile,
+    ProjectSkill,
+)
 from app.models.project_knowledge_base import ProjectKnowledgeBase
 from app.models.ropa import ProcessingActivity, System, processing_activity_systems
 from app.models.saved_prompt import SavedPrompt
@@ -73,6 +79,7 @@ __all__ = [
     "KnowledgeBase",
     "KnowledgeBaseFile",
     "MatterMemoryEntry",
+    "MatterReferenceCounter",
     "Message",
     "OrgPlaybookVersion",
     "OrgSkillVersion",
