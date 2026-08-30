@@ -27,7 +27,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.intake_tools import requeue_pending_intake_message
-from app.agents.run_service import is_conversation_in_flight, newest_live_run
+from app.agents.run_service import (
+    AgentThreadBusy,
+    is_conversation_in_flight,
+    newest_live_run,
+    start_agent_run,
+)
 from app.config import get_settings
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
@@ -821,3 +826,36 @@ async def test_summarise_is_a_noop_once_a_summary_exists(
         "reason": "summary_exists",
         "thread_id": str(seeded.thread_id),
     }
+
+
+@pytest.mark.integration
+async def test_a_lost_insert_race_is_busy_and_leaves_the_session_usable(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
+) -> None:
+    """Live 2026-08-30: two requeued siblings raced; the loser's insert hit
+    ``uq_agent_runs_thread_running`` and — because the failed flush poisoned the
+    session before ``AgentThreadBusy`` reached the worker — the thread was marked
+    ``error`` instead of deferring. The translation now rolls back first, so the
+    caller gets a clean busy signal on a session it can keep using."""
+    first = await process_intake_thread(
+        commit_factory, get_settings(), seeded.thread_id, enqueue=_ok
+    )
+    assert first["status"] == "started"
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None and thread.agent_thread_id is not None
+        with pytest.raises(AgentThreadBusy):
+            await start_agent_run(
+                db,
+                user_id=seeded.user_id,
+                project_id=thread.project_id,
+                thread_id=thread.agent_thread_id,
+                prompt="second job, same conversation",
+                settings=get_settings(),
+                enqueue=_ok,
+            )
+        # The fix under test: the session survives the lost race.
+        still_there = await db.get(IntakeThread, seeded.thread_id)
+        assert still_there is not None
+        still_there.status = "processing"
+        await db.commit()

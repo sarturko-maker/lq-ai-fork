@@ -49,6 +49,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.intake_prompt import (
@@ -253,9 +254,12 @@ async def process_intake_thread(
                 settings=settings,
                 enqueue=enqueue,
             )
-        except AgentThreadBusy:
+        except (AgentThreadBusy, PendingRollbackError):
             # Lost the race to a concurrent job on the same conversation; the same
-            # deferral rule applies (the message stays unclaimed).
+            # deferral rule applies (the message stays unclaimed). PendingRollbackError
+            # is the same race seen one session-op later (the failed flush poisoned the
+            # session before the translated AgentThreadBusy reached us) — never an
+            # error state (live, 2026-08-30).
             await db.rollback()
             log.info(
                 "intake_email_job: conversation busy; deferring",
