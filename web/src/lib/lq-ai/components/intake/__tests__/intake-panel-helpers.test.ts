@@ -4,26 +4,23 @@
  * The contracts under test are the ones a regression would quietly break:
  * the server's attention rank always dresses to a person's words (never
  * `awaiting_human`), the tones route through the shared `TONE_TO_DOT` map, the
- * row meta reads as a digest, and the conversation deep link is the cockpit's
- * own URL codec — not a hand-built string.
+ * row meta reads as a digest, and the matter deep link is the cockpit's own URL
+ * codec — not a hand-built string.
  */
 import { describe, expect, it } from 'vitest';
 
 import type { IntakeThread } from '$lib/lq-ai/api/intakeThreads';
 import {
 	attentionChip,
-	attentionCount,
 	attentionStripe,
 	authLabel,
 	badgeCount,
 	chainSummaryLine,
-	conversationHref,
 	emptyCopy,
 	filterQuery,
 	matterHref,
 	matterRef,
 	messageSender,
-	needsAttention,
 	outcomeLabel,
 	rowMeta,
 	summaryState
@@ -88,18 +85,6 @@ describe('attention stripe (the only new visual device)', () => {
 			expect(attentionStripe(thread({ attention_rank: rank }))).toBeNull();
 		}
 	});
-
-	it('agrees with the server attention set (ranks 0-2)', () => {
-		expect([0, 1, 2].every((r) => needsAttention(thread({ attention_rank: r })))).toBe(true);
-		expect([3, 4, 5].some((r) => needsAttention(thread({ attention_rank: r })))).toBe(false);
-		expect(
-			attentionCount([
-				thread({ attention_rank: 0 }),
-				thread({ attention_rank: 2 }),
-				thread({ attention_rank: 5 })
-			])
-		).toBe(2);
-	});
 });
 
 describe('rowMeta (the list reads as a digest — plan ruling 7)', () => {
@@ -141,18 +126,6 @@ describe('summaryState', () => {
 });
 
 describe('deep links go through the cockpit URL codec', () => {
-	it('builds the conversation link from matter + agent thread', () => {
-		expect(conversationHref(thread())).toBe('/lq-ai?matter=p-1&thread=at-1');
-	});
-
-	it('is null with no conversation bound (the button disables)', () => {
-		expect(conversationHref(thread({ agent_thread_id: null }))).toBeNull();
-	});
-
-	it('still links a thread whose matter was hard-deleted', () => {
-		expect(conversationHref(thread({ project: null }))).toBe('/lq-ai?thread=at-1');
-	});
-
 	it('links and names the matter, honestly when it is gone', () => {
 		expect(matterHref(thread())).toBe('/lq-ai?matter=p-1');
 		expect(matterRef(thread())).toBe('ORG-COM-0011');
@@ -187,9 +160,13 @@ describe('rail badge', () => {
 		expect(badgeCount(7)).toBe('7');
 	});
 
-	it('says 99+ rather than pretending a full page is the truth', () => {
+	it('marks a full page with a `+` rather than pretending it is the truth', () => {
+		// Only past 99 does the badge stop naming the number; a short probe page
+		// reports its own honest count, never a borrowed `99+`.
 		expect(badgeCount(100)).toBe('99+');
-		expect(badgeCount(5, 5)).toBe('99+');
+		expect(badgeCount(99, 99)).toBe('99+');
+		expect(badgeCount(98, 99)).toBe('98');
+		expect(badgeCount(5, 5)).toBe('5+');
 	});
 });
 

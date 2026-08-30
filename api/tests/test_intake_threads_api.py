@@ -11,7 +11,8 @@ Covers ``GET /api/v1/intake/threads`` and ``GET /api/v1/intake/threads/{id}``:
   successor merely ``failed`` (ADR-F087: such a run never consumed the interrupt);
 * ``summary_stale``;
 * pagination and the boundary's rejections;
-* the detail's message ordering + attachment→file resolution;
+* the detail's message ordering, its keep-the-newest truncation, and the bounded
+  attachment→file resolution;
 * and the standing promise that no email body, subject or address reaches a log line.
 """
 
@@ -30,6 +31,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.intake_threads import (
+    _CURSOR_OFFSET_MAX,
+    _encode_cursor as _cursor,
+    _resolve_attachment_file_ids,
+)
 from app.db.session import get_db
 from app.main import app
 from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
@@ -38,6 +44,7 @@ from app.models.intake import IntakeMailbox, IntakeMessage, IntakeThread
 from app.models.practice_area import PracticeArea
 from app.models.project import Project
 from app.models.user import User
+from app.schemas.intake import INTAKE_THREAD_MESSAGE_MAX
 from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_db
 
 pytestmark = pytest.mark.integration
@@ -803,6 +810,19 @@ async def test_limit_and_cursor_are_bounded_at_the_boundary(
     ).status_code == 422
 
 
+async def test_a_cursor_offset_past_the_cap_is_rejected(client: AsyncClient, owner: User) -> None:
+    """An OFFSET is a skip the database pays for row by row, so it is bounded like
+    every other input here: at the cap it still reads, past it the answer is a 422,
+    not a slow scan a stranger can ask for at will."""
+    at_cap = _cursor(_CURSOR_OFFSET_MAX)
+    assert (
+        await client.get(_LIST, params={"cursor": at_cap}, headers=_bearer(owner))
+    ).status_code == 200
+    past_cap = _cursor(_CURSOR_OFFSET_MAX + 1)
+    resp = await client.get(_LIST, params={"cursor": past_cap}, headers=_bearer(owner))
+    assert resp.status_code == 422
+
+
 async def test_the_list_requires_authentication(client: AsyncClient) -> None:
     assert (await client.get(_LIST)).status_code == 401
 
@@ -907,6 +927,148 @@ async def test_a_soft_deleted_file_does_not_resolve(
 
     body = (await client.get(f"{_LIST}/{seeded.thread.id}", headers=_bearer(owner))).json()
     assert body["messages"][0]["file_ids"] == [None]
+
+
+class _EmptyResult:
+    """The shape ``_resolve_attachment_file_ids`` consumes: rows, and nothing else."""
+
+    @staticmethod
+    def all() -> list[Any]:
+        return []
+
+
+class _RecordingSession:
+    """Enough AsyncSession to record what ``_resolve_attachment_file_ids`` asks for."""
+
+    def __init__(self) -> None:
+        self.statements: list[Any] = []
+
+    async def execute(self, statement: Any) -> _EmptyResult:
+        self.statements.append(statement)
+        return _EmptyResult()
+
+
+async def test_the_file_lookup_asks_only_for_the_filenames_on_the_page() -> None:
+    """A data-room matter holds thousands of files; the page needs the handful it
+    NAMES. The query carries an ``IN`` over exactly those names — never the matter's
+    whole live file table."""
+    session = _RecordingSession()
+    message = IntakeMessage(
+        id=uuid.uuid4(),
+        thread_id=uuid.uuid4(),
+        provider_message_id="msg-bounded",
+        direction="in",
+        to_addrs=["legal-intake@example.com"],
+        attachment_filenames=["Mutual-NDA.docx", "Side-Letter.pdf"],
+        provider_timestamp=_BASE_TIME,
+    )
+    message.created_at = _BASE_TIME
+
+    resolved = await _resolve_attachment_file_ids(
+        session,  # type: ignore[arg-type]
+        [message],
+        project_id=uuid.uuid4(),
+    )
+    assert resolved[message.id] == [None, None]
+    assert len(session.statements) == 1
+    rendered = str(
+        session.statements[0].compile(
+            compile_kwargs={"literal_binds": True, "render_postcompile": True}
+        )
+    )
+    # An IN over exactly the page's names — not a bare `project_id` scan.
+    assert " IN " in rendered.upper()
+    assert "Mutual-NDA.docx" in rendered
+    assert "Side-Letter.pdf" in rendered
+
+
+async def test_a_page_with_no_attachments_asks_the_files_table_nothing() -> None:
+    """No names, no query — the common case costs zero round trips."""
+    session = _RecordingSession()
+    message = IntakeMessage(
+        id=uuid.uuid4(),
+        thread_id=uuid.uuid4(),
+        provider_message_id="msg-empty",
+        direction="in",
+        to_addrs=["legal-intake@example.com"],
+        attachment_filenames=[],
+        provider_timestamp=_BASE_TIME,
+    )
+    message.created_at = _BASE_TIME
+
+    assert await _resolve_attachment_file_ids(
+        session,  # type: ignore[arg-type]
+        [message],
+        project_id=uuid.uuid4(),
+    ) == {message.id: []}
+    assert session.statements == []
+
+
+async def test_an_unrelated_file_in_the_same_matter_is_not_handed_out(
+    client: AsyncClient, db_session: AsyncSession, owner: User
+) -> None:
+    """The end-to-end half of the bound: a matter full of other documents resolves
+    only the attachment the message names."""
+    mailbox = await _mailbox(db_session, owner)
+    project = await _matter(db_session, owner)
+    seeded = await _seed_thread(db_session, owner, mailbox=mailbox, project=project)
+    wanted = File(
+        owner_id=owner.id,
+        project_id=project.id,
+        filename="Mutual-NDA.docx",
+        mime_type="application/octet-stream",
+        size_bytes=1,
+        hash_sha256=uuid.uuid4().hex,
+        storage_path=str(uuid.uuid4()),
+        ingestion_status="ready",
+    )
+    db_session.add(wanted)
+    for index in range(3):
+        db_session.add(
+            File(
+                owner_id=owner.id,
+                project_id=project.id,
+                filename=f"Unrelated-Data-Room-File-{index}.pdf",
+                mime_type="application/pdf",
+                size_bytes=1,
+                hash_sha256=uuid.uuid4().hex,
+                storage_path=str(uuid.uuid4()),
+                ingestion_status="ready",
+            )
+        )
+    await db_session.flush()
+    await _message(db_session, seeded.thread, attachment_filenames=["Mutual-NDA.docx"])
+
+    body = (await client.get(f"{_LIST}/{seeded.thread.id}", headers=_bearer(owner))).json()
+    assert body["messages"][0]["file_ids"] == [str(wanted.id)]
+
+
+async def test_a_long_chain_keeps_its_NEWEST_messages(
+    client: AsyncClient, db_session: AsyncSession, owner: User
+) -> None:
+    """A truncated chain drops the OLD end, not the part the lawyer opened it for."""
+    mailbox = await _mailbox(db_session, owner)
+    project = await _matter(db_session, owner)
+    seeded = await _seed_thread(db_session, owner, mailbox=mailbox, project=project)
+    for index in range(INTAKE_THREAD_MESSAGE_MAX + 1):
+        await _message(
+            db_session,
+            seeded.thread,
+            body_text=f"email-{index}",
+            provider_timestamp=_BASE_TIME + timedelta(minutes=index),
+            created_at=_BASE_TIME + timedelta(minutes=index),
+        )
+
+    body = (await client.get(f"{_LIST}/{seeded.thread.id}", headers=_bearer(owner))).json()
+    assert body["messages_truncated"] is True
+    bodies = [m["body_text"] for m in body["messages"]]
+    assert len(bodies) == INTAKE_THREAD_MESSAGE_MAX
+    # Still oldest-first on the wire...
+    assert bodies == sorted(bodies, key=lambda t: int(t.split("-")[1]))
+    # ...but the OLDEST email is the one that fell off, and the newest is present.
+    assert "email-0" not in bodies
+    assert bodies[0] == "email-1"
+    assert bodies[-1] == f"email-{INTAKE_THREAD_MESSAGE_MAX}"
 
 
 # --------------------------------------------------------------------------- #

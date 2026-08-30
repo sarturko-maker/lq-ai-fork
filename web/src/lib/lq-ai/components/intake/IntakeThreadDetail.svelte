@@ -164,7 +164,7 @@
 							data-testid="lq-intake-summary"
 						>
 							<p class="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-								The thread so far · updated {timeAgo(thread.last_inbound_at, nowMs)}
+								The thread so far · last email {timeAgo(thread.last_inbound_at, nowMs)}
 							</p>
 							<ul class="mt-3 space-y-2">
 								{#each thread.summary as item, i (i)}
@@ -197,7 +197,7 @@
 						<div class="border-border space-y-4 border-t px-4 py-4">
 							{#if data?.messages_truncated}
 								<Alert intent="info">
-									This chain is longer than we show — the newest emails are not listed here.
+									This chain is longer than we show — the older emails are not listed here.
 								</Alert>
 							{/if}
 							{#each messages as message (message.id)}

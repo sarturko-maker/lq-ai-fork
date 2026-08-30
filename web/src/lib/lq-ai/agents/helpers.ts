@@ -327,23 +327,26 @@ export function visibleSteps(
 }
 
 /**
- * The pending stop-and-ask step for a paused run (HITL-3, ADR-F071): the last
+ * The pending stop-and-ask step for a paused run (HITL-3, ADR-F071): the FIRST
  * `hitl_request` row, whose `name` is the gated tool and `summary` is the
  * bounded JSON digest of the gated call(s) the confirm card renders. Returns
  * null unless the run is `awaiting_input` (a paused run always has one) — so a
  * settled/replayed hitl_request row from an already-resolved turn never
- * resurrects the card. Scanning from the end keeps it correct if a future turn
- * ever carries more than one.
+ * resurrects the card.
+ *
+ * First, not last, because the authoritative resume gate picks the first:
+ * `POST /agents/runs/{id}/resume` reads the `hitl_request` step
+ * `ORDER BY seq ASC LIMIT 1` (`api/app/api/agent_runs.py`) to derive the allowed
+ * decisions, and the card must never offer a verb that gate would refuse. The
+ * server-side Inbox read (`_load_live_asks` in `api/app/api/intake_threads.py`)
+ * takes the first for the same reason.
  */
 export function pendingHitlStep(
 	run: Pick<AgentRun, 'status'>,
 	steps: AgentRunStep[]
 ): AgentRunStep | null {
 	if (run.status !== 'awaiting_input') return null;
-	for (let i = steps.length - 1; i >= 0; i--) {
-		if (steps[i].kind === 'hitl_request') return steps[i];
-	}
-	return null;
+	return steps.find((step) => step.kind === 'hitl_request') ?? null;
 }
 
 /**

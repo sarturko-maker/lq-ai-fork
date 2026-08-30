@@ -48,9 +48,6 @@ const RANK_CHIP: Record<number, { label: string; tone: StatusTone }> = {
 	5: { label: 'Handled', tone: 'neutral' }
 };
 
-/** Ranks 0, 1 and 2 — the server's own `attention=true` set (plan ruling 3). */
-export const ATTENTION_MAX_RANK = 2;
-
 /** Humanise an unexpected status value rather than leaking the enum verbatim. */
 function humaniseStatus(status: string): string {
 	const words = status.replace(/[_-]+/g, ' ').trim();
@@ -86,11 +83,6 @@ export function attentionStripe(thread: Pick<IntakeThread, 'attention_rank'>): I
 	}
 }
 
-/** True when the server would have returned this row under `attention=true`. */
-export function needsAttention(thread: Pick<IntakeThread, 'attention_rank'>): boolean {
-	return thread.attention_rank >= 0 && thread.attention_rank <= ATTENTION_MAX_RANK;
-}
-
 /**
  * The grey meta line under a subject. Plan ruling 7: the FIRST summary bullet's
  * text, so the Inbox itself reads as a digest of what the agent understood; the
@@ -115,19 +107,6 @@ export function summaryState(
 ): 'fresh' | 'stale' | 'none' {
 	if (!thread.summary || thread.summary.length === 0) return 'none';
 	return thread.summary_stale ? 'stale' : 'fresh';
-}
-
-/**
- * Deep link into the conversation where the approve/edit/respond card already
- * lives (plan ruling 2 — the Inbox never renders a second approval surface).
- * Null when the thread has no conversation bound (the project was hard-deleted,
- * or the conversation was never created) — the caller disables the button.
- */
-export function conversationHref(
-	thread: Pick<IntakeThread, 'project' | 'agent_thread_id'>
-): string | null {
-	if (!thread.agent_thread_id) return null;
-	return cockpitUrl({ matter: thread.project?.id ?? null, thread: thread.agent_thread_id });
 }
 
 /** The matter this thread landed in, as the Inbox shows it (mono reference,
@@ -156,18 +135,18 @@ export function chainSummaryLine(messages: Pick<IntakeMessage, 'direction'>[]): 
 /**
  * The rail badge for the Inbox nav entry. The list endpoint returns ITEMS, not a
  * count, so the shell asks for one bounded page of attention rows and counts
- * them: a full page means "at least this many", which the badge says as `99+`
- * rather than pretending the page size is the truth. Zero → no badge at all.
+ * them: a full page means "at least this many", which the badge marks with a
+ * trailing `+` rather than pretending the page size is the truth. Zero → no badge
+ * at all.
  */
 export function badgeCount(attentionRows: number, pageSize = 100): string | null {
 	if (attentionRows <= 0) return null;
-	return attentionRows >= pageSize ? '99+' : String(attentionRows);
-}
-
-/** How many rows in a page a human is expected to act on (the segmented
- *  filter's "Needs you" count when the caller already holds the page). */
-export function attentionCount(threads: Pick<IntakeThread, 'attention_rank'>[]): number {
-	return threads.filter(needsAttention).length;
+	// A full page is "at least this many", which the badge marks with a `+`; only
+	// past 99 does it stop naming the number, because that is where the badge runs
+	// out of room. A short probe page therefore reports its own honest count
+	// (`5+`), never a borrowed `99+`.
+	if (attentionRows < pageSize) return String(attentionRows);
+	return attentionRows > 99 ? '99+' : `${attentionRows}+`;
 }
 
 /** The three segments of the Inbox filter, in the user's voice. */

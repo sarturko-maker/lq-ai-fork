@@ -85,6 +85,13 @@ _ATTENTION_CUTOFF = _ATTENTION_AWAITING_HUMAN
 #: An unknown value is a 422 at the boundary, not an empty page (reject, don't guess).
 _THREAD_STATUS_FILTER = ("received", "processing", "awaiting_human", "replied", "handled", "error")
 
+#: Hard ceiling on the cursor's OFFSET. An offset is a SKIP the database pays for
+#: row by row, so an unbounded one is a free way to make the server do arbitrary
+#: work. 10_000 is far past any real Inbox (200 pages at the max page size); past
+#: it the answer is a 422, not a slow scan. Reject at the boundary, don't clamp —
+#: a silently clamped cursor would return a page the client did not ask for.
+_CURSOR_OFFSET_MAX = 10_000
+
 
 # ---------------------------------------------------------------------------
 # Pagination
@@ -119,6 +126,8 @@ def _decode_cursor(value: str) -> int:
     offset = decoded.get("offset")
     if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
         raise HTTPException(status_code=422, detail="cursor is malformed")
+    if offset > _CURSOR_OFFSET_MAX:
+        raise HTTPException(status_code=422, detail="cursor is out of range")
     return offset
 
 
@@ -418,9 +427,14 @@ async def list_intake_threads(
     items = await _read_page(db, stmt)
     has_more = len(items) > limit
     items = items[:limit]
+    # Never hand back a cursor the decoder would refuse: past `_CURSOR_OFFSET_MAX`
+    # the walk ends here rather than issuing a link that 422s on use.
+    next_offset = offset + limit
     return IntakeThreadListResponse(
         items=items,
-        next_cursor=_encode_cursor(offset + limit) if has_more else None,
+        next_cursor=(
+            _encode_cursor(next_offset) if has_more and next_offset <= _CURSOR_OFFSET_MAX else None
+        ),
     )
 
 
@@ -441,6 +455,11 @@ async def get_intake_thread(
     lifecycle decisions but is the right thing to READ a chain by; ties break on our
     own insert order). A thread the caller cannot see is a 404 — the same answer a
     non-existent id gets.
+
+    A chain longer than ``INTAKE_THREAD_MESSAGE_MAX`` keeps its NEWEST messages: the
+    query walks newest-first and the page is reversed in Python, so the reader still
+    gets an oldest-first chain but the part that is missing is the old part, not the
+    part they came to read. ``messages_truncated`` says so.
     """
     stmt, _rank = _thread_page_select(user.id)
     items = await _read_page(db, stmt.where(IntakeThread.id == thread_id))
@@ -448,15 +467,20 @@ async def get_intake_thread(
         raise HTTPException(status_code=404, detail="intake thread not found")
     thread_read = items[0]
 
+    # Newest-first in SQL (with one extra row to detect truncation), then reversed
+    # here: the client is served oldest-first, but what falls off a long chain is
+    # the OLD end, not the new one. `nulls_first` on the DESC leg is the exact
+    # mirror of the oldest-first `nulls_last` this used to be, so an untruncated
+    # chain comes back in precisely the order it always did.
     rows = (
         (
             await db.execute(
                 select(IntakeMessage)
                 .where(IntakeMessage.thread_id == thread_id)
                 .order_by(
-                    IntakeMessage.provider_timestamp.asc().nulls_last(),
-                    IntakeMessage.created_at.asc(),
-                    IntakeMessage.id.asc(),
+                    IntakeMessage.provider_timestamp.desc().nulls_first(),
+                    IntakeMessage.created_at.desc(),
+                    IntakeMessage.id.desc(),
                 )
                 .limit(INTAKE_THREAD_MESSAGE_MAX + 1)
             )
@@ -465,7 +489,7 @@ async def get_intake_thread(
         .all()
     )
     truncated = len(rows) > INTAKE_THREAD_MESSAGE_MAX
-    messages = list(rows[:INTAKE_THREAD_MESSAGE_MAX])
+    messages = list(reversed(rows[:INTAKE_THREAD_MESSAGE_MAX]))
     file_ids = await _resolve_attachment_file_ids(
         db, messages, project_id=thread_read.project.id if thread_read.project else None
     )
@@ -500,12 +524,15 @@ async def _resolve_attachment_file_ids(
     attachment and the landing endpoint records only the STORED filenames on the
     message (``app.api.intake_emails``), so the join has to be reconstructed. The
     rule: within this thread's matter, take the live ``files`` rows whose
-    ``filename`` matches, oldest first, and hand them out to the messages in INGEST
-    order (message ``created_at``) — the same order the rows were written in. That
-    is exact whenever a filename appears once, and correct-by-construction for a
-    filename that repeats across messages in the ordinary case; a repeat whose rows
-    were re-ordered by a later human upload can mis-pair, so the UI treats an id as
-    a convenience link to a document it also names, never as proof.
+    ``filename`` is one of the names ON THIS PAGE (an ``IN`` over that set — the
+    query never pulls the matter's whole file table, which on a data-room matter is
+    thousands of rows this thread has no use for), oldest first, and hand them out
+    to the messages in INGEST order (message ``created_at``) — the same order the
+    rows were written in. That is exact whenever a filename appears once, and
+    correct-by-construction for a filename that repeats across messages in the
+    ordinary case; a repeat whose rows were re-ordered by a later human upload can
+    mis-pair, so the UI treats an id as a convenience link to a document it also
+    names, never as proof.
 
     Returns a list PARALLEL to each message's ``attachment_filenames`` (same length,
     same order), with ``None`` where nothing resolved. An orphaned thread (no matter)
@@ -514,12 +541,17 @@ async def _resolve_attachment_file_ids(
     resolved: dict[uuid.UUID, list[uuid.UUID | None]] = {
         m.id: [None] * len(m.attachment_filenames or []) for m in messages
     }
-    if project_id is None or not any(m.attachment_filenames for m in messages):
+    wanted = {str(name) for m in messages for name in (m.attachment_filenames or []) if str(name)}
+    if project_id is None or not wanted:
         return resolved
     rows = (
         await db.execute(
             select(File.id, File.filename)
-            .where(File.project_id == project_id, File.deleted_at.is_(None))
+            .where(
+                File.project_id == project_id,
+                File.deleted_at.is_(None),
+                File.filename.in_(wanted),
+            )
             .order_by(File.created_at.asc(), File.id.asc())
         )
     ).all()

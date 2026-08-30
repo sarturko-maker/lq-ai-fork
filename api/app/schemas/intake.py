@@ -384,8 +384,9 @@ INTAKE_THREAD_LIST_LIMIT_DEFAULT = 50
 INTAKE_THREAD_LIST_LIMIT_MAX = 100
 #: Hard ceiling on the messages returned with one thread. A thread is one email
 #: conversation, so this is generous; a chain longer than this is truncated to its
-#: OLDEST ``INTAKE_THREAD_MESSAGE_MAX`` messages plus nothing — ``messages_truncated``
-#: tells the reader the tail is missing rather than silently showing a partial chain.
+#: NEWEST ``INTAKE_THREAD_MESSAGE_MAX`` messages — the ones a human opening the
+#: thread came to read — and ``messages_truncated`` tells the reader the OLD end is
+#: missing rather than silently showing a partial chain.
 INTAKE_THREAD_MESSAGE_MAX = 200
 
 
@@ -501,5 +502,5 @@ class IntakeThreadDetailResponse(BaseModel):
     thread: IntakeThreadRead
     messages: list[IntakeMessageRead] = Field(default_factory=list)
     #: True when the chain was longer than ``INTAKE_THREAD_MESSAGE_MAX`` and the
-    #: newest messages were dropped — the reader is told, never silently shortchanged.
+    #: OLDEST messages were dropped — the reader is told, never silently shortchanged.
     messages_truncated: bool = False
