@@ -112,7 +112,17 @@ The one change to what the agent does: it now writes that summary every time it 
    is agent-written text about untrusted mail: rendered as text, never HTML; the human corrects
    nothing here (the conversation is where they steer). Row `meta` in the list = the FIRST
    bullet's text, so the inbox itself reads as a digest.
-8. **Bodies are shown to the owner, never logged.** The thread detail returns `body_text`
+8. **Same look and feel as the existing fork UI (maintainer ruling 2026-08-30).** The Inbox
+   is reached through the existing cockpit only: a fourth left-nav view `view=inbox` beside
+   Areas / Matters / Unfiled (with the needs-you count), an Inbox tab in the matter strip, and
+   an admin page beside "Intake bridges". No separate app, route tree, or design language:
+   F013 tokens from `app.css`, the cockpit primitives (`PageShell`, `SectionHeader`,
+   `StatusDot`, `ModalShell`, `Skeleton`), `GridsPanel` as the structural precedent, chip
+   tones via `TONE_TO_DOT`/`statusBadge` so intake statuses cannot disagree with run statuses,
+   `timeAgo` from `cockpit/helpers`. New visual devices are limited to the mono matter
+   reference and the three attention stripes (brand / destructive / warning tokens). A builder
+   who needs a token that does not exist stops and asks.
+9. **Bodies are shown to the owner, never logged.** The thread detail returns `body_text`
    (their own mail; untrusted for the model, ordinary for the human). Rendered as plain text
    with preserved line breaks — no HTML, no link auto-activation of anything but bare `https`
    URLs shown as text. Attachments appear as filenames linking to the file already in the
