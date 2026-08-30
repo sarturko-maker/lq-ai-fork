@@ -15,15 +15,22 @@ import {
 	attentionStripe,
 	authLabel,
 	badgeCount,
+	canSummarise,
 	chainSummaryLine,
 	emptyCopy,
 	filterQuery,
 	matterHref,
+	matterLabel,
 	matterRef,
 	messageSender,
+	noteNeedsClamp,
 	outcomeLabel,
+	receiptChips,
 	rowMeta,
-	summaryState
+	summariseIsSettled,
+	summariseRefusalLine,
+	summaryState,
+	waitingLine
 } from '../intake-panel-helpers';
 
 function thread(over: Partial<IntakeThread> = {}): IntakeThread {
@@ -45,6 +52,7 @@ function thread(over: Partial<IntakeThread> = {}): IntakeThread {
 		agent_thread_id: 'at-1',
 		live_ask: null,
 		last_send_error: null,
+		waiting_on: null,
 		attention_rank: 5,
 		...over
 	};
@@ -106,6 +114,90 @@ describe('rowMeta (the list reads as a digest — plan ruling 7)', () => {
 		expect(rowMeta(thread({ summary: [], outcome_note: '   ' }))).toBe(
 			'Agent is reading the thread'
 		);
+	});
+
+	it('says what it is actually waiting for rather than pretending to read', () => {
+		const waiting = thread({
+			summary: [],
+			outcome_note: null,
+			status: 'received',
+			waiting_on: { thread_id: 't-2', subject: 'NDA — please approve the reply' }
+		});
+		expect(rowMeta(waiting)).toBe(
+			"Waiting for your decision on 'NDA — please approve the reply' before the agent reads this."
+		);
+		// An empty subject is named honestly, never rendered as an empty quote.
+		expect(waitingLine(thread({ waiting_on: { thread_id: 't-2', subject: '  ' } }))).toBe(
+			"Waiting for your decision on '(no subject)' before the agent reads this."
+		);
+		expect(waitingLine(thread())).toBeNull();
+	});
+
+	it('prefers the agent’s own account over the queue explanation', () => {
+		const both = thread({
+			summary: [{ title: 'What they want', text: 'A renewal quote.' }],
+			waiting_on: { thread_id: 't-2', subject: 'other' }
+		});
+		expect(rowMeta(both)).toBe('A renewal quote.');
+	});
+});
+
+describe('the receipt card (INTAKE-5a.1)', () => {
+	it('turns outcome, sender check and label into chips on the shared tone map', () => {
+		expect(
+			receiptChips(thread({ outcome: 'dealt_with', auth_state: 'pass', label: 'nda' }))
+		).toEqual([
+			{ label: 'Dealt with', tone: 'ok', dot: 'completed' },
+			{ label: 'Sender check passed', tone: 'ok', dot: 'completed' },
+			{ label: 'nda', tone: 'neutral', dot: 'cancelled' }
+		]);
+	});
+
+	it('flags a failed sender check and drops an absent label', () => {
+		const chips = receiptChips(
+			thread({ outcome: 'needs_human', auth_state: 'fail', label: '   ' })
+		);
+		expect(chips).toEqual([
+			{ label: 'Handed to a human', tone: 'warn', dot: 'attention' },
+			{ label: 'Sender authentication failed', tone: 'error', dot: 'failed' }
+		]);
+	});
+
+	it('clamps only a note long enough to need it', () => {
+		expect(noteNeedsClamp('Short note.')).toBe(false);
+		expect(noteNeedsClamp(null)).toBe(false);
+		expect(noteNeedsClamp('x'.repeat(181))).toBe(true);
+	});
+
+	it('names the matter as reference AND name, degrading honestly', () => {
+		expect(matterLabel(thread())).toBe('ORG-COM-0011 · Project Atlas');
+		expect(matterLabel(thread({ project: { ...thread().project!, reference: null } }))).toBe(
+			'Project Atlas'
+		);
+		expect(matterLabel(thread({ project: null }))).toBe('Matter deleted');
+		// The LIST keeps the bare reference — the row already shows the subject.
+		expect(matterRef(thread())).toBe('ORG-COM-0011');
+	});
+});
+
+describe('“Summarise now” is offered only where it would work', () => {
+	const settled = () => thread({ summary: [], status: 'replied', agent_thread_id: 'at-1' });
+
+	it('is offered for a settled, summary-less thread with a conversation', () => {
+		expect(canSummarise(settled())).toBe(true);
+	});
+
+	it.each([
+		['it already has one', { summary: [{ title: 'a', text: 'b' }] }],
+		['it never ran', { agent_thread_id: null }],
+		['a decision is live', { live_ask: { run_id: 'r', tool_names: [], allowed_decisions: [] } }],
+		[
+			'the matter is closed',
+			{ project: { id: 'p-1', name: 'n', reference: null, archived: true } }
+		],
+		['a run is still working it', { status: 'processing' }]
+	])('is withheld when %s', (_why, over) => {
+		expect(canSummarise({ ...settled(), ...(over as Partial<IntakeThread>) })).toBe(false);
 	});
 });
 
@@ -201,5 +293,31 @@ describe('message sender attribution', () => {
 			'them@x.test'
 		);
 		expect(messageSender({ direction: 'in', from_addr: '  ' }, 'us@x.test')).toBe('Unknown sender');
+	});
+});
+
+describe('the summarise refusals speak English', () => {
+	it('never puts a server code in front of a lawyer', () => {
+		expect(summariseRefusalLine('thread_busy')).toBe(
+			'The agent is still working on this conversation — try again when it settles.'
+		);
+		expect(summariseRefusalLine('matter_closed')).toBe(
+			'This matter is closed; its threads keep the record they have.'
+		);
+		expect(summariseRefusalLine('summary_exists')).toBe('This thread already has a summary.');
+		// Anything unrecognised — a 500, a proxy, a network failure — is generic and
+		// honest about what did NOT happen.
+		expect(summariseRefusalLine('Request failed with status 500')).toBe(
+			'Could not ask for a summary — nothing was started.'
+		);
+		expect(summariseRefusalLine(null)).toBe('Could not ask for a summary — nothing was started.');
+	});
+
+	it('retires the offer only when asking again would change nothing', () => {
+		expect(summariseIsSettled('summary_exists')).toBe(true);
+		expect(summariseIsSettled('summarise_in_progress')).toBe(true);
+		expect(summariseIsSettled('thread_busy')).toBe(false);
+		expect(summariseIsSettled('enqueue_failed')).toBe(false);
+		expect(summariseIsSettled(undefined)).toBe(false);
 	});
 });

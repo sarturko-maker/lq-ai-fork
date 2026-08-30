@@ -25,9 +25,10 @@ file, and none may be added — the audit contract (counts/types/IDs, never raw
 values) governs this surface exactly as it governs the landing endpoint. Every
 string returned is rendered as text by the client, never as HTML.
 
-Nothing here mutates. Human attach (``POST /intake/threads/{id}/attach``) is
-INTAKE-5b and carries ``MutatingUser`` + an audit row; this slice is read-only, so
-the router mounts under the ordinary ``_active`` user gate.
+The two reads mutate nothing. The one write on this router is INTAKE-5a.1's
+``POST /intake/threads/{id}/summarise`` — a ``MutatingUser`` endpoint that queues a
+READ-ONLY conclude pass and changes no row itself. Human attach
+(``POST /intake/threads/{id}/attach``) is INTAKE-5b.
 """
 
 from __future__ import annotations
@@ -46,8 +47,12 @@ from sqlalchemy.orm import aliased
 
 from app.agents.hitl import decisions_allowed_for_step, order_decisions, tool_names_for_step
 from app.agents.intake_prompt import single_line_neutralised
-from app.agents.run_service import IN_FLIGHT_RUN_STATUSES, NOT_LIVE_RUN_STATUSES
-from app.api.dependencies import ActiveUser
+from app.agents.run_service import (
+    IN_FLIGHT_RUN_STATUSES,
+    NOT_LIVE_RUN_STATUSES,
+    is_conversation_in_flight,
+)
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.db.session import get_db
 from app.models.agent_run import AgentRun, AgentRunStep
 from app.models.file import File
@@ -60,12 +65,15 @@ from app.schemas.intake import (
     INTAKE_THREAD_MESSAGE_MAX,
     IntakeLiveAskRead,
     IntakeMessageRead,
+    IntakeSummariseResponse,
     IntakeSummaryItem,
     IntakeThreadDetailResponse,
     IntakeThreadListResponse,
     IntakeThreadProjectRead,
     IntakeThreadRead,
+    IntakeWaitingOnRead,
 )
+from app.workers.queue import enqueue_intake_summarise_job
 
 router = APIRouter(prefix="/intake", tags=["intake-threads"])
 
@@ -139,7 +147,7 @@ def _decode_cursor(value: str) -> int:
 def _thread_page_select(user_id: uuid.UUID) -> tuple[Any, ColumnElement[int]]:
     """The owner-fenced thread SELECT plus its attention-rank expression.
 
-    Four joins carry what the row model needs and one query cannot be talked out of:
+    Five joins carry what the row model needs and one query cannot be talked out of:
 
     ``live``
         the conversation's newest LIVE run (:data:`NOT_LIVE_RUN_STATUSES` — the
@@ -153,6 +161,9 @@ def _thread_page_select(user_id: uuid.UUID) -> tuple[Any, ColumnElement[int]]:
         — the other half of ``summary_stale`` (see :func:`_row_to_read`).
     ``summary_run``
         the run that wrote the summary, for its ``started_at``.
+    ``waiting``
+        the SIBLING thread of this conversation that holds the live ask, when there is
+        one — the honest reason an unread thread is unread (INTAKE-5a.1).
 
     The fence is the WHERE clause, not a post-filter: a thread the caller cannot see
     never leaves the database. The rank expression is returned UNLABELLED alongside
@@ -195,6 +206,32 @@ def _thread_page_select(user_id: uuid.UUID) -> tuple[Any, ColumnElement[int]]:
         .lateral("newest_settled_run")
     )
     summary_run = aliased(AgentRun, name="summary_run")
+    # ``waiting`` — INTAKE-5a.1. A conversation runs ONE run at a time, so a thread can
+    # sit unread purely because a SIBLING thread on the same conversation is paused on
+    # the lawyer's decision. This finds that sibling: the newest inbound message on
+    # another thread of this conversation that is claimed by a run which is
+    # ``awaiting_input`` right now. Correlated to the outer ``intake_threads`` row only
+    # (never to another lateral), and ``sibling.id != IntakeThread.id`` is what keeps a
+    # thread from waiting on itself — a live ask on THIS thread is ``live_ask``, not a
+    # reason to wait.
+    ask_run = aliased(AgentRun, name="waiting_ask_run")
+    sibling = aliased(IntakeThread, name="waiting_sibling")
+    waiting = (
+        select(sibling.id.label("thread_id"), sibling.subject.label("subject"))
+        .select_from(IntakeMessage)
+        .join(sibling, sibling.id == IntakeMessage.thread_id)
+        .join(ask_run, ask_run.id == IntakeMessage.run_id)
+        .where(
+            sibling.agent_thread_id == IntakeThread.agent_thread_id,
+            sibling.id != IntakeThread.id,
+            IntakeMessage.direction == "in",
+            ask_run.thread_id == IntakeThread.agent_thread_id,
+            ask_run.status == AgentRunStatus.awaiting_input.value,
+        )
+        .order_by(ask_run.started_at.desc(), IntakeMessage.created_at.desc())
+        .limit(1)
+        .lateral("waiting_on_thread")
+    )
 
     attention_rank = case(
         (live.c.run_status == AgentRunStatus.awaiting_input.value, _ATTENTION_LIVE_ASK),
@@ -218,6 +255,8 @@ def _thread_page_select(user_id: uuid.UUID) -> tuple[Any, ColumnElement[int]]:
             last_err.c.send_error,
             settled.c.started_at.label("newest_settled_started_at"),
             summary_run.started_at.label("summary_run_started_at"),
+            waiting.c.thread_id.label("waiting_thread_id"),
+            waiting.c.subject.label("waiting_subject"),
             attention_rank.label("attention_rank"),
         )
         .select_from(IntakeThread)
@@ -227,6 +266,7 @@ def _thread_page_select(user_id: uuid.UUID) -> tuple[Any, ColumnElement[int]]:
         .outerjoin(live, true())
         .outerjoin(last_err, true())
         .outerjoin(settled, true())
+        .outerjoin(waiting, true())
         .where(
             # The owner fence. `project_id` is NULL exactly when the matter row was
             # hard-deleted (SET NULL), and such an orphan belongs to the mailbox's
@@ -295,7 +335,32 @@ def _row_to_read(row: Row[Any], live_asks: dict[uuid.UUID, IntakeLiveAskRead]) -
         agent_thread_id=thread.agent_thread_id,
         live_ask=live_asks.get(row.run_id) if row.run_id is not None else None,
         last_send_error=row.send_error,
+        waiting_on=_waiting_on(thread, row),
         attention_rank=row.attention_rank,
+    )
+
+
+#: Statuses that mean "nobody has read this yet" — the only ones for which a sibling's
+#: live ask is the honest explanation (INTAKE-5a.1).
+_UNREAD_THREAD_STATUSES = frozenset({"received", "processing"})
+
+
+def _waiting_on(thread: IntakeThread, row: Row[Any]) -> IntakeWaitingOnRead | None:
+    """ "Waiting for your decision on '<other subject>'" — or ``None``.
+
+    Three conditions, all required: this thread has no account of its own yet, it is
+    still unread (``received``/``processing``), and a SIBLING thread on the same
+    conversation holds a live ask. A thread that HAS a summary is not waiting for
+    anything the reader needs told, and a thread whose own ask is live already says so
+    through ``live_ask``.
+    """
+    if thread.summary or thread.status not in _UNREAD_THREAD_STATUSES:
+        return None
+    if row.waiting_thread_id is None:
+        return None
+    return IntakeWaitingOnRead(
+        thread_id=row.waiting_thread_id,
+        subject=single_line_neutralised(row.waiting_subject or ""),
     )
 
 
@@ -520,6 +585,70 @@ async def get_intake_thread(
         ],
         messages_truncated=truncated,
     )
+
+
+@router.post(
+    "/threads/{thread_id}/summarise",
+    response_model=IntakeSummariseResponse,
+    status_code=202,
+    summary="Ask the agent to write the missing summary of a settled thread.",
+)
+async def summarise_intake_thread(
+    thread_id: uuid.UUID,
+    user: MutatingUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> IntakeSummariseResponse:
+    """POST /api/v1/intake/threads/{thread_id}/summarise
+
+    The backfill the Inbox needs and nothing more. Threads concluded before
+    ``record_intake_outcome`` carried a summary — and threads whose run safe-failed —
+    open on their email chain with no account of them at all. This queues ONE
+    read-only pass over the conversation the agent already has: composition builds it
+    with no ``draft_email_reply`` tool (so nothing it does can reach a counterparty)
+    and coaches it to restate the conclusion and write the summary. The thread's
+    status and the matter's state are untouched — a ``replied`` or ``handled`` thread
+    stays exactly that.
+
+    The refusals, all deliberate:
+
+    * 404 — not this caller's thread (never 403; the same answer a bad id gets);
+    * 422 ``no_conversation`` — the thread never ran, so there is no history to
+      summarise (asking a model to invent one is the opposite of what this is for);
+    * 409 ``summary_exists`` — it already has one; the agent rewrites it on its next
+      real run, and this endpoint is not a "regenerate" button;
+    * 409 ``thread_busy`` — a run is live on this conversation (a paused ask counts);
+      answer it first, and it will write the summary itself;
+    * 409 ``matter_closed`` — composition refuses to bind an archived matter (the
+      memory fence), so a run would compose without the intake tools and write
+      nothing. Refusing loudly beats spending a run to do nothing. Re-open the matter
+      to summarise it. **Known limit** (INTAKE-5a.1): a ``dealt_with`` thread closes
+      its matter, so those threads cannot be backfilled while closed;
+    * 409 ``summarise_in_progress`` — one is already queued for this thread;
+    * 503 ``enqueue_failed`` — the queue could not be reached; nothing was started.
+
+    There is no audit row: the durable record of this action is the ``agent_runs`` row
+    it creates, owned by the caller's own queue owner, with its steps and its cost.
+    """
+    stmt, _rank = _thread_page_select(user.id)
+    row = (await db.execute(stmt.where(IntakeThread.id == thread_id).limit(1))).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="intake thread not found")
+    thread: IntakeThread = row[0]
+    if thread.agent_thread_id is None:
+        raise HTTPException(status_code=422, detail="no_conversation")
+    if thread.summary:
+        raise HTTPException(status_code=409, detail="summary_exists")
+    if await is_conversation_in_flight(db, thread.agent_thread_id):
+        raise HTTPException(status_code=409, detail="thread_busy")
+    if row.project_id is None or row.project_archived_at is not None:
+        raise HTTPException(status_code=409, detail="matter_closed")
+
+    outcome = await enqueue_intake_summarise_job(thread.id)
+    if outcome == "duplicate":
+        raise HTTPException(status_code=409, detail="summarise_in_progress")
+    if outcome != "queued":
+        raise HTTPException(status_code=503, detail="enqueue_failed")
+    return IntakeSummariseResponse(thread_id=thread.id, queued=True)
 
 
 async def _resolve_attachment_file_ids(

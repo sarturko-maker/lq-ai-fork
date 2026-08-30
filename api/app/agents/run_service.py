@@ -229,13 +229,22 @@ async def start_agent_run(
     )
     db.add(run)
     thread.last_run_at = datetime.now(UTC)
+    # Read BEFORE the commit attempt: after a failed flush (and after rollback) the
+    # ORM object is expired, and touching ``thread.id`` would lazy-refresh on an
+    # async session — the very MissingGreenlet/PendingRollbackError that turned a
+    # lost race into an errored thread live (2026-08-30).
+    busy_thread_id = str(thread.id)
     try:
         await db.commit()
     except IntegrityError as exc:
         # The partial unique index (one running run per thread) closes the
-        # check-then-insert race between concurrent follow-ups.
+        # check-then-insert race between concurrent follow-ups. Roll back HERE so the
+        # caller receives a usable session — without this, the caller's next session
+        # op dies with PendingRollbackError and a lost race escalates into an error
+        # path (seen live 2026-08-30: a requeued sibling marked its thread 'error').
         if "uq_agent_runs_thread_running" in str(exc.orig):
-            raise AgentThreadBusy(str(thread.id)) from exc
+            await db.rollback()
+            raise AgentThreadBusy(busy_thread_id) from exc
         raise
     await db.refresh(run)
 

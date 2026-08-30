@@ -424,6 +424,64 @@ async def enqueue_intake_email_job(thread_id: uuid.UUID, *, provider_message_id:
         return False
 
 
+INTAKE_SUMMARISE_JOB_NAME = "intake_summarise_job"
+"""INTAKE-5a.1 — the human-asked "Summarise now" pass. Mirrors
+:data:`app.workers.intake_worker.INTAKE_SUMMARISE_JOB_NAME`."""
+
+
+def intake_summarise_job_id(thread_id: uuid.UUID) -> str:
+    """The deterministic arq job id for a summarise pass on one thread.
+
+    Keyed on the thread ALONE (there is no message to key on — the pass reads the
+    conversation, not an email), so a lawyer clicking "Summarise now" twice queues one
+    job. Registered with ``keep_result=0`` like the intake job, so the dedup window is
+    exactly "queued or running" and a second, later request is not refused for an hour
+    (the INTAKE-4b trap).
+    """
+
+    return f"intake-summarise:{thread_id}"
+
+
+async def enqueue_intake_summarise_job(thread_id: uuid.UUID) -> str:
+    """Enqueue the summarise pass onto the shared playbook queue.
+
+    Returns ``"queued"``, ``"duplicate"`` (arq refused the id — one is already queued
+    or running for this thread) or ``"failed"``. Three answers rather than the
+    ``bool`` its siblings return because the caller is a human-facing endpoint and the
+    two failure modes deserve different words: "we are already doing that" is not
+    "we could not reach the queue" (the INTAKE-4b lesson — never swallow the refusal).
+    """
+
+    try:
+        pool = await _get_m3a6_pool()
+        job = await pool.enqueue_job(
+            INTAKE_SUMMARISE_JOB_NAME,
+            str(thread_id),
+            _job_id=intake_summarise_job_id(thread_id),
+        )
+        if job is None:
+            log.info(
+                "enqueue_intake_summarise_job: already queued for this thread",
+                extra={"event": "intake_summarise_enqueue_deduped", "thread_id": str(thread_id)},
+            )
+            return "duplicate"
+        log.info(
+            "enqueue_intake_summarise_job: enqueued",
+            extra={"event": "intake_summarise_enqueue", "thread_id": str(thread_id)},
+        )
+        return "queued"
+    except Exception as exc:
+        log.warning(
+            "enqueue_intake_summarise_job: failed",
+            extra={
+                "event": "intake_summarise_enqueue_failed",
+                "thread_id": str(thread_id),
+                "error": str(exc),
+            },
+        )
+        return "failed"
+
+
 async def enqueue_autonomous_session_job(session_id: uuid.UUID) -> bool:
     """Enqueue an Autonomous Session job onto the shared playbook queue.
 

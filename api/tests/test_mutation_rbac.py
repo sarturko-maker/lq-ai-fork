@@ -166,8 +166,11 @@ def test_mutating_route_entry_count_pinned() -> None:
     /internal/intake/emails (bridge-token auth, allowlisted above) + POST
     /admin/intake-mailboxes + PATCH/DELETE /admin/intake-mailboxes/{mailbox_id}
     (all three AdminUser-gated — pass the drift guard automatically, no
-    allowlist entry): 144 → 148."""
-    assert len(_mutating_routes()) == 148
+    allowlist entry): 144 → 148.
+    INTAKE-5a.1 adds 1 mutating route (POST /intake/threads/{thread_id}/summarise,
+    MutatingUser-gated — the lawyer asking for a missing thread summary):
+    148 → 149."""
+    assert len(_mutating_routes()) == 149
 
 
 @pytest.mark.unit
@@ -192,13 +195,15 @@ def test_api_v1_path_count_pinned() -> None:
     INTAKE-1 (fork, ADR-F086) adds 3 paths: POST /internal/intake/emails +
     /admin/intake-mailboxes (POST+GET share one path) +
     /admin/intake-mailboxes/{mailbox_id} (PATCH+DELETE share one path):
-    197 → 200."""
+    197 → 200.
+    INTAKE-5a.1 adds 1 path (POST /intake/threads/{thread_id}/summarise):
+    202 → 203."""
     paths = {
         route.path
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
     }
-    assert len(paths) == 202
+    assert len(paths) == 203
 
 
 @pytest.mark.unit
@@ -213,13 +218,15 @@ def test_swapped_routers_expose_no_ungated_write() -> None:
     author-side org-playbook propose (MutatingUser): 70 → 71 (approve/reject/
     revoke are AdminUser, so they do not add to this count).
     WORKSPACE-3 (ADR-F082) adds PUT /matters/{project_id}/files/{file_id}/summary —
-    the lawyer's summary correct/clear (MutatingUser): 71 → 72."""
+    the lawyer's summary correct/clear (MutatingUser): 71 → 72.
+    INTAKE-5a.1 adds POST /intake/threads/{thread_id}/summarise — the lawyer asking
+    for the summary a settled thread never got (MutatingUser): 72 → 73."""
     gated = sum(
         1
         for _m, _p, route in _mutating_routes()
         if "get_mutating_user" in _auth_callables(route.dependant)
     )
-    assert gated == 72
+    assert gated == 73
 
 
 # ---------------------------------------------------------------------------

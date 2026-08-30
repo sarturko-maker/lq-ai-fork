@@ -62,6 +62,7 @@ class ScriptedToolCallingModel(BaseChatModel):
 
     _idx: int = PrivateAttr(default=0)
     _seen: list[list[BaseMessage]] = PrivateAttr(default_factory=list)
+    _bound_tool_names: set[str] = PrivateAttr(default_factory=set)
 
     def _usage_md(self) -> dict[str, int] | None:
         if self.usage_per_turn <= 0:
@@ -81,8 +82,29 @@ class ScriptedToolCallingModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "scripted-tool-calling"
 
+    @property
+    def bound_tool_names(self) -> set[str]:
+        """Every tool name this model was bound with, across all binds.
+
+        The script decides the OUTPUTS, but "which tools did composition build for
+        this run" is only observable here — the graph binds them to the model
+        (INTAKE-5a.1 S2: a read-only summarise pass must hold no write tool).
+        Includes deepagents builtins; callers intersect with the grant vocabulary.
+        """
+        return self._bound_tool_names
+
     def bind_tools(self, tools: Any, **kwargs: Any) -> ScriptedToolCallingModel:
-        # The script decides the outputs; tool schemas are irrelevant.
+        # The script decides the outputs; tool schemas are irrelevant. The NAMES are
+        # recorded (see bound_tool_names) — nothing else about them is.
+        for tool in tools or []:
+            name = getattr(tool, "name", None)
+            if name is None and isinstance(tool, dict):
+                function = tool.get("function")
+                name = tool.get("name") or (
+                    function.get("name") if isinstance(function, dict) else None
+                )
+            if isinstance(name, str):
+                self._bound_tool_names.add(name)
         return self
 
     def _next_message(self) -> AIMessage:

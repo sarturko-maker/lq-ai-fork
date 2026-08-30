@@ -49,6 +49,7 @@ Registered functions:
   (F1-S1, ADR-F009) — deep-agent run execution, at-most-once
   (per-function ``max_tries=1``; lease claim before composing).
 * :func:`app.workers.intake_worker.intake_email_job`
+* :func:`app.workers.intake_worker.intake_summarise_job`
   (INTAKE-1, ADR-F086) — email-intake processing pipeline. STUB body
   (logs + returns) until INTAKE-3 lands the real bound-area-agent run.
 
@@ -99,7 +100,7 @@ from app.workers.autonomous_worker import (
     autonomous_session_job,
 )
 from app.workers.easy_playbook_worker import easy_playbook_generation_job
-from app.workers.intake_worker import intake_email_job
+from app.workers.intake_worker import intake_email_job, intake_summarise_job
 from app.workers.playbook_worker import playbook_execution_job
 from app.workers.tabular_worker import tabular_execution_job
 
@@ -323,6 +324,9 @@ class WorkerSettings:
         # it stays a bare callable here so the module still imports where arq is
         # absent, which is why func() is imported lazily at all.
         intake_email_job,
+        # INTAKE-5a.1: the human-asked "Summarise now" pass. Same keep_result=0
+        # re-wrap below — a second request must not be refused for an hour.
+        intake_summarise_job,
         # agent_run_job is appended by _populate_class_attrs wrapped in
         # arq's func() so it carries per-function max_tries=1 + its own
         # timeout (at-most-once, ADR-F009) without touching the legacy
@@ -384,9 +388,8 @@ def _populate_class_attrs() -> None:
         # NEW row with a NEW id), so a lingering result key can never block a
         # legitimate enqueue. It also already treats ``None`` as fatal.
         for index, registered in enumerate(WorkerSettings.functions):
-            if registered is intake_email_job:
-                WorkerSettings.functions[index] = arq_func(intake_email_job, keep_result=0)
-                break
+            if registered in (intake_email_job, intake_summarise_job):
+                WorkerSettings.functions[index] = arq_func(registered, keep_result=0)
         if not any(getattr(f, "name", None) == "agent_run_job" for f in WorkerSettings.functions):
             WorkerSettings.functions.append(
                 # At-most-once (ADR-F009): max_tries=1 — verified at arq

@@ -2309,6 +2309,52 @@ def test_intake_doctrine_rides_the_prompt_only_for_an_intake_run() -> None:
     assert "NEW draft with draft_email_reply" in INTAKE_DOCTRINE
 
 
+def test_a_summarise_pass_gets_its_own_doctrine_and_never_the_drafting_one() -> None:
+    """INTAKE-5a.1: the summarise pass has no reply tool, so telling it to draft one
+    would coach it into a tool it cannot call. The two doctrines are exclusive."""
+    from app.agents.composition import INTAKE_DOCTRINE, INTAKE_SUMMARISE_DOCTRINE
+
+    binding = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Intake — NDA",
+        privileged=False,
+        minimum_inference_tier=None,
+        practice_area_id=None,
+    )
+    prompt = system_prompt_for(binding, intake_enabled=True, intake_summarise_only=True)
+    assert INTAKE_SUMMARISE_DOCTRINE in prompt
+    assert INTAKE_DOCTRINE not in prompt
+    assert "draft_email_reply" not in INTAKE_SUMMARISE_DOCTRINE
+    assert "record_intake_outcome" in INTAKE_SUMMARISE_DOCTRINE
+    # And it is never injected into an ordinary intake run.
+    assert INTAKE_SUMMARISE_DOCTRINE not in system_prompt_for(binding, intake_enabled=True)
+
+
+def test_the_matter_addendum_names_the_reference_beside_the_name() -> None:
+    """INTAKE-5a.1: "ORG-COM-0013 · Contoso hosting renewal" — the agent and the
+    lawyer read the same handle. A matter with no reference degrades to its name."""
+    binding = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Contoso hosting renewal",
+        privileged=False,
+        minimum_inference_tier=None,
+        practice_area_id=None,
+        reference="ORG-COM-0013",
+    )
+    assert 'the matter "ORG-COM-0013 · Contoso hosting renewal"' in system_prompt_for(binding)
+    plain = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Contoso hosting renewal",
+        privileged=False,
+        minimum_inference_tier=None,
+        practice_area_id=None,
+    )
+    assert 'the matter "Contoso hosting renewal"' in system_prompt_for(plain)
+
+
 @pytest_asyncio.fixture
 async def intake_thread_id(comp_env: CompositionEnv) -> AsyncIterator[uuid.UUID]:
     """Turn the composition matter into an intake candidate with a bound thread.
@@ -2396,6 +2442,8 @@ async def test_intake_matter_grants_the_outcome_tool_end_to_end(
                     "outcome": "needs_human",
                     "label": "NDA review",
                     "note": "Counterparty NDA to review; over to you.",
+                    # INTAKE-5a.1: the matter's own name, required alongside them.
+                    "matter_title": "Contoso NDA — mutual, before diligence",
                     # INTAKE-5a (ADR-F086 ruling 7): the summary is REQUIRED, so the
                     # scripted call carries one or the tool rejects it and the thread
                     # row — the proof this test rests on — never changes.
@@ -2435,9 +2483,11 @@ async def test_intake_matter_grants_the_outcome_tool_end_to_end(
         assert thread.summary_run_id == run_id
     audited = "\n".join(str(r.details) for r in await _tool_audit_rows(comp_env, run_id))
     assert "record_intake_outcome" in audited
-    # The note and the summary are model text — the audit contract keeps both out.
+    # The note, the summary and the matter title are model text — the audit contract
+    # keeps all of them out (counts/types/IDs only).
     assert "over to you" not in audited
     assert "attached mutual NDA" not in audited
+    assert "Contoso" not in audited
 
 
 async def test_ordinary_matter_never_gets_the_intake_tools(
@@ -2499,3 +2549,155 @@ async def test_ordinary_cockpit_chat_on_an_intake_matter_gets_neither_tools_nor_
         assert thread is not None
         assert thread.outcome is None
         assert thread.status == "processing"
+
+
+async def _mark_summarise_pass(env: CompositionEnv, intake_thread_id: uuid.UUID) -> uuid.UUID:
+    """The run POST /intake/threads/{id}/summarise queues: bound to the thread's
+    conversation and NAMED on the thread row (migration 0104), then settled so a
+    resume of it can be the only running run on the conversation."""
+    from app.models.intake import IntakeThread
+
+    run_id = await _bind_intake_run(env, intake_thread_id)
+    async with env.factory() as db:
+        thread = await db.get(IntakeThread, intake_thread_id)
+        run = await db.get(AgentRun, run_id)
+        assert thread is not None and run is not None
+        thread.summarise_pass_run_id = run_id
+        run.status = "awaiting_input"
+        await db.commit()
+    return run_id
+
+
+async def _resume_of(env: CompositionEnv, parent_run_id: uuid.UUID) -> uuid.UUID:
+    """The row POST /agents/runs/{id}/resume writes: a NEW run on the SAME
+    conversation, carrying the parent link (migration 0103)."""
+    async with env.factory() as db:
+        parent = await db.get(AgentRun, parent_run_id)
+        assert parent is not None
+        resume = AgentRun(
+            user_id=parent.user_id,
+            thread_id=parent.thread_id,
+            project_id=parent.project_id,
+            status="running",
+            prompt="[resume: approve]",
+            model_alias=parent.model_alias,
+            max_steps=parent.max_steps,
+            resumed_from_run_id=parent.id,
+        )
+        db.add(resume)
+        await db.commit()
+        return resume.id
+
+
+async def test_a_resumed_summarise_pass_stays_read_only(
+    comp_env: CompositionEnv, intake_thread_id: uuid.UUID
+) -> None:
+    """INTAKE-5a.1 B1 + S2. A summarise pass that paused and resumed runs under a NEW
+    agent_runs row, so an identity test against run_id alone re-composed it as a FULL
+    intake run — the reply tool back, the drafting doctrine back, and its binding sent
+    through the legacy layer-2 guess (the P1 fix D closed).
+
+    The pass composes EXACTLY the read-only set: the matter read/search tools plus its
+    own conclusion. No draft_email_reply, no matter writes (wiki, facts, consolidation,
+    document summaries, roster), no edited-document re-read, no area domain group. The
+    Store is off here, so search_matter_conversations (in SUMMARISE_PASS_TOOL_NAMES, and
+    read-only) is not built for ANY run in this test.
+    """
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agents.capabilities import hitl_eligible_tool_names
+    from app.agents.composition import INTAKE_SUMMARISE_DOCTRINE, SUMMARISE_PASS_TOOL_NAMES
+    from app.agents.matter_conversation_tools import MATTER_CONVERSATION_TOOL_NAMES
+
+    parent_run_id = await _mark_summarise_pass(comp_env, intake_thread_id)
+    resume_run_id = await _resume_of(comp_env, parent_run_id)
+
+    model = ScriptedToolCallingModel(responses=[final_message("Summary written.")])
+    await compose_and_execute_run(
+        run_id=resume_run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+        checkpointer_provider=InMemorySaver,
+        store_provider=lambda: None,
+    )
+
+    run = await _run_row(comp_env, resume_run_id)
+    assert run.status == "completed", run.error
+    composed = model.bound_tool_names & hitl_eligible_tool_names()
+    assert composed == SUMMARISE_PASS_TOOL_NAMES - MATTER_CONVERSATION_TOOL_NAMES
+    assert "draft_email_reply" not in composed
+
+    # ...and it is coached as the pass it is, not as a drafting intake run.
+    # Content may arrive as plain text OR as typed blocks; ``str()`` on a block list
+    # is a repr (newlines escaped), which can never contain the doctrine verbatim —
+    # extract the text blocks instead.
+    def _message_text(content: object) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+        return str(content)
+
+    system_text = "\n".join(_message_text(m.content) for m in model.seen_messages[0])
+    assert INTAKE_SUMMARISE_DOCTRINE in system_text
+
+
+async def test_a_resumed_summarise_pass_binds_to_the_thread_it_was_asked_about(
+    comp_env: CompositionEnv, intake_thread_id: uuid.UUID
+) -> None:
+    """B1, the second half: the marker names the thread, and the resume inherits that
+    binding. The run concludes with summarise semantics — the thread's status does not
+    move and the matter is not renamed — which is only possible if it bound to THIS
+    thread as a summarise pass."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.models.intake import IntakeThread
+
+    parent_run_id = await _mark_summarise_pass(comp_env, intake_thread_id)
+    resume_run_id = await _resume_of(comp_env, parent_run_id)
+    async with comp_env.factory() as db:
+        thread = await db.get(IntakeThread, intake_thread_id)
+        project = await db.get(Project, comp_env.project_id)
+        assert thread is not None and project is not None
+        thread.status = "replied"
+        # The matter still carries the name the eager intake row was opened with, so a
+        # FULL intake run WOULD rename it here (S5) — the assertion below is real.
+        project.name_source = "subject"
+        await db.commit()
+
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "record_intake_outcome",
+                {
+                    "outcome": "needs_human",
+                    "label": "NDA review",
+                    "note": "Backfilled account of the thread.",
+                    "matter_title": "Contoso NDA — mutual, before diligence",
+                    "summary": [{"title": "What they want", "text": "A review of the mutual NDA."}],
+                },
+            ),
+            final_message("Summary written."),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=resume_run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+        checkpointer_provider=InMemorySaver,
+        store_provider=lambda: None,
+    )
+
+    async with comp_env.factory() as db:
+        thread = await db.get(IntakeThread, intake_thread_id)
+        project = await db.get(Project, comp_env.project_id)
+        assert thread is not None and project is not None
+        # It wrote the account onto the MARKED thread...
+        assert thread.summary == [
+            {"title": "What they want", "text": "A review of the mutual NDA."}
+        ]
+        assert thread.summary_run_id == resume_run_id
+        # ...with summarise semantics: the settled status stands and the matter keeps
+        # its name (a full intake run would have parked it and renamed it).
+        assert thread.status == "replied"
+        assert project.name == "Composition Matter"

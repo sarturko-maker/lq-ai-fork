@@ -57,7 +57,7 @@ from typing import Annotated, Any
 
 from langchain_core.tools import InjectedToolCallId
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.guard import GuardContext, guarded_dispatch
@@ -72,6 +72,10 @@ from app.schemas.intake import DraftEmailReplyInput, RecordIntakeOutcomeInput
 logger = logging.getLogger(__name__)
 
 INTAKE_TOOL_NAMES = frozenset({"record_intake_outcome", "draft_email_reply"})
+# INTAKE-5a.1: the human-asked "Summarise now" pass gets the conclusion tool alone.
+# Public because composition pins the whole read-only tool set of such a pass
+# against it (S2 review fix) — the grant sets live in the builder modules.
+SUMMARISE_INTAKE_TOOL_NAMES = frozenset({"record_intake_outcome"})
 
 # outcome -> the thread status it settles on. The matter-side effect (closing the
 # matter on 'dealt_with') is applied beside this map in _record_intake_outcome.
@@ -126,8 +130,9 @@ def build_intake_tools(
     binding: MatterBinding,
     intake_thread_id: uuid.UUID,
     bridge: BridgeClient | None = None,
+    summarise_only: bool = False,
 ) -> list[Callable[..., Any]]:
-    """Build the two intake tools for one run on an intake-born matter.
+    """Build the intake tools for one run on an intake-born matter (one, or two).
 
     The guard context grants exactly :data:`INTAKE_TOOL_NAMES`; ``binding.project_id``
     scopes every write, so the blast radius is this one matter and the one
@@ -144,18 +149,29 @@ def build_intake_tools(
     the deployment has not configured a bridge: an approved reply is then kept as a
     draft with ``send_error='not_configured'`` and the tool says plainly that nothing
     was delivered.
+
+    ``summarise_only`` (INTAKE-5a.1) is the human-asked "Summarise now" pass: the run
+    exists to write an account of a thread that never got one. It gets
+    ``record_intake_outcome`` and NOTHING ELSE — no reply tool is built, so the grant
+    set is narrowed to match (R6 fails closed on a tool that is not in it), and the
+    outcome it records leaves the thread's status exactly where it was.
     """
+    granted = SUMMARISE_INTAKE_TOOL_NAMES if summarise_only else INTAKE_TOOL_NAMES
     ctx = GuardContext(
         session_factory=session_factory,
         run_id=run_id,
         user_id=binding.user_id,
         project_id=binding.project_id,
-        granted=INTAKE_TOOL_NAMES,
+        granted=granted,
         practice_area_id=binding.practice_area_id,
     )
 
     async def record_intake_outcome(
-        outcome: str, label: str, note: str, summary: list[dict[str, str]]
+        outcome: str,
+        label: str,
+        note: str,
+        matter_title: str,
+        summary: list[dict[str, str]],
     ) -> str:
         """Conclude this intake thread — call this exactly once, last.
 
@@ -177,6 +193,18 @@ def build_intake_tools(
         `note` is one short paragraph the lawyer reads at a glance: what this is,
         what you did, and what (if anything) you need from them.
 
+        `matter_title` NAMES this matter. The matter was opened before anyone had
+        read the email, so it is still called whatever the subject line said —
+        which is often "RE: FW: quick question". Replace it with the essence of
+        the matter in at most 80 characters, on one line, the way a lawyer would
+        write it on a file: "Contoso hosting renewal — pricing before notice
+        deadline", "Northwind MSA — indemnity cap open". No sender addresses, no
+        "RE:"/"FW:", and do NOT repeat the matter reference — it is displayed
+        beside the name already. The title usually settles after the first email;
+        write it again only when the thread turns out to be about something
+        different. If a human has renamed this matter, their name stands and
+        yours is ignored — that is deliberate, not a failure.
+
         `summary` is THE THREAD SO FAR for someone who has never seen it: one to
         five bullets, each `{"title": "...", "text": "..."}`. The title is two or
         three words the lawyer's eye lands on ("What they want", "What we did",
@@ -197,7 +225,9 @@ def build_intake_tools(
                 outcome=outcome,
                 label=label,
                 note=note,
+                matter_title=matter_title,
                 summary=summary,
+                summarise_only=summarise_only,
             ),
             ctx,
         )
@@ -253,6 +283,10 @@ def build_intake_tools(
             ctx,
         )
 
+    if summarise_only:
+        # Nothing this run does can reach a counterparty: the tool is not built, so
+        # there is no interrupt to approve and no send path to reach.
+        return [record_intake_outcome]
     return [record_intake_outcome, draft_email_reply]
 
 
@@ -281,15 +315,32 @@ async def load_intake_thread_for_run(
     ``scalar_one_or_none()`` here raised ``MultipleResultsFound`` — which killed the
     resume of the first live approval (three rows: one ``awaiting_human``, two still
     ``received``). A ``LIMIT 1`` would only have replaced a crash with a coin flip, so
-    the run is bound to its thread EXPLICITLY, in three deterministic steps:
+    the run is bound to its thread EXPLICITLY, in four deterministic steps:
 
+    0. **A human-asked summarise pass** (INTAKE-5a.1) names its thread on the row
+       itself (``intake_threads.summarise_pass_run_id``): it claims no inbound
+       message, so no later layer could find it. Matched against this run AND the
+       runs it resumes (below), so a pass that paused and resumed keeps its binding
+       instead of falling through to the legacy layer 2.
     1. **This run's own work.** The worker stamps an inbound message's ``run_id`` at
        the moment it starts a run for it (``intake_worker``), so the message carrying
        this ``run_id`` names the thread the run was started for.
-    2. **The conversation's lineage.** A resume is a NEW ``agent_runs`` row with no
-       messages of its own, so fall back to the newest inbound processed by ANY run on
-       this same agent conversation — precisely the message the paused run was working
-       on.
+    1b. **The resume's parent chain** (INTAKE-5a.1 fix D, migration 0103). A resume is
+       a NEW ``agent_runs`` row with no messages of its own, but it now records WHICH
+       run it resumes (``agent_runs.resumed_from_run_id``, set by the resume endpoint;
+       a resume of a resume chains, so the walk follows it up to
+       :data:`_RESUME_CHAIN_MAX_HOPS`). The thread is then the one whose inbound
+       message an ANCESTOR claimed — a fact, not an inference.
+
+       This layer exists because layer 2 below got it WRONG in production, twice: on a
+       conversation holding three intake threads, an approved reply on the paused
+       thread bound to a SIBLING thread that had already replied, and the tool's
+       delivered-row guard refused the send. The lawyer's approval was consumed and
+       nothing went out.
+    2. **The conversation's lineage — LEGACY heuristic, superseded by 1b.** The newest
+       inbound processed by ANY run on this same agent conversation. It is right when
+       the conversation holds ONE thread and a guess when it holds several, which is
+       why it now runs only for runs that predate the parent link (no backfill).
     3. **The single working thread.** With nothing processed yet, take the one thread
        that is not still ``received``.
 
@@ -302,6 +353,20 @@ async def load_intake_thread_for_run(
     candidates = await load_conversation_intake_threads(
         db, project_id=project_id, agent_thread_id=agent_thread_id
     )
+    # The run's own id plus the runs it resumes, resolved at most once per call and
+    # only when a layer actually needs it (B1/fix D).
+    lineage: list[uuid.UUID] | None = None
+    if run_id is not None and any(c.summarise_pass_run_id is not None for c in candidates):
+        # Layer 0 (INTAKE-5a.1): a human-asked "Summarise now" pass names its thread
+        # outright — it claims no inbound message, so nothing below could find it.
+        # The marker names the run the endpoint QUEUED; a pass that paused and was
+        # resumed runs under a NEW agent_runs row, so the whole resume lineage counts
+        # (B1 review fix) or the resumed pass would fall through to the legacy layer 2
+        # and bind to a sibling thread — the very P1 fix D closed.
+        lineage = [run_id, *await resume_ancestor_run_ids(db, run_id)]
+        for candidate in candidates:
+            if candidate.summarise_pass_run_id in lineage:
+                return candidate
     if len(candidates) <= 1:
         return candidates[0] if candidates else None
 
@@ -325,6 +390,15 @@ async def load_intake_thread_for_run(
         bound = (
             await db.execute(_newest_processed(IntakeMessage.run_id == run_id))
         ).scalar_one_or_none()
+    if bound is None and run_id is not None:
+        # Layer 1b: follow the resume's own parent link (fix D).
+        ancestors = (
+            lineage[1:] if lineage is not None else await resume_ancestor_run_ids(db, run_id)
+        )
+        if ancestors:
+            bound = (
+                await db.execute(_newest_processed(IntakeMessage.run_id.in_(ancestors)))
+            ).scalar_one_or_none()
     if bound is None:
         bound = (
             await db.execute(
@@ -352,6 +426,53 @@ async def load_intake_thread_for_run(
         },
     )
     return None
+
+
+#: How far the resume chain is followed before the walk gives up (fix D). A human
+#: approving, being sent back to, and re-approving a draft builds a chain one link at
+#: a time; ten is far past any real sequence and makes a corrupted self-referential
+#: link a bounded walk rather than a hang.
+_RESUME_CHAIN_MAX_HOPS = 10
+
+
+async def is_summarise_pass_run(
+    db: AsyncSession, thread: IntakeThread | None, run_id: uuid.UUID
+) -> bool:
+    """Is THIS run the thread's human-asked "Summarise now" pass? (INTAKE-5a.1)
+
+    The marker (``intake_threads.summarise_pass_run_id``, migration 0104) names the
+    run the endpoint queued. A pass that stopped for a human and was resumed executes
+    under a NEW ``agent_runs`` row, so the question is asked of the whole resume
+    lineage — otherwise the resumed pass would compose as a FULL intake run (the reply
+    tool back, the drafting doctrine back) and its safe-fail would restate the status
+    of a thread it was only ever meant to describe (B1/S3 review fix).
+    """
+    if thread is None or thread.summarise_pass_run_id is None:
+        return False
+    if thread.summarise_pass_run_id == run_id:
+        return True
+    return thread.summarise_pass_run_id in await resume_ancestor_run_ids(db, run_id)
+
+
+async def resume_ancestor_run_ids(db: AsyncSession, run_id: uuid.UUID) -> list[uuid.UUID]:
+    """The runs THIS run resumes, nearest ancestor first (INTAKE-5a.1 fix D).
+
+    Empty for an ordinary run, for a historic resume written before migration 0103,
+    and for a run row that is gone. ``db.get`` is a primary-key lookup served from the
+    session's identity map when the caller already loaded the row (the callers do),
+    so the common case costs no query at all.
+    """
+    ancestors: list[uuid.UUID] = []
+    current = await db.get(AgentRun, run_id)
+    for _ in range(_RESUME_CHAIN_MAX_HOPS):
+        if current is None or current.resumed_from_run_id is None:
+            break
+        parent_id = current.resumed_from_run_id
+        if parent_id in ancestors or parent_id == run_id:
+            break  # a cycle is a bug, not a state to walk forever
+        ancestors.append(parent_id)
+        current = await db.get(AgentRun, parent_id)
+    return ancestors
 
 
 async def load_conversation_intake_threads(
@@ -409,14 +530,27 @@ async def _record_intake_outcome(
     outcome: str,
     label: str,
     note: str,
+    matter_title: str,
     summary: list[dict[str, str]],
+    summarise_only: bool = False,
 ) -> str:
-    """Validate → write the outcome + summary onto the thread → apply the project effect."""
+    """Validate → write the outcome + summary onto the thread → apply the project effect.
+
+    ``summarise_only`` (INTAKE-5a.1) is the human-asked backfill pass. It writes the
+    ACCOUNT of the thread — outcome, label, note, summary — and touches nothing else:
+    the thread's status, the matter's NAME and its open/closed state are facts a real
+    run established, and a pass whose only purpose is to describe them must not
+    restate them as decisions. Concretely, it can never downgrade a ``replied`` or
+    ``handled`` thread back to ``awaiting_human``, never re-open (or close) the
+    matter, and never rename it (S5: the arg stays required — the model still has to
+    say what the matter is — but the result tells it the title was not applied).
+    """
     try:
         proposal = RecordIntakeOutcomeInput(
             outcome=outcome,  # type: ignore[arg-type]  # Pydantic validates the closed set
             label=label,
             note=note,
+            matter_title=matter_title,
             summary=summary,  # type: ignore[arg-type]  # Pydantic validates the item shape
         )
     except ValidationError as exc:
@@ -460,44 +594,91 @@ async def _record_intake_outcome(
     # place a failed delivery is visible to the lawyer, so the outcome records itself
     # WITHOUT touching the status. The doctrine asks for the outcome first, so this is
     # the out-of-order case, not the normal one.
-    if thread.status not in _SEND_TERMINAL_THREAD_STATUSES:
-        thread.status = _OUTCOME_THREAD_STATUS[proposal.outcome]
+    if summarise_only:
+        # The lawyer asked for an account of a settled thread, not for a new decision
+        # about it. Leaving the status alone is what makes `replied`/`handled` sticky
+        # here — there is no "stronger status" comparison to get wrong.
+        status_note = f"the thread stays {thread.status}"
+    else:
+        if thread.status not in _SEND_TERMINAL_THREAD_STATUSES:
+            thread.status = _OUTCOME_THREAD_STATUS[proposal.outcome]
+        status_note = f"the thread is now {thread.status}"
+
+    # ONE owner-scoped load for the matter's lifecycle effects below (the close, the
+    # re-open) — the same row, in the same transaction, read once. The NAME is not
+    # written through it: that one is a conditional UPDATE (S4, below).
+    project = (
+        await db.execute(
+            select(Project).where(
+                Project.id == binding.project_id, Project.owner_id == binding.user_id
+            )
+        )
+    ).scalar_one_or_none()
+
+    # INTAKE-5a.1 (maintainer UAT ruling, migration 0103): the matter's NAME is the
+    # agent's summary of what this thread IS, not the subject line the eager row was
+    # opened with. Three fences, all structural, and all of them evaluated BY THE
+    # DATABASE at write time (S4 review fix — a read-then-assign let a human PATCH
+    # that committed between the SELECT above and this write be overwritten, and its
+    # ``name_source`` reset to 'agent', losing the pin):
+    #
+    # * ``intake_state = 'candidate'`` — only an intake-BORN matter is renamed. A
+    #   thread later attached to an ordinary matter (INTAKE-5b) must never rename
+    #   the lawyer's own file.
+    # * ``name_source <> 'human'`` — a person's name is final. This is ADR-F042's
+    #   auto-write-then-correct in its simplest form: the agent writes, the human
+    #   corrects, and the correction is permanent (pins win).
+    # * ``owner_id`` — the same fence the SELECT above carries.
+    #
+    # A summarise pass renames NOTHING (S5): it exists to describe a settled thread,
+    # and its own result text used to say "nothing else changed" while the title
+    # moved underneath the lawyer.
+    if not summarise_only:
+        await db.execute(
+            update(Project)
+            .where(
+                Project.id == binding.project_id,
+                Project.owner_id == binding.user_id,
+                Project.intake_state == "candidate",
+                Project.name_source != "human",
+                Project.name != proposal.matter_title,
+            )
+            .values(name=proposal.matter_title, name_source="agent")
+            # "fetch" (Postgres: RETURNING, no extra round trip) so the session syncs
+            # the rows the DATABASE matched. The default "evaluate" would re-run the
+            # predicate against the possibly-stale identity-map copy and could tell
+            # this session the rename happened when the DB refused it.
+            .execution_options(synchronize_session="fetch")
+        )
+
+    if summarise_only:
+        return (
+            f"Summary recorded for this thread ({proposal.outcome}, label: "
+            f"{proposal.label}). Nothing else changed: {status_note}, the matter's "
+            "state is exactly as the earlier run left it, and the title you wrote was "
+            "noted but NOT applied — a summary pass never renames the matter."
+        )
 
     project_note = "the matter stays open for the lawyer"
-    if proposal.outcome != "dealt_with" and prior_outcome == "dealt_with":
-        # Last-wins must win WHOLE (adversarial review B4): an earlier dealt_with in
-        # this same run closed the matter, so changing our mind has to re-open it or
-        # the thread says "open" while the matter is archived. Scoped to undoing OUR
-        # OWN close — a matter the human archived was never given a dealt_with
-        # outcome, so this branch cannot reach it.
-        reopened = (
-            await db.execute(
-                select(Project).where(
-                    Project.id == binding.project_id, Project.owner_id == binding.user_id
-                )
-            )
-        ).scalar_one_or_none()
-        if reopened is not None:
-            reopened.archived_at = None
+    # Last-wins must win WHOLE (adversarial review B4): an earlier dealt_with in this
+    # same run closed the matter, so changing our mind has to re-open it or the thread
+    # says "open" while the matter is archived. Scoped to undoing OUR OWN close — a
+    # matter the human archived was never given a dealt_with outcome, so this branch
+    # cannot reach it.
+    if proposal.outcome != "dealt_with" and prior_outcome == "dealt_with" and project is not None:
+        project.archived_at = None
     if proposal.outcome == "dealt_with":
         # Close the matter: the SAME soft archive DELETE /projects/{id} performs
         # (archived_at), and nothing else — ``intake_state`` is provenance, never a
         # lifecycle the agent drives (ADR-F086 Amendment A1). Archiving is also the
         # memory fence: a closed matter composes no binding on a later run.
-        project = (
-            await db.execute(
-                select(Project).where(
-                    Project.id == binding.project_id, Project.owner_id == binding.user_id
-                )
-            )
-        ).scalar_one_or_none()
         if project is not None and project.archived_at is None:
             project.archived_at = datetime.now(tz=UTC)
         project_note = "the matter is closed and filed away"
 
     return (
         f"Intake outcome recorded: {proposal.outcome} (label: {proposal.label}). "
-        f"The thread is now {thread.status} and {project_note}. "
+        f"{status_note[0].upper()}{status_note[1:]} and {project_note}. "
         "This thread stays visible to the lawyer with your label and note."
     )
 
@@ -780,6 +961,10 @@ async def safe_fail_intake_thread(
     ``summary_run_id`` against the newest settled run instead and shows the reader
     "the agent's last run did not finish", which is the honest form of the same fact.
 
+    A human-asked SUMMARISE pass is exempt (S3): it is read-only by construction, so
+    "it ended without an outcome" says nothing about whose decision the thread waits
+    for. Its thread is left exactly as the run that settled it left it.
+
     Returns whether it changed anything. Never raises: it must not mask the run's
     own outcome (the caller invokes it from a ``finally``).
     """
@@ -797,6 +982,12 @@ async def safe_fail_intake_thread(
                 run_id=run_id,
             )
             if thread is None or thread.status != "processing":
+                return False
+            if await is_summarise_pass_run(db, thread, run_id):
+                # S3 review fix: a summarise pass describes a thread, it never decides
+                # about one. Parking it at `awaiting_human` (and stamping the R7 note)
+                # would make the read-only pass the last word on a thread some earlier
+                # run really did settle.
                 return False
             thread.status = "awaiting_human"
             if thread.outcome_note is None:

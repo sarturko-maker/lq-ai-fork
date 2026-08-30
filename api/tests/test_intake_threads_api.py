@@ -31,6 +31,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import intake_threads as intake_threads_module
 from app.api.intake_threads import (
     _CURSOR_OFFSET_MAX,
     _encode_cursor as _cursor,
@@ -1237,3 +1238,300 @@ async def test_detail_orders_a_sent_reply_without_provider_timestamp_by_insert_t
         str(reply.id),
         str(second_in.id),
     ]
+
+
+# --------------------------------------------------------------------------- #
+# INTAKE-5a.1 — `waiting_on`: why an unread thread is unread
+# --------------------------------------------------------------------------- #
+
+
+async def _sibling_on_same_conversation(
+    db: AsyncSession,
+    owner_user: User,
+    *,
+    mailbox: IntakeMailbox,
+    project: Project,
+    agent_thread: AgentThread,
+    status: str = "received",
+    subject: str = "Re: the renewal",
+    summary: list[dict[str, str]] | None = None,
+) -> SeededThread:
+    """A second intake thread on the SAME agent conversation (ADR-F088 layer 2/3)."""
+    thread = IntakeThread(
+        mailbox_id=mailbox.id,
+        provider_thread_id=f"thr-{uuid.uuid4().hex[:8]}",
+        project_id=project.id,
+        agent_thread_id=agent_thread.id,
+        subject=subject,
+        status=status,
+        auth_state="pass",
+        message_count=1,
+        last_inbound_at=_BASE_TIME + timedelta(hours=1),
+        summary=summary,
+    )
+    db.add(thread)
+    await db.flush()
+    return SeededThread(thread=thread, project=project, mailbox=mailbox, agent_thread=agent_thread)
+
+
+async def _paused_ask_on(db: AsyncSession, owner_user: User, seeded: SeededThread) -> AgentRun:
+    run = await _run(db, owner_user, seeded, status="awaiting_input")
+    await _hitl_step(db, run)
+    await _message(db, seeded.thread, run=run)
+    return run
+
+
+async def test_waiting_on_names_the_sibling_that_holds_the_live_ask(
+    client: AsyncClient, db_session: AsyncSession, owner: User
+) -> None:
+    """One conversation runs one run at a time, so a thread whose sibling is paused on
+    the lawyer is not "in progress" — it is waiting for them, and the row now says so
+    (and names what to answer)."""
+    mailbox = await _mailbox(db_session, owner)
+    project = await _matter(db_session, owner)
+    asking = await _seed_thread(
+        db_session,
+        owner,
+        mailbox=mailbox,
+        project=project,
+        subject="NDA — please approve the reply",
+        with_conversation=True,
+    )
+    assert asking.agent_thread is not None
+    await _paused_ask_on(db_session, owner, asking)
+    waiting = await _sibling_on_same_conversation(
+        db_session,
+        owner,
+        mailbox=mailbox,
+        project=project,
+        agent_thread=asking.agent_thread,
+    )
+
+    items = (await client.get(_LIST, headers=_bearer(owner))).json()["items"]
+    by_id = {item["id"]: item for item in items}
+    assert by_id[str(waiting.thread.id)]["waiting_on"] == {
+        "thread_id": str(asking.thread.id),
+        "subject": "NDA — please approve the reply",
+    }
+    # The thread that HOLDS the ask says so through `live_ask` — it is not waiting on
+    # itself.
+    assert by_id[str(asking.thread.id)]["waiting_on"] is None
+    assert by_id[str(asking.thread.id)]["live_ask"] is not None
+
+
+async def test_waiting_on_is_absent_when_the_only_ask_is_this_threads_own(
+    client: AsyncClient, db_session: AsyncSession, owner: User
+) -> None:
+    """The explicit negative: a single-thread conversation with a live ask never
+    reports waiting_on, whatever its status."""
+    mailbox = await _mailbox(db_session, owner)
+    seeded = await _seed_thread(
+        db_session,
+        owner,
+        mailbox=mailbox,
+        project=await _matter(db_session, owner),
+        status="processing",
+        with_conversation=True,
+    )
+    await _paused_ask_on(db_session, owner, seeded)
+    (item,) = (await client.get(_LIST, headers=_bearer(owner))).json()["items"]
+    assert item["waiting_on"] is None
+
+
+async def test_waiting_on_is_absent_once_the_thread_has_its_own_summary(
+    client: AsyncClient, db_session: AsyncSession, owner: User
+) -> None:
+    """A thread the agent has already accounted for is not "unread": the reader gets
+    the summary, not an explanation of a queue."""
+    mailbox = await _mailbox(db_session, owner)
+    project = await _matter(db_session, owner)
+    asking = await _seed_thread(
+        db_session, owner, mailbox=mailbox, project=project, with_conversation=True
+    )
+    assert asking.agent_thread is not None
+    await _paused_ask_on(db_session, owner, asking)
+    summarised = await _sibling_on_same_conversation(
+        db_session,
+        owner,
+        mailbox=mailbox,
+        project=project,
+        agent_thread=asking.agent_thread,
+        summary=[{"title": "What they want", "text": "A renewal quote."}],
+    )
+    items = (await client.get(_LIST, headers=_bearer(owner))).json()["items"]
+    by_id = {item["id"]: item for item in items}
+    assert by_id[str(summarised.thread.id)]["waiting_on"] is None
+
+
+async def test_waiting_on_is_absent_for_a_settled_thread(
+    client: AsyncClient, db_session: AsyncSession, owner: User
+) -> None:
+    """Only `received`/`processing` threads are unread. A `handled` sibling is not
+    waiting for anything."""
+    mailbox = await _mailbox(db_session, owner)
+    project = await _matter(db_session, owner)
+    asking = await _seed_thread(
+        db_session, owner, mailbox=mailbox, project=project, with_conversation=True
+    )
+    assert asking.agent_thread is not None
+    await _paused_ask_on(db_session, owner, asking)
+    settled = await _sibling_on_same_conversation(
+        db_session,
+        owner,
+        mailbox=mailbox,
+        project=project,
+        agent_thread=asking.agent_thread,
+        status="handled",
+    )
+    items = (await client.get(_LIST, headers=_bearer(owner))).json()["items"]
+    by_id = {item["id"]: item for item in items}
+    assert by_id[str(settled.thread.id)]["waiting_on"] is None
+
+
+# --------------------------------------------------------------------------- #
+# INTAKE-5a.1 — POST /intake/threads/{id}/summarise
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def queued(monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
+    """Capture the arq enqueue at the module seam (no Redis in the suite)."""
+    calls: list[uuid.UUID] = []
+
+    async def _fake(thread_id: uuid.UUID) -> str:
+        calls.append(thread_id)
+        return "queued"
+
+    monkeypatch.setattr(intake_threads_module, "enqueue_intake_summarise_job", _fake)
+    return calls
+
+
+async def _settled_summary_less_thread(db: AsyncSession, owner_user: User) -> SeededThread:
+    mailbox = await _mailbox(db, owner_user)
+    seeded = await _seed_thread(
+        db,
+        owner_user,
+        mailbox=mailbox,
+        project=await _matter(db, owner_user),
+        status="replied",
+        with_conversation=True,
+    )
+    await _run(db, owner_user, seeded, status="completed")
+    return seeded
+
+
+async def test_summarise_queues_one_pass_for_a_settled_summary_less_thread(
+    client: AsyncClient, db_session: AsyncSession, owner: User, queued: list[uuid.UUID]
+) -> None:
+    seeded = await _settled_summary_less_thread(db_session, owner)
+    resp = await client.post(f"{_LIST}/{seeded.thread.id}/summarise", headers=_bearer(owner))
+    assert resp.status_code == 202, resp.text
+    assert resp.json() == {"thread_id": str(seeded.thread.id), "queued": True}
+    assert queued == [seeded.thread.id]
+    # Nothing about the thread changed: the pass is what writes, not the request.
+    await db_session.refresh(seeded.thread)
+    assert seeded.thread.status == "replied"
+    assert seeded.thread.summary is None
+
+
+async def test_summarise_is_a_404_for_another_users_thread(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    owner: User,
+    stranger: User,
+    queued: list[uuid.UUID],
+) -> None:
+    """Cross-user is 404, never 403 — and nothing is queued."""
+    seeded = await _settled_summary_less_thread(db_session, owner)
+    resp = await client.post(f"{_LIST}/{seeded.thread.id}/summarise", headers=_bearer(stranger))
+    assert resp.status_code == 404
+    assert (
+        await client.post(f"{_LIST}/{uuid.uuid4()}/summarise", headers=_bearer(stranger))
+    ).status_code == 404
+    assert queued == []
+
+
+async def test_summarise_refuses_a_thread_that_already_has_one(
+    client: AsyncClient, db_session: AsyncSession, owner: User, queued: list[uuid.UUID]
+) -> None:
+    seeded = await _settled_summary_less_thread(db_session, owner)
+    seeded.thread.summary = [{"title": "What they want", "text": "A review."}]
+    await db_session.flush()
+    resp = await client.post(f"{_LIST}/{seeded.thread.id}/summarise", headers=_bearer(owner))
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "summary_exists"
+    assert queued == []
+
+
+async def test_summarise_refuses_while_the_conversation_is_in_flight(
+    client: AsyncClient, db_session: AsyncSession, owner: User, queued: list[uuid.UUID]
+) -> None:
+    """A paused ask counts as in flight: answer it, and that run writes the summary."""
+    mailbox = await _mailbox(db_session, owner)
+    seeded = await _seed_thread(
+        db_session,
+        owner,
+        mailbox=mailbox,
+        project=await _matter(db_session, owner),
+        status="awaiting_human",
+        with_conversation=True,
+    )
+    run = await _run(db_session, owner, seeded, status="awaiting_input")
+    await _hitl_step(db_session, run)
+    resp = await client.post(f"{_LIST}/{seeded.thread.id}/summarise", headers=_bearer(owner))
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "thread_busy"
+    assert queued == []
+
+
+async def test_summarise_refuses_a_thread_that_never_ran(
+    client: AsyncClient, db_session: AsyncSession, owner: User, queued: list[uuid.UUID]
+) -> None:
+    """No conversation means no history to summarise — 422, not an invented account."""
+    mailbox = await _mailbox(db_session, owner)
+    seeded = await _seed_thread(
+        db_session, owner, mailbox=mailbox, project=await _matter(db_session, owner)
+    )
+    resp = await client.post(f"{_LIST}/{seeded.thread.id}/summarise", headers=_bearer(owner))
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "no_conversation"
+    assert queued == []
+
+
+async def test_summarise_refuses_a_closed_matter(
+    client: AsyncClient, db_session: AsyncSession, owner: User, queued: list[uuid.UUID]
+) -> None:
+    """Composition refuses to bind an archived matter, so a run would write nothing.
+    Say so instead of spending it (the known limit on `dealt_with` threads)."""
+    seeded = await _settled_summary_less_thread(db_session, owner)
+    assert seeded.project is not None
+    seeded.project.archived_at = datetime.now(tz=UTC)
+    await db_session.flush()
+    resp = await client.post(f"{_LIST}/{seeded.thread.id}/summarise", headers=_bearer(owner))
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "matter_closed"
+    assert queued == []
+
+
+async def test_summarise_reports_a_pass_that_is_already_queued(
+    client: AsyncClient, db_session: AsyncSession, owner: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """arq refusing the deterministic job id means one is already queued or running —
+    a different answer from "the queue is unreachable", and the caller gets both."""
+    seeded = await _settled_summary_less_thread(db_session, owner)
+
+    async def _duplicate(thread_id: uuid.UUID) -> str:
+        return "duplicate"
+
+    monkeypatch.setattr(intake_threads_module, "enqueue_intake_summarise_job", _duplicate)
+    resp = await client.post(f"{_LIST}/{seeded.thread.id}/summarise", headers=_bearer(owner))
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "summarise_in_progress"
+
+    async def _failed(thread_id: uuid.UUID) -> str:
+        return "failed"
+
+    monkeypatch.setattr(intake_threads_module, "enqueue_intake_summarise_job", _failed)
+    resp = await client.post(f"{_LIST}/{seeded.thread.id}/summarise", headers=_bearer(owner))
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "enqueue_failed"

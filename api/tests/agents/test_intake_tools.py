@@ -24,11 +24,11 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.commercial_tools import COMMERCIAL_TOOL_NAMES
@@ -39,6 +39,7 @@ from app.agents.intake_tools import (
     _record_intake_outcome,
     _send_key,
     build_intake_tools,
+    is_summarise_pass_run,
     load_intake_thread_for_run,
     requeue_pending_intake_message,
     safe_fail_intake_thread,
@@ -190,6 +191,11 @@ def _binding(row: SeededIntake) -> MatterBinding:
 # succeed. Shape-checked by RecordIntakeOutcomeInput, so every write-path test has to
 # carry one — that is the point: the arg is REQUIRED, there is no "outcome without an
 # account of the thread".
+# INTAKE-5a.1: the matter's NAME, written by the agent. Required on every call for
+# the same reason the summary is — a matter still called "RE: FW: quick question" is
+# a matter the lawyer cannot find.
+_TITLE = "Contoso NDA — mutual, before diligence"
+
 _SUMMARY: list[dict[str, str]] = [
     {"title": "What they want", "text": "The counterparty asks us to review their mutual NDA."},
     {"title": "Where it stands", "text": "Read and redlined; waiting on the lawyer."},
@@ -253,6 +259,27 @@ def test_build_grants_exactly_the_two_intake_tools() -> None:
     assert sorted(INTAKE_TOOL_NAMES) == ["draft_email_reply", "record_intake_outcome"]
 
 
+def test_a_summarise_pass_gets_the_conclusion_tool_and_nothing_else() -> None:
+    """INTAKE-5a.1: the human-asked backfill has no way to reach a counterparty —
+    the reply tool is not built, so there is no interrupt to approve and nothing for
+    an injected instruction in the mail to aim at."""
+    tools = build_intake_tools(
+        async_sessionmaker(),
+        run_id=uuid.uuid4(),
+        binding=MatterBinding(
+            project_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            name="m",
+            privileged=False,
+            minimum_inference_tier=None,
+            practice_area_id=None,
+        ),
+        intake_thread_id=uuid.uuid4(),
+        summarise_only=True,
+    )
+    assert [t.__name__ for t in tools] == ["record_intake_outcome"]
+
+
 def test_grant_set_disjoint_from_every_other_grant() -> None:
     for other in (
         MATTER_TOOL_NAMES,
@@ -282,6 +309,7 @@ async def test_dealt_with_files_the_thread_and_closes_the_matter(
             outcome="dealt_with",
             label="marketing",
             note="Vendor marketing email; nothing needed.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -312,6 +340,7 @@ async def test_needs_human_keeps_the_matter_open(
             outcome="needs_human",
             label="NDA review",
             note="Redline drafted.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -323,6 +352,230 @@ async def test_needs_human_keeps_the_matter_open(
         assert thread.status == "awaiting_human"
         assert project.archived_at is None
         assert project.intake_state == "candidate"
+
+
+# --------------------------------------------------------------------------- #
+# INTAKE-5a.1 — the human-asked summarise pass (read-only)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("status", ["replied", "handled", "awaiting_human", "error"])
+async def test_a_summarise_pass_writes_the_account_and_moves_nothing(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake, status: str
+) -> None:
+    """The lawyer asked for an account of a SETTLED thread. It lands — and the
+    thread's status stays exactly where the real run left it, `replied` and `handled`
+    included (there is no status write at all, so there is no downgrade to get
+    wrong)."""
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        project = await db.get(Project, seeded.project_id)
+        assert thread is not None and project is not None
+        thread.status = status
+        thread.outcome = "dealt_with" if status == "handled" else "needs_human"
+        project.archived_at = None
+        await db.commit()
+
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        out = await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="dealt_with",
+            label="marketing",
+            note="Nothing needed.",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+            summarise_only=True,
+        )
+        await db.commit()
+
+    assert "Summary recorded" in out
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        project = await db.get(Project, seeded.project_id)
+        assert thread is not None and project is not None
+        assert thread.status == status  # sticky, whatever it was
+        assert thread.summary == _SUMMARY
+        assert thread.summary_run_id == run_id
+        # `dealt_with` from a summarise pass must NOT close the matter: the pass
+        # describes the thread, it does not decide anything about it.
+        assert project.archived_at is None
+
+
+async def test_a_summarise_pass_does_not_reopen_a_closed_matter(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """The mirror case: restating `needs_human` over a closed matter leaves it
+    closed. Only a real run's change of mind re-opens (adversarial review B4)."""
+    closed_at = datetime(2026, 8, 20, 9, 0, tzinfo=UTC)
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        project = await db.get(Project, seeded.project_id)
+        assert thread is not None and project is not None
+        thread.status = "handled"
+        thread.outcome = "dealt_with"
+        project.archived_at = closed_at
+        await db.commit()
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+            summarise_only=True,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        project = await db.get(Project, seeded.project_id)
+        assert thread is not None and project is not None
+        assert thread.status == "handled"
+        assert project.archived_at == closed_at
+
+
+# --------------------------------------------------------------------------- #
+# INTAKE-5a.1 — the matter's NAME (migration 0103, projects.name_source)
+# --------------------------------------------------------------------------- #
+
+
+async def _set_name(
+    factory: async_sessionmaker[AsyncSession],
+    project_id: uuid.UUID,
+    *,
+    name: str,
+    source: str,
+    intake_state: str | None = "candidate",
+) -> None:
+    async with factory() as db:
+        project = await db.get(Project, project_id)
+        assert project is not None
+        project.name = name
+        project.name_source = source
+        project.intake_state = intake_state
+        await db.commit()
+
+
+async def test_the_agent_names_the_matter_it_read(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """The eager row was named from the subject line; concluding renames it to what
+    the thread turned out to be, and records that the AGENT did so."""
+    await _set_name(
+        commit_factory, seeded.project_id, name="RE: FW: quick question", source="subject"
+    )
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="Redline drafted.",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        assert project is not None
+        assert project.name == _TITLE
+        assert project.name_source == "agent"
+
+
+async def test_a_later_run_may_improve_its_own_title(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """An agent-written name is still the agent's: the thread turning out to be
+    something else rewrites it."""
+    await _set_name(commit_factory, seeded.project_id, name="Old reading", source="agent")
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title="Contoso hosting renewal — pricing before notice deadline",
+            summary=_SUMMARY,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        assert project is not None
+        assert project.name == "Contoso hosting renewal — pricing before notice deadline"
+        assert project.name_source == "agent"
+
+
+async def test_a_human_name_is_never_overwritten(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """ADR-F042 in its simplest form: the human writes last, permanently. The rest of
+    the conclusion (outcome, label, note, summary) still lands."""
+    await _set_name(commit_factory, seeded.project_id, name="Project Atlas", source="human")
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert project is not None and thread is not None
+        assert project.name == "Project Atlas"
+        assert project.name_source == "human"
+        assert thread.outcome == "needs_human"
+        assert thread.summary == _SUMMARY
+
+
+async def test_a_matter_not_born_from_email_is_never_renamed(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """Only an intake-BORN matter carries a subject line for a name. A thread filed
+    onto the lawyer's own matter (INTAKE-5b) must never rename their file."""
+    await _set_name(
+        commit_factory, seeded.project_id, name="Atlas MSA", source="agent", intake_state=None
+    )
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        assert project is not None
+        assert project.name == "Atlas MSA"
 
 
 @pytest.mark.parametrize(
@@ -355,6 +608,7 @@ async def test_outcome_never_overwrites_a_settled_send_status(
             outcome=outcome,
             label="NDA review",
             note="n",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -374,6 +628,7 @@ def _bad(**overrides: object) -> dict[str, object]:
         "outcome": "dealt_with",
         "label": "x",
         "note": "y",
+        "matter_title": _TITLE,
         "summary": _SUMMARY,
     }
     base.update(overrides)
@@ -398,6 +653,20 @@ def _bad(**overrides: object) -> dict[str, object]:
         _bad(summary=[{"title": "t", "text": "line one\nline two"}]),  # control char
         _bad(summary=[{"title": "t\x1b[31m", "text": "x"}]),  # ANSI escape
         _bad(summary=[{"title": "t", "text": "x\x00y"}]),  # NUL
+        # INTAKE-5a.1 — the matter title's own bounds. Single line, same control-char
+        # rejection as a summary title: it renders beside the matter reference.
+        _bad(matter_title=""),
+        _bad(matter_title="t" * 81),
+        _bad(matter_title="Contoso NDA\nsecond line"),
+        _bad(matter_title="Contoso\u2028NDA"),
+        _bad(matter_title="Contoso\x00NDA"),
+        # INTAKE-5a.1 (N9) — bidi formatting characters. Not "control characters" by
+        # category, but they re-order the glyphs around them, so a stored string and
+        # the line the lawyer reads can say different things ("Trojan Source" applied
+        # to an Inbox row). Refused in all three plain-line fields.
+        _bad(matter_title="Contoso NDA \u202egnidnep tidua"),
+        _bad(summary=[{"title": "What they \u202dwant", "text": "x"}]),
+        _bad(summary=[{"title": "t", "text": "Approved \u2066 by counsel \u2069"}]),
         _bad(summary=[{"title": "", "text": "x"}]),  # empty title
         _bad(summary=[{"title": "t"}]),  # missing text
         _bad(summary=[{"title": "t", "text": "x", "extra": "z"}]),  # extra="forbid"
@@ -448,6 +717,7 @@ async def test_summary_is_written_in_full_and_rewritten_wholesale(
             outcome="needs_human",
             label="NDA review",
             note="Redline drafted.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -468,6 +738,7 @@ async def test_summary_is_written_in_full_and_rewritten_wholesale(
             outcome="needs_human",
             label="NDA review",
             note="They came back.",
+            matter_title=_TITLE,
             summary=rewritten,
         )
         await db.commit()
@@ -494,6 +765,7 @@ async def test_summary_is_stripped_of_surrounding_whitespace(
             outcome="needs_human",
             label="NDA review",
             note="n",
+            matter_title=_TITLE,
             summary=[{"title": "  What they want  ", "text": "  A review.  "}],
         )
         await db.commit()
@@ -519,6 +791,7 @@ async def test_safe_fail_leaves_the_previous_summary_in_place(
             outcome="needs_human",
             label="NDA review",
             note="Redline drafted.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -551,6 +824,7 @@ async def test_second_call_overwrites_last_wins(
             outcome="dealt_with",
             label="spam",
             note="Noise.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -563,6 +837,7 @@ async def test_second_call_overwrites_last_wins(
             outcome="needs_human",
             note="On reflection the lawyer should see this.",
             label="unclear",
+            matter_title=_TITLE,
             summary=[{"title": "Where it stands", "text": "Over to the lawyer after all."}],
         )
         await db.commit()
@@ -616,6 +891,7 @@ async def test_non_intake_matter_records_nothing(
                 outcome="dealt_with",
                 label="x",
                 note="y",
+                matter_title=_TITLE,
                 summary=_SUMMARY,
             )
         assert "not an intake thread" in out
@@ -638,7 +914,7 @@ async def test_guarded_dispatch_audits_counts_only_never_the_note(
     )
     record = next(t for t in tools if t.__name__ == "record_intake_outcome")
     secret_note = "the counterparty offered a side letter nobody should see in an audit row"
-    out = await record("needs_human", "NDA review", secret_note, _SUMMARY)
+    out = await record("needs_human", "NDA review", secret_note, _TITLE, _SUMMARY)
     assert "recorded" in out
     async with commit_factory() as db:
         rows = (
@@ -1297,6 +1573,158 @@ async def test_binding_follows_the_conversation_lineage_for_a_resumed_run(
         assert bound.id == conversation.worked_thread_id
 
 
+async def _make_resume(
+    factory: async_sessionmaker[AsyncSession],
+    conversation: SeededConversation,
+    *,
+    parent_run_id: uuid.UUID | None,
+) -> uuid.UUID:
+    """A resume run on the SAME conversation: no messages of its own, optionally
+    carrying the parent link the resume endpoint now writes (fix D)."""
+    async with factory() as db:
+        # Only one running run may exist per thread (uq_agent_runs_thread_running);
+        # in production the parent is paused (awaiting_input) before its resume
+        # starts, so mirror that here for the parent AND any earlier chain link.
+        await db.execute(
+            sa_update(AgentRun)
+            .where(
+                AgentRun.thread_id == conversation.agent_thread_id,
+                AgentRun.status == "running",
+            )
+            .values(status="awaiting_input")
+        )
+        resume = AgentRun(
+            user_id=conversation.seeded.user_id,
+            thread_id=conversation.agent_thread_id,
+            project_id=conversation.seeded.project_id,
+            status="running",
+            prompt="[resume: approve]",
+            max_steps=8,
+            resumed_from_run_id=parent_run_id,
+        )
+        db.add(resume)
+        await db.commit()
+        return resume.id
+
+
+async def _sibling_replied_more_recently(
+    factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """The live shape (fix D): a SIBLING thread's inbound is the newest message on the
+    conversation and was processed by its own run — so the layer-2 heuristic names
+    that sibling, not the thread the paused run was working."""
+    async with factory() as db:
+        sibling_run = AgentRun(
+            user_id=conversation.seeded.user_id,
+            thread_id=conversation.agent_thread_id,
+            project_id=conversation.seeded.project_id,
+            status="completed",
+            prompt="intake",
+            max_steps=8,
+        )
+        db.add(sibling_run)
+        await db.flush()
+        newest = (
+            (
+                await db.execute(
+                    select(IntakeMessage).where(
+                        IntakeMessage.thread_id == conversation.pending_a_id
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert newest is not None
+        newest.run_id = sibling_run.id
+        newest.created_at = datetime.now(tz=UTC) + timedelta(hours=1)
+        await db.commit()
+
+
+async def test_a_resume_binds_to_the_thread_its_parent_was_working(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """P1, reproduced from dev (fix D): the sibling thread carries the conversation's
+    NEWEST processed inbound, so the legacy lineage heuristic names it — and the
+    approved reply was then refused against that sibling's delivered row. With the
+    parent link the resume binds to the thread its paused run actually worked."""
+    await _sibling_replied_more_recently(commit_factory, conversation)
+    resume_run_id = await _make_resume(
+        commit_factory, conversation, parent_run_id=conversation.run_id
+    )
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=resume_run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.worked_thread_id
+        assert bound.id != conversation.pending_a_id
+
+
+async def test_a_resume_of_a_resume_follows_the_whole_chain(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """Send-back → redraft → approve builds a chain of resumes, none of which stamps a
+    message. The walk climbs it to the run that did."""
+    await _sibling_replied_more_recently(commit_factory, conversation)
+    first = await _make_resume(commit_factory, conversation, parent_run_id=conversation.run_id)
+    second = await _make_resume(commit_factory, conversation, parent_run_id=first)
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=second,
+        )
+        assert bound is not None
+        assert bound.id == conversation.worked_thread_id
+
+
+async def test_a_historic_resume_still_uses_the_legacy_lineage_heuristic(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """No backfill: a resume written before migration 0103 carries no parent link and
+    falls through to layer 2 exactly as it always did — which is the behaviour this
+    test pins, bug and all, so a future change to it is deliberate."""
+    await _sibling_replied_more_recently(commit_factory, conversation)
+    resume_run_id = await _make_resume(commit_factory, conversation, parent_run_id=None)
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=resume_run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.pending_a_id
+
+
+async def test_a_summarise_pass_binds_to_the_thread_it_names(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """Layer 0 (INTAKE-5a.1): a summarise pass claims no inbound message, so it names
+    its thread on the row. Here it names a SIBLING — the one the lawyer asked about —
+    and must bind to that, not to the thread the conversation last worked."""
+    summarise_run_id = await _make_resume(commit_factory, conversation, parent_run_id=None)
+    async with commit_factory() as db:
+        sibling = await db.get(IntakeThread, conversation.pending_b_id)
+        assert sibling is not None
+        sibling.summarise_pass_run_id = summarise_run_id
+        await db.commit()
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=summarise_run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.pending_b_id
+
+
 async def test_binding_falls_back_to_the_single_working_thread(
     commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
 ) -> None:
@@ -1479,6 +1907,7 @@ async def test_safe_fail_leaves_a_concluded_thread_alone(
             outcome="dealt_with",
             label="spam",
             note="Noise.",
+            matter_title=_TITLE,
             summary=_SUMMARY,
         )
         await db.commit()
@@ -1646,3 +2075,201 @@ def test_summary_is_required_at_the_tool_schema() -> None:
 
     with pytest.raises(ValidationError):
         RecordIntakeOutcomeInput(outcome="dealt_with", label="x", note="y")  # type: ignore[call-arg]
+
+
+# --------------------------------------------------------------------------- #
+# INTAKE-5a.1 review fixes — the summarise pass survives a resume (B1/S3),
+# and the rename cannot lose a human's pin (S4/S5)
+# --------------------------------------------------------------------------- #
+
+
+async def _resume_of(
+    factory: async_sessionmaker[AsyncSession],
+    parent_run_id: uuid.UUID,
+    *,
+    status: str = "running",
+) -> uuid.UUID:
+    """The row the resume endpoint writes: a NEW run on the SAME conversation,
+    carrying the parent link (migration 0103)."""
+    async with factory() as db:
+        parent = await db.get(AgentRun, parent_run_id)
+        assert parent is not None
+        # One running run per thread (uq_agent_runs_thread_running): pause every
+        # running row first, as the resume endpoint's world always has.
+        await db.execute(
+            sa_update(AgentRun)
+            .where(AgentRun.thread_id == parent.thread_id, AgentRun.status == "running")
+            .values(status="awaiting_input")
+        )
+        resume = AgentRun(
+            user_id=parent.user_id,
+            thread_id=parent.thread_id,
+            project_id=parent.project_id,
+            status=status,
+            prompt="[resume: approve]",
+            max_steps=8,
+            resumed_from_run_id=parent.id,
+        )
+        db.add(resume)
+        await db.commit()
+        return resume.id
+
+
+async def test_a_resumed_summarise_pass_still_binds_to_the_thread_it_names(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """B1: the marker names the run the ENDPOINT queued. A pass that stopped for a
+    human and was resumed runs under a new agent_runs row, so layer 0 matches the whole
+    resume lineage — otherwise the resumed pass falls through to the legacy layer-2
+    heuristic and binds to whichever sibling the conversation last worked."""
+    queued_run_id = await _make_resume(commit_factory, conversation, parent_run_id=None)
+    async with commit_factory() as db:
+        sibling = await db.get(IntakeThread, conversation.pending_b_id)
+        assert sibling is not None
+        sibling.summarise_pass_run_id = queued_run_id
+        await db.commit()
+    resume_run_id = await _resume_of(commit_factory, queued_run_id)
+
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=resume_run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.pending_b_id
+        assert bound.id != conversation.worked_thread_id  # what layer 2 would have said
+        # ...and it is still the READ-ONLY pass, so composition builds no reply tool.
+        assert await is_summarise_pass_run(db, bound, resume_run_id) is True
+
+
+async def test_an_ordinary_run_is_not_a_summarise_pass(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """The identity test is a DB fact about this run's lineage — an unrelated run on
+    the same thread is an ordinary intake run with the full tool set."""
+    marked_run_id = await _make_run(commit_factory, seeded)
+    other_run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        thread.summarise_pass_run_id = marked_run_id
+        await db.commit()
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert await is_summarise_pass_run(db, thread, other_run_id) is False
+        assert await is_summarise_pass_run(db, thread, marked_run_id) is True
+        assert await is_summarise_pass_run(db, None, marked_run_id) is False
+
+
+@pytest.mark.parametrize("resumed", [False, True])
+async def test_safe_fail_never_parks_a_summarise_pass_thread(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake, resumed: bool
+) -> None:
+    """S3: a summarise pass describes a thread, it never decides about one. Ending
+    without an outcome says nothing about whose decision the thread waits for, so R7
+    must leave the status (and the fixed note) alone — for the resumed pass too."""
+    queued_run_id = await _make_run(commit_factory, seeded, status="awaiting_input")
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        thread.summarise_pass_run_id = queued_run_id
+        thread.status = "processing"
+        await db.commit()
+    settled_run_id = queued_run_id
+    if resumed:
+        settled_run_id = await _resume_of(commit_factory, queued_run_id, status="failed")
+    else:
+        async with commit_factory() as db:
+            run = await db.get(AgentRun, queued_run_id)
+            assert run is not None
+            run.status = "failed"
+            await db.commit()
+
+    assert await safe_fail_intake_thread(commit_factory, settled_run_id) is False
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        assert thread.status == "processing"
+        assert thread.outcome_note is None
+
+
+async def test_a_human_rename_that_commits_mid_run_survives(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """S4: the rename is a CONDITIONAL UPDATE evaluated by the database, not a
+    read-then-assign. The run's session holds the pre-rename row (the ordinary
+    identity-map read); a human PATCH commits underneath it; the pin must still win —
+    both the name AND its ``name_source``, which the old path reset to 'agent'."""
+    await _set_name(
+        commit_factory, seeded.project_id, name="RE: FW: quick question", source="subject"
+    )
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        stale = await db.get(Project, seeded.project_id)  # the read the race is against
+        assert stale is not None and stale.name_source == "subject"
+
+        async with commit_factory() as human_session:
+            renamed = await human_session.get(Project, seeded.project_id)
+            assert renamed is not None
+            renamed.name = "Project Atlas"
+            renamed.name_source = "human"
+            await human_session.commit()
+
+        await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+        )
+        await db.commit()
+
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert project is not None and thread is not None
+        assert project.name == "Project Atlas"
+        assert project.name_source == "human"
+        # The rest of the conclusion still landed — only the name was refused.
+        assert thread.summary == _SUMMARY
+
+
+async def test_a_summarise_pass_never_renames_the_matter(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """S5: the pass said "nothing changed" while the matter's name moved under the
+    lawyer. The arg stays REQUIRED (the model still has to say what this is), but the
+    title is not applied and the tool's own result says so."""
+    await _set_name(
+        commit_factory, seeded.project_id, name="RE: FW: quick question", source="subject"
+    )
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        out = await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            outcome="needs_human",
+            label="NDA review",
+            note="n",
+            matter_title=_TITLE,
+            summary=_SUMMARY,
+            summarise_only=True,
+        )
+        await db.commit()
+
+    assert "noted but NOT applied" in out
+    async with commit_factory() as db:
+        project = await db.get(Project, seeded.project_id)
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert project is not None and thread is not None
+        assert project.name == "RE: FW: quick question"
+        assert project.name_source == "subject"
+        assert thread.summary == _SUMMARY  # the account itself still lands

@@ -95,22 +95,38 @@ def _reject_nul_bytes(value: str) -> str:
     return value
 
 
+#: Bidirectional formatting characters (INTAKE-5a.1, N9). They are not "control
+#: characters" by Unicode's category, but they do the same job on a rendered line:
+#: LRE/RLE/PDF/LRO/RLO (U+202A-U+202E) and the isolates LRI/RLI/FSI/PDI
+#: (U+2066-U+2069) re-order the glyphs AROUND them, so a bullet can display text in
+#: an order the stored string does not have ("Trojan Source" applied to a summary the
+#: lawyer acts on). A one-line plain-text summary never needs one.
+_BIDI_CONTROLS = frozenset(range(0x202A, 0x202F)) | frozenset(range(0x2066, 0x206A))
+
+
 def _reject_control_chars(value: str) -> str:
-    """Reject (never strip) ANY control character — INTAKE-5a, ADR-F086.
+    """Reject (never strip) ANY control or bidi-formatting character — ADR-F086.
 
     Stricter than :func:`_reject_nul_bytes`, and deliberately so: this guards the
-    agent-written ``intake_threads.summary`` bullets, which are model text ABOUT
-    untrusted mail rendered straight into the lawyer's Inbox. A summary bullet is
-    one short plain-text line, so a newline, a tab, an ANSI escape, a bidi
-    override or a line/paragraph separator is never legitimate content — it is
-    someone trying to make the rendered list read as something it is not. C0
-    (``\x00``-``\x1f``), DEL, C1 (``\x80``-``\x9f``) and U+2028/U+2029 are all
-    refused; the model is told which character class it must fix and retries.
+    agent-written ``intake_threads.summary`` bullets and matter title, which are
+    model text ABOUT untrusted mail rendered straight into the lawyer's Inbox (and,
+    for the title, into the matter list). Such a value is one short plain-text line,
+    so a newline, a tab, an ANSI escape, a line/paragraph separator or a bidi
+    override is never legitimate content — it is someone trying to make the rendered
+    line read as something it is not. C0 (``\x00``-``\x1f``), DEL, C1
+    (``\x80``-``\x9f``), U+2028/U+2029 and :data:`_BIDI_CONTROLS` are all refused;
+    the model is told which character class it must fix and retries.
     """
 
     for ch in value:
         code = ord(ch)
-        if code < 0x20 or code == 0x7F or 0x80 <= code <= 0x9F or code in (0x2028, 0x2029):
+        if (
+            code < 0x20
+            or code == 0x7F
+            or 0x80 <= code <= 0x9F
+            or code in (0x2028, 0x2029)
+            or code in _BIDI_CONTROLS
+        ):
             raise ValueError("must not contain control characters or line breaks")
     return value
 
@@ -302,6 +318,15 @@ DRAFT_REPLY_MAX_ATTACHMENTS = 10
 # INTAKE-5a (ADR-F086, plan ruling 7): the thread summary's shape. Small on
 # purpose — the point of the Inbox is that a fresh reader takes in the whole
 # thread at a glance, so five short bullets is the budget, not a target.
+# INTAKE-5a.1 (maintainer UAT ruling): the matter's NAME, written by the agent —
+# the essence of the thread ("Contoso hosting renewal — pricing before notice
+# deadline"), not the email subject the eager row was opened with. 80 chars is a
+# name, not a sentence, and it sits under the 200-char ``projects.name`` CHECK
+# with room to spare. Single-line plain text, same rejection as a summary title:
+# it renders beside the matter reference in the Inbox, the cockpit and the agent's
+# own prompt, so a line break or a bidi override there would forge a second line.
+INTAKE_MATTER_TITLE_MAX_CHARS = 80
+
 INTAKE_SUMMARY_MAX_ITEMS = 5
 INTAKE_SUMMARY_TITLE_MAX_CHARS = 40
 INTAKE_SUMMARY_TEXT_MAX_CHARS = 300
@@ -329,7 +354,11 @@ class RecordIntakeOutcomeInput(BaseModel):
 
     ``label`` is a short free-form tag of the agent's own choosing (Ruling 5: no fixed
     taxonomy — nothing branches on it); ``note`` is the one-glance explanation the
-    lawyer reads in the intake list. ``summary`` (INTAKE-5a, ruling 7) is the agent's
+    lawyer reads in the intake list. ``matter_title`` (INTAKE-5a.1) is the NAME of
+    the matter this thread is — the agent's one-line statement of what the thread
+    turned out to be, which replaces the email subject the eager row was opened
+    with UNLESS a human has renamed it (``projects.name_source``). ``summary``
+    (INTAKE-5a, ruling 7) is the agent's
     ≤5-bullet account of the THREAD SO FAR, required on every call and written in
     full each time — it is what the Inbox opens on instead of the email chain. All
     three are model text: bounded here, stored on the thread, and never written into
@@ -341,6 +370,7 @@ class RecordIntakeOutcomeInput(BaseModel):
     outcome: IntakeOutcome
     label: _NulFreeStr = Field(min_length=1, max_length=INTAKE_LABEL_MAX_CHARS)
     note: _NulFreeStr = Field(min_length=1, max_length=INTAKE_NOTE_MAX_CHARS)
+    matter_title: _PlainLineStr = Field(min_length=1, max_length=INTAKE_MATTER_TITLE_MAX_CHARS)
     summary: list[IntakeSummaryItem] = Field(min_length=1, max_length=INTAKE_SUMMARY_MAX_ITEMS)
 
 
@@ -424,6 +454,32 @@ class IntakeLiveAskRead(BaseModel):
     allowed_decisions: list[str] = Field(default_factory=list)
 
 
+class IntakeWaitingOnRead(BaseModel):
+    """Why this thread has not been read yet (INTAKE-5a.1).
+
+    A conversation runs ONE run at a time (``is_conversation_in_flight``), so a thread
+    whose sibling is paused on the lawyer's approval is not "in progress" — it is
+    waiting for them, and the Inbox used to say "Agent is reading the thread", which
+    was not true. This names the sibling that holds the live ask so the row can say
+    what is actually blocking it, and link to it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: uuid.UUID
+    #: Single-line neutralised, like every other subject on this surface.
+    subject: str
+
+
+class IntakeSummariseResponse(BaseModel):
+    """``POST /intake/threads/{id}/summarise`` — IDs and a flag, never content."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: uuid.UUID
+    queued: bool
+
+
 class IntakeThreadRead(BaseModel):
     """One row of the lawyer's Inbox."""
 
@@ -453,6 +509,10 @@ class IntakeThreadRead(BaseModel):
     #: The error CLASS of the newest outbound message that failed to send
     #: (``timeout``, ``http_502``, …) — never a provider message, body or address.
     last_send_error: str | None = None
+    #: INTAKE-5a.1: set only when this thread is unread BECAUSE a sibling thread on the
+    #: same conversation is paused on the lawyer's decision. ``None`` otherwise — and
+    #: never set when the live ask is on THIS thread (that is what ``live_ask`` says).
+    waiting_on: IntakeWaitingOnRead | None = None
     #: Server-computed queue position (plan ruling 3), ascending: 0 = a live ask,
     #: 1 = a failed send, 2 = waiting for a human, 3 = still working, 4 = replied,
     #: 5 = handled. ``attention=true`` returns ranks 0, 1 and 2 only. Computed here so the

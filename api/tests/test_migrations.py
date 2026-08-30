@@ -1753,6 +1753,97 @@ async def test_practice_areas_hitl_policy_column(db_session: AsyncSession) -> No
     assert seeded and all(policy == {} for policy in seeded)
 
 
+@pytest.mark.integration
+async def test_projects_name_source_column_and_check(db_session: AsyncSession) -> None:
+    """0103 (INTAKE-5a.1): projects.name_source exists, NOT NULL, defaults to 'human'
+    — the conservative default, so the agent's title can never rename a matter a
+    person typed the name of. The CHECK admits exactly the three provenances."""
+    row = (
+        await db_session.execute(
+            text(
+                "SELECT is_nullable, column_default FROM information_schema.columns "
+                "WHERE table_name = 'projects' AND column_name = 'name_source'"
+            )
+        )
+    ).one()
+    assert row.is_nullable == "NO"
+    assert "'human'" in (row.column_default or "")
+
+    clause = (
+        await db_session.execute(
+            text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'chk_projects_name_source'"
+            )
+        )
+    ).scalar_one()
+    for value in ("subject", "agent", "human"):
+        assert f"'{value}'" in clause
+
+
+@pytest.mark.integration
+async def test_agent_runs_resumed_from_run_id_is_a_self_fk(db_session: AsyncSession) -> None:
+    """0103 (INTAKE-5a.1 fix D): the resume's parent link — nullable (no backfill;
+    historic resumes stay NULL) and SET NULL on delete, so losing the parent row
+    costs the link and never the run."""
+    nullable = (
+        await db_session.execute(
+            text(
+                "SELECT is_nullable FROM information_schema.columns "
+                "WHERE table_name = 'agent_runs' AND column_name = 'resumed_from_run_id'"
+            )
+        )
+    ).scalar_one()
+    assert nullable == "YES"
+    clause = (
+        await db_session.execute(
+            text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'fk_agent_runs_resumed_from_run_id'"
+            )
+        )
+    ).scalar_one()
+    assert "REFERENCES agent_runs(id)" in clause
+    assert "ON DELETE SET NULL" in clause
+    # S6 review fix: the binder walks this link on every intake run's composition (and
+    # the safe-fail hook walks it again). A self-referential FK gets no index for free.
+    indexed = (
+        await db_session.execute(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE tablename = 'agent_runs' "
+                "AND indexname = 'ix_agent_runs_resumed_from_run_id'"
+            )
+        )
+    ).scalar_one()
+    assert "resumed_from_run_id" in indexed
+
+
+@pytest.mark.integration
+async def test_intake_threads_summarise_pass_run_id(db_session: AsyncSession) -> None:
+    """0104 (INTAKE-5a.1): the summarise pass's marker + binding — nullable, and
+    SET NULL on run delete so a deleted run cannot take the thread with it."""
+    nullable = (
+        await db_session.execute(
+            text(
+                "SELECT is_nullable FROM information_schema.columns "
+                "WHERE table_name = 'intake_threads' AND column_name = 'summarise_pass_run_id'"
+            )
+        )
+    ).scalar_one()
+    assert nullable == "YES"
+    clause = (
+        await db_session.execute(
+            text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'fk_intake_threads_summarise_pass_run_id'"
+            )
+        )
+    ).scalar_one()
+    assert "REFERENCES agent_runs(id)" in clause
+    assert "ON DELETE SET NULL" in clause
+
+
 # ---------------------------------------------------------------------------
 # HS-1 — migrate-on-boot advisory lock (CLEAN-1)
 #

@@ -240,6 +240,18 @@ class IntakeThread(Base):
         ForeignKey("agent_runs.id", ondelete="SET NULL", name="fk_intake_threads_summary_run_id"),
         nullable=True,
     )
+    # INTAKE-5a.1 (migration 0104): the run of a human-asked "Summarise now" pass —
+    # READ-ONLY: composition builds it with NO draft_email_reply tool and the
+    # summarise doctrine, and the outcome it records never moves the thread's status.
+    # Also the pass's explicit thread BINDING (it claims no inbound message, and one
+    # conversation can hold several threads — ADR-F088).
+    summarise_pass_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "agent_runs.id", ondelete="SET NULL", name="fk_intake_threads_summarise_pass_run_id"
+        ),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

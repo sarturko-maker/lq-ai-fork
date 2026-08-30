@@ -89,12 +89,29 @@ export function attentionStripe(thread: Pick<IntakeThread, 'attention_rank'>): I
  * agent's outcome note is the fallback, and a thread the agent has not concluded
  * yet says so honestly instead of showing an empty line.
  */
-export function rowMeta(thread: Pick<IntakeThread, 'summary' | 'outcome_note'>): string {
+export function rowMeta(
+	thread: Pick<IntakeThread, 'summary' | 'outcome_note' | 'waiting_on'>
+): string {
 	const first = thread.summary?.[0]?.text?.trim();
 	if (first) return first;
 	const note = thread.outcome_note?.trim();
 	if (note) return note;
-	return 'Agent is reading the thread';
+	// INTAKE-5a.1: the honest reason an unread thread is unread. A conversation runs
+	// one run at a time, so a thread whose sibling is paused on the lawyer is not
+	// being read at all — saying it was is the bug this replaces.
+	return waitingLine(thread) ?? 'Agent is reading the thread';
+}
+
+/**
+ * "Waiting for your decision on 'X' before the agent reads this." — or `null` when
+ * the server did not say this thread is blocked on a sibling's ask. Server-computed
+ * (`waiting_on`); the client never guesses at a queue.
+ */
+export function waitingLine(thread: Pick<IntakeThread, 'waiting_on'>): string | null {
+	const waiting = thread.waiting_on;
+	if (!waiting) return null;
+	const subject = waiting.subject?.trim() || '(no subject)';
+	return `Waiting for your decision on '${subject}' before the agent reads this.`;
 }
 
 /**
@@ -115,6 +132,21 @@ export function matterRef(thread: Pick<IntakeThread, 'project'>): string {
 	const project = thread.project;
 	if (!project) return 'Matter deleted';
 	return project.reference?.trim() || project.name;
+}
+
+/**
+ * The matter as the DETAIL names it: "ORG-COM-0013 · Contoso hosting renewal"
+ * (INTAKE-5a.1). The reference is what a person quotes; the name is what the matter
+ * IS, and since the agent now writes that name it is worth reading. The LIST keeps
+ * the bare reference — beside a subject line the name would say the same thing twice.
+ */
+export function matterLabel(thread: Pick<IntakeThread, 'project'>): string {
+	const project = thread.project;
+	if (!project) return 'Matter deleted';
+	const reference = project.reference?.trim();
+	const name = project.name?.trim();
+	if (reference && name) return `${reference} · ${name}`;
+	return reference || name || 'Matter';
 }
 
 /** Deep link to the matter this thread landed in; null when it is gone. */
@@ -194,6 +226,73 @@ export function authLabel(authState: string): string {
 	return 'Sender check unavailable';
 }
 
+/**
+ * The "What the agent did" chips (INTAKE-5a.1): outcome, sender check, and the
+ * agent's own label when it wrote one. Same shape and the same `TONE_TO_DOT` map as
+ * the list's status chip, so nothing here can introduce a colour the design language
+ * does not already have. The label is agent text — rendered as text, never HTML.
+ */
+export function receiptChips(
+	thread: Pick<IntakeThread, 'outcome' | 'auth_state' | 'label'>
+): IntakeChip[] {
+	const chips: { label: string; tone: StatusTone }[] = [
+		{ label: outcomeLabel(thread.outcome), tone: outcomeTone(thread.outcome) },
+		{ label: authLabel(thread.auth_state), tone: authTone(thread.auth_state) }
+	];
+	const label = thread.label?.trim();
+	if (label) chips.push({ label, tone: 'neutral' });
+	return chips.map((chip) => ({ ...chip, dot: TONE_TO_DOT[chip.tone] }));
+}
+
+function outcomeTone(outcome: string | null): StatusTone {
+	if (outcome === 'dealt_with') return 'ok';
+	if (outcome === 'needs_human') return 'warn';
+	return 'neutral';
+}
+
+function authTone(authState: string): StatusTone {
+	if (authState === 'pass') return 'ok';
+	if (authState === 'fail') return 'error';
+	return 'neutral';
+}
+
+/**
+ * Whether the outcome note is long enough to clamp. The note is clamped to three
+ * lines with a "Show more" toggle; offering that toggle on a one-line note is noise,
+ * and measuring the rendered height would mean reading layout in a component that
+ * otherwise never touches the DOM. A character budget is the honest approximation:
+ * roughly three lines of the note's own column.
+ */
+export const NOTE_CLAMP_CHARS = 180;
+
+export function noteNeedsClamp(note: string | null): boolean {
+	return (note?.trim().length ?? 0) > NOTE_CLAMP_CHARS;
+}
+
+/** Statuses that mean a run is (or should be) working this thread right now. */
+const UNSETTLED_STATUSES = new Set(['received', 'processing']);
+
+/**
+ * Whether "Summarise now" applies (INTAKE-5a.1) — the client half of the endpoint's
+ * own refusals, so the lawyer is not offered a button that would 409:
+ *
+ *  - nothing to backfill if the thread already has a summary;
+ *  - nothing to summarise if it never ran (no conversation);
+ *  - a live ask on this conversation means the run will write one itself;
+ *  - a closed matter composes no binding, so the pass would write nothing.
+ *
+ * The server re-checks every one of these — this only decides whether to offer it.
+ */
+export function canSummarise(
+	thread: Pick<IntakeThread, 'summary' | 'agent_thread_id' | 'live_ask' | 'status' | 'project'>
+): boolean {
+	if (thread.summary && thread.summary.length > 0) return false;
+	if (!thread.agent_thread_id) return false;
+	if (thread.live_ask) return false;
+	if (thread.project?.archived) return false;
+	return !UNSETTLED_STATUSES.has(thread.status);
+}
+
 /** Whose email this is, for a message header. Falls back honestly. */
 export function messageSender(
 	message: Pick<IntakeMessage, 'direction' | 'from_addr'>,
@@ -201,4 +300,39 @@ export function messageSender(
 ): string {
 	if (message.direction === 'out') return `Sent from ${mailboxAddress}`;
 	return message.from_addr?.trim() || 'Unknown sender';
+}
+
+/**
+ * The server's refusal codes for "Summarise now", in the lawyer's words (INTAKE-5a.1).
+ *
+ * `POST /intake/threads/{id}/summarise` answers with a bare machine code
+ * (`{"detail": "thread_busy"}`), which the API client surfaces as the error's
+ * `message`. Showing that verbatim — as the first cut did — puts `thread_busy` in
+ * front of a lawyer. The mapping lives here, next to `canSummarise` (the client half
+ * of the same rules), so the two cannot drift apart.
+ */
+const SUMMARISE_REFUSALS: Record<string, string> = {
+	thread_busy: 'The agent is still working on this conversation — try again when it settles.',
+	matter_closed: 'This matter is closed; its threads keep the record they have.',
+	summary_exists: 'This thread already has a summary.',
+	summarise_in_progress: 'A summary is already on its way — it will appear here shortly.',
+	no_conversation: 'The agent never ran on this thread, so there is nothing to summarise yet.',
+	enqueue_failed: 'The summary could not be started just now. Nothing was queued — try again.'
+};
+
+/** Refusal codes that mean asking again would change nothing — the button goes away. */
+const SUMMARISE_SETTLED_CODES = new Set(['summary_exists', 'summarise_in_progress']);
+
+/** A refusal from the summarise endpoint, as a sentence. Anything unrecognised
+ *  (a 500, a proxy error, a network failure) gets the honest generic line rather
+ *  than a code the reader cannot act on. */
+export function summariseRefusalLine(detail: string | null | undefined): string {
+	const code = (detail ?? '').trim();
+	return SUMMARISE_REFUSALS[code] ?? 'Could not ask for a summary — nothing was started.';
+}
+
+/** Whether that refusal means the offer should disappear (there is already one, or
+ *  one is already coming), as opposed to "try again". */
+export function summariseIsSettled(detail: string | null | undefined): boolean {
+	return SUMMARISE_SETTLED_CODES.has((detail ?? '').trim());
 }

@@ -195,6 +195,9 @@ CREATE TABLE projects (
     id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id                 UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     name                     TEXT NOT NULL,
+    name_source              VARCHAR(16) NOT NULL DEFAULT 'human',  -- 0103 (INTAKE-5a.1):
+                                    -- CHECK 'subject' | 'agent' | 'human'; who named this
+                                    -- matter. The agent's matter_title never overwrites 'human'
     slug                     TEXT NOT NULL,  -- URL-friendly identifier; unique-per-owner-active
     description              TEXT,
     context_md               TEXT,  -- free-form markdown
@@ -208,6 +211,9 @@ CREATE TABLE projects (
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     archived_at              TIMESTAMPTZ,  -- soft-delete; NULL means active
+    CONSTRAINT chk_projects_name_source CHECK (
+        name_source IN ('subject','agent','human')
+    ),
     CONSTRAINT chk_projects_tier_range CHECK (
         minimum_inference_tier IS NULL OR (minimum_inference_tier BETWEEN 1 AND 5)
     ),
@@ -1980,8 +1986,16 @@ CREATE TABLE agent_runs (
     claimed_by   TEXT,                    -- worker tag (host:pid:boot-uuid), ops only
     claimed_at   TIMESTAMPTZ,
     lease_token  UUID,                    -- fencing value; terminal writes carry WHERE lease_token = :mine
-    heartbeat_at TIMESTAMPTZ              -- stale ⇒ orphan sweep settles FAILED
+    heartbeat_at TIMESTAMPTZ,             -- stale ⇒ orphan sweep settles FAILED
+    -- 0103 (INTAKE-5a.1): WHICH run this one resumes (HITL-2 resume rows only; NULL
+    -- everywhere else, no backfill). A resume carries no work of its own, so the
+    -- intake binder follows this link — through a chain of resumes — to the message
+    -- an ancestor claimed, instead of guessing which thread of a multi-thread
+    -- conversation it belongs to (a P1 seen live: an approved reply refused against a
+    -- sibling thread's delivered row).
+    resumed_from_run_id UUID REFERENCES agent_runs(id) ON DELETE SET NULL
 );
+CREATE INDEX ix_agent_runs_resumed_from_run_id ON agent_runs(resumed_from_run_id);
 CREATE INDEX idx_agent_runs_user_started ON agent_runs(user_id, started_at DESC);
 CREATE INDEX idx_agent_runs_project ON agent_runs(project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX idx_agent_runs_thread_started ON agent_runs(thread_id, started_at);
@@ -2020,11 +2034,14 @@ CREATE INDEX idx_agent_run_steps_parent ON agent_run_steps(parent_step_id)
 
 ## Fork: email legal intake (INTAKE, ADR-F086/F088)
 
-Migrations `0098` (the three tables + `projects.intake_state`), `0099` (the thread
-outcome + the inbound message's own content), `0100` (the matter reference +
-stamping substrate), `0101` (`intake_messages.send_error`) and `0102` (the thread
-summary + the Inbox read indexes + narrowing `projects.intake_state` to
-`NULL | 'candidate'`). The mail-bridge microservice is the sole holder of mailbox
+Migrations, in order: `0098` (the three tables + `projects.intake_state`), `0099`
+(the thread outcome + the inbound message's own content), `0100` (the matter
+reference + stamping substrate), `0101` (`intake_messages.send_error`), `0102` (the
+thread summary + the Inbox read indexes + narrowing `projects.intake_state` to
+`NULL | 'candidate'`), `0103` (`projects.name_source` — the agent names an
+intake-born matter and a human rename wins — plus `agent_runs.resumed_from_run_id`
+and its index) and `0104` (`intake_threads.summarise_pass_run_id`, the human-asked
+summarise pass). The mail-bridge microservice is the sole holder of mailbox
 credentials; `api` never sees them. Everything a sender controls in here is
 UNTRUSTED: boundary-validated at `app/schemas/intake.py`, fenced as DATA in the
 agent prompt, never logged or audited.
@@ -2080,6 +2097,13 @@ CREATE TABLE intake_threads (
     -- CHECK: a CHECK over JSONB shape would be a second, drifting copy of the schema.
     summary            JSONB,
     summary_run_id     UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
+    -- 0104 (INTAKE-5a.1): the run queued by POST /intake/threads/{id}/summarise. It
+    -- both MARKS that run summarise-only (composition builds it with no
+    -- draft_email_reply tool, no matter-write tools, no area domain groups and its own
+    -- doctrine) and BINDS it to this thread — a summarise pass claims no inbound
+    -- message, so nothing else could find it. Matched against the run AND the runs it
+    -- resumes (agent_runs.resumed_from_run_id).
+    summarise_pass_run_id UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT uq_intake_threads_mailbox_provider_thread UNIQUE (mailbox_id, provider_thread_id)

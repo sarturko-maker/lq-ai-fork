@@ -63,6 +63,15 @@ export type IntakeOutcome = 'dealt_with' | 'needs_human';
 /** Sender-authenticity signal from the provider (`AuthState`). */
 export type IntakeAuthState = 'pass' | 'fail' | 'unknown';
 
+/** Why an unread thread is unread (`IntakeWaitingOnRead`, INTAKE-5a.1).
+ *  A conversation runs one run at a time, so a thread whose SIBLING is paused on
+ *  the lawyer is waiting for them — not "in progress". Null unless that is the
+ *  case, and never set when the live ask is this thread's own. */
+export interface IntakeWaitingOn {
+	thread_id: string;
+	subject: string;
+}
+
 /** One row of the Inbox (`IntakeThreadRead`). */
 export interface IntakeThread {
 	id: string;
@@ -86,6 +95,8 @@ export interface IntakeThread {
 	/** The error CLASS of the newest failed outbound send — never a provider
 	 *  message, body or address. */
 	last_send_error: string | null;
+	/** Set only when a SIBLING thread's live ask is what this thread is waiting on. */
+	waiting_on: IntakeWaitingOn | null;
 	/** Server-computed queue position, ascending (plan ruling 3): 0 = a live ask,
 	 *  1 = a failed send, 2 = waiting for a human, 3 = still working, 4 = replied,
 	 *  5 = handled. Computed server-side so the UI cannot invent a second,
@@ -156,4 +167,25 @@ export async function listIntakeThreads(
  *  404 (never 403) for a thread the caller does not own. */
 export async function getIntakeThread(threadId: string): Promise<IntakeThreadDetail> {
 	return apiRequest<IntakeThreadDetail>(`/intake/threads/${encodeURIComponent(threadId)}`);
+}
+
+/** `POST /intake/threads/{id}/summarise` — INTAKE-5a.1.
+ *
+ * Asks the agent to write the account a settled thread never got (it was concluded
+ * before summaries existed, or its run safe-failed). The pass is READ-ONLY: it has no
+ * reply tool and it moves neither the thread's status nor the matter's state.
+ *
+ * Refusals arrive as `LQAIApiError` with the server's own words: 409 `summary_exists`
+ * / `thread_busy` / `matter_closed` / `summarise_in_progress`, 422 `no_conversation`,
+ * 503 `enqueue_failed`, 404 for a thread the caller does not own. */
+export async function summariseIntakeThread(threadId: string): Promise<IntakeSummariseResponse> {
+	return apiRequest<IntakeSummariseResponse>(
+		`/intake/threads/${encodeURIComponent(threadId)}/summarise`,
+		{ method: 'POST' }
+	);
+}
+
+export interface IntakeSummariseResponse {
+	thread_id: string;
+	queued: boolean;
 }

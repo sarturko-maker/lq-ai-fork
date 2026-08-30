@@ -252,6 +252,10 @@ async def test_resume_paused_run_creates_resume_run_and_audits(
     ).scalar_one()
     assert resume.thread_id == paused.thread_id
     assert resume.resume_decision == {"type": "approve"}
+    # INTAKE-5a.1 fix D: and WHICH run it resumes — the link the intake binder
+    # follows instead of guessing which thread on a multi-thread conversation this
+    # resume belongs to.
+    assert resume.resumed_from_run_id == paused.id
     audit = (
         await db_session.execute(
             select(AuditLog).where(

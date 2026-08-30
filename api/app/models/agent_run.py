@@ -203,6 +203,19 @@ class AgentRun(Base):
     # this boundary; the runner degrades a malformed value to ``failed`` rather
     # than raising (mirrors ``hitl_policy``).
     resume_decision: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # INTAKE-5a.1 fix D (migration 0103): WHICH run this one resumes. Set by the
+    # resume endpoint beside ``resume_decision``; NULL for every ordinary run and
+    # for historic resumes (no backfill). It exists because a resume carries none of
+    # the paused run's work on its own row — no stamped inbound message — and the
+    # intake binder was left guessing which of a conversation's several threads the
+    # resume belonged to. Follow this link (it can chain: a resume of a resume) and
+    # the answer is a fact. FK self-reference, SET NULL: losing the parent row costs
+    # the link, never the run.
+    resumed_from_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="SET NULL", name="fk_agent_runs_resumed_from_run_id"),
+        nullable=True,
+    )
 
     def __repr__(self) -> str:
         return (
