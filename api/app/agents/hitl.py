@@ -14,6 +14,12 @@ policy ∩ the run's ACTUAL grant set:
 * An empty result compiles to ``None``: the caller then never sets the
   ``interrupt_on`` kwarg, no HITL middleware attaches, and the agent graph is
   byte-identical to an unconfigured area's (the zero-config invariant, ADR-F071).
+* INTAKE-4b (ADR-F087, amending F071) makes ``allowed_decisions`` PER TOOL: the one
+  editable tool (:data:`EDITABLE_TOOL_NAMES`) admits ``edit`` as well, because its
+  arguments are the artefact the lawyer is reviewing. The compiled list rides the
+  interrupt payload, the ``hitl_request`` digest and the SSE frame, so the cockpit
+  offers exactly the verbs the resume endpoint will accept
+  (:func:`decisions_allowed_for_step` is that endpoint's gate).
 * INTAKE-3 (ADR-F086) adds a code-enforced FLOOR on top of the policy:
   :data:`ALWAYS_INTERRUPT_TOOL_NAMES` — outbound tools — are gated whenever the run
   was granted them, whatever the policy says (or does not say). Structural, not
@@ -26,15 +32,40 @@ and the ``hitl_request`` step row as data, not as prose (ADR-F071).
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Sequence
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Decisions allowed in v1 (ADR-F071): approve / reject only. `edit` and `respond`
-# would break "what you saw is what runs" until arg-diff review UX exists.
+# Decisions allowed for an ORDINARY gated tool (ADR-F071): approve / reject only.
+# `edit` on an arbitrary tool is a licence to rewrite structured arguments the human
+# never sees rendered, and langchain's native `respond` fabricates a success-shaped
+# tool result — both break "what you saw is what runs".
 _ALLOWED_DECISIONS = ["approve", "reject"]
+
+# INTAKE-4b (ADR-F087, amends F071): the ONE exception. ``draft_email_reply``'s
+# arguments ARE the artefact under review — prose a lawyer is qualified to rewrite —
+# and its execution is the send, so "approve or refuse" makes review a rubber stamp.
+# Nothing else is editable; adding a name here is a deliberate decision, never a
+# default, and the resume endpoint refuses an ``edit`` for anything outside this set.
+EDITABLE_TOOL_NAMES = frozenset({"draft_email_reply"})
+_EDITABLE_DECISIONS = ["approve", "edit", "reject"]
+
+
+def allowed_decisions_for(tool_name: str) -> list[str]:
+    """The decision verbs this tool's pause accepts (ADR-F087).
+
+    A FRESH list per call: a compiled policy entry is handed to middleware and to
+    the step digest, and a shared list would let either alias (and mutate) the
+    module constants. ``respond`` is deliberately absent everywhere — the UI's
+    "Respond" is ``reject`` + ``message`` (ADR-F087).
+    """
+    if tool_name in EDITABLE_TOOL_NAMES:
+        return list(_EDITABLE_DECISIONS)
+    return list(_ALLOWED_DECISIONS)
+
 
 # INTAKE-3 (ADR-F086): the STRUCTURAL HITL floor — not policy. Every outbound tool
 # is interrupt-gated whenever it is granted, regardless of (and unremovable by) the
@@ -59,8 +90,9 @@ def compile_hitl_policy(policy: dict[Any, Any], granted: frozenset[str]) -> dict
     Returns ``None`` when nothing compiles (empty policy, or every entry dropped/
     skipped) — the caller must then leave the ``interrupt_on`` kwarg unset entirely
     (zero-config invariant, ADR-F071). Each surviving entry maps to an
-    ``InterruptOnConfig``-shaped dict: ``allowed_decisions=["approve", "reject"]``
-    plus the fork-authored description.
+    ``InterruptOnConfig``-shaped dict: :func:`allowed_decisions_for` (approve/reject —
+    plus ``edit`` for the one editable tool, ADR-F087) and the fork-authored
+    description.
     """
     compiled: dict[str, Any] = {}
     if not isinstance(policy, dict):
@@ -95,7 +127,7 @@ def compile_hitl_policy(policy: dict[Any, Any], granted: frozenset[str]) -> dict
             )
             continue
         compiled[name] = {
-            "allowed_decisions": list(_ALLOWED_DECISIONS),
+            "allowed_decisions": allowed_decisions_for(name),
             "description": _describe(name),
         }
     return _with_structural_floor(compiled, granted)
@@ -116,10 +148,53 @@ def _with_structural_floor(
     """
     for name in sorted(ALWAYS_INTERRUPT_TOOL_NAMES & granted):
         compiled[name] = {
-            "allowed_decisions": list(_ALLOWED_DECISIONS),
+            "allowed_decisions": allowed_decisions_for(name),
             "description": _describe(name),
         }
     return compiled or None
+
+
+def decisions_allowed_for_step(step_name: str | None, summary: str | None) -> frozenset[str]:
+    """Which decision verbs the persisted ``hitl_request`` step admits (ADR-F087).
+
+    The resume endpoint's gate. The runner writes the digest as
+    ``json.dumps([{"tool", "args", "allowed_decisions"}, …])``; ONE human decision is
+    fanned across every gated call in the paused turn, so the answer is the
+    INTERSECTION over the entries.
+
+    DEFENSIVE, and deliberately asymmetric: anything that does not parse into a
+    non-empty list of well-formed entries — a truncated digest, a pre-F087 row, a
+    hand-edited one — falls back to the conservative :data:`_ALLOWED_DECISIONS` pair.
+    A malformed digest can therefore only ever NARROW the verbs, never widen them;
+    the runner's own name check (``_build_resume_command``) is the second gate.
+    """
+    conservative = frozenset(_ALLOWED_DECISIONS)
+    if not summary:
+        return conservative
+    try:
+        parsed = json.loads(summary)
+    except (TypeError, ValueError):
+        return conservative
+    if not isinstance(parsed, list) or not parsed:
+        return conservative
+    allowed: set[str] | None = None
+    for entry in parsed:
+        if not isinstance(entry, dict) or not isinstance(entry.get("tool"), str):
+            return conservative
+        decisions = entry.get("allowed_decisions")
+        if not isinstance(decisions, list) or not decisions:
+            return conservative
+        names = {d for d in decisions if isinstance(d, str)}
+        # The tool name is authoritative over the digest's own list: a row whose
+        # entry claims `edit` for a non-editable tool is not honoured.
+        names &= set(allowed_decisions_for(entry["tool"]))
+        allowed = names if allowed is None else (allowed & names)
+    if not allowed:
+        return conservative
+    if step_name is not None and step_name not in {e.get("tool") for e in parsed}:
+        # The step's own `name` column disagrees with its digest — trust neither.
+        return conservative
+    return frozenset(allowed)
 
 
 def stamp_subagent_opt_out(

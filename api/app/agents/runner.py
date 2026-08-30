@@ -40,6 +40,7 @@ import json
 import logging
 import uuid
 from collections.abc import Callable, Collection, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, NamedTuple
@@ -54,6 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.checkpointer import thread_config
 from app.agents.cost import estimate_agent_run_cost_usd
 from app.agents.factory import build_deep_agent
+from app.agents.hitl import EDITABLE_TOOL_NAMES
 from app.agents.lease import RunLease, RunSettledElsewhere, heartbeat_run, settle_run
 from app.agents.live_changes import ChangeLedger
 from app.agents.memory_backend import AgentRuntimeContext
@@ -93,6 +95,14 @@ def _recursion_limit(max_steps: int) -> int:
 # Bounded step digests — the polled UI renders these verbatim, so tool
 # args/results are truncated here, before they ever reach a row.
 _SUMMARY_LIMIT = 2000
+
+# INTAKE-4b (ADR-F087): the ``hitl_request`` digest gets its own, larger bound. It is
+# the one step a HUMAN acts on rather than reads — the cockpit's editor needs the WHOLE
+# pending draft, and at 2000 chars any real email reply is cut mid-sentence and becomes
+# unapprovable-as-seen. Still bounded (the tool's own arg caps are the real ceiling:
+# body ≤ 50k chars) and still truncation-safe — a clipped digest fails to parse in the
+# card, which degrades to plain approve/refuse rather than editing a half-draft.
+_HITL_SUMMARY_LIMIT = 64_000
 
 # Default system prompt; the composition point appends the matter
 # addendum for matter-bound runs (F0-S4). Public so the caller extends
@@ -620,6 +630,18 @@ async def repair_dangling_tool_calls(agent: Any, thread_id: uuid.UUID) -> int:
     return len(synthetic)
 
 
+@dataclass(frozen=True)
+class PendingAction:
+    """One gated tool call inside a pending interrupt (HITL-2; ADR-F087).
+
+    ``name`` is ``None`` only for a malformed payload — an ``edit`` against it is
+    refused rather than guessed at.
+    """
+
+    name: str | None
+    args: dict[str, Any]
+
+
 async def _pending_interrupt_objects(agent: Any, thread_id: uuid.UUID) -> list[Any]:
     """The raw pending interrupt objects iff the thread is genuinely paused (ADR-F071).
 
@@ -640,12 +662,37 @@ async def _pending_interrupt_objects(agent: Any, thread_id: uuid.UUID) -> list[A
     ]
 
 
+def _decisions_by_action(value: Any) -> dict[str, list[str]]:
+    """``{action_name: allowed_decisions}`` out of one HITLRequest payload.
+
+    langchain's middleware ships a parallel ``review_configs`` list beside
+    ``action_requests``; the verbs live there, not on the request. Defensive —
+    a payload shape change degrades to "no verbs known" (the readers below then
+    fall back to the compiled default), never raises.
+    """
+    configs = value.get("review_configs") if isinstance(value, dict) else None
+    verbs: dict[str, list[str]] = {}
+    for config in configs or ():
+        if not isinstance(config, dict):
+            continue
+        name = config.get("action_name")
+        decisions = config.get("allowed_decisions")
+        if isinstance(name, str) and isinstance(decisions, list):
+            verbs[name] = [d for d in decisions if isinstance(d, str)]
+    return verbs
+
+
 async def _pending_hitl_actions(agent: Any, thread_id: uuid.UUID) -> list[dict[str, Any]] | None:
     """The pending stop-and-ask actions iff the thread is genuinely paused (ADR-F071).
 
-    Display-only copy ``[{"tool": name, "args": {...}}, ...]`` extracted from the
-    interrupts' HITLRequest payloads (the approved bytes remain the checkpointed
-    tool call itself). ``None`` when not paused.
+    Display-only copy ``[{"tool": name, "args": {...}, "allowed_decisions": [...]}, ...]``
+    extracted from the interrupts' HITLRequest payloads (the approved bytes remain the
+    checkpointed tool call itself). ``None`` when not paused.
+
+    INTAKE-4b (ADR-F087): the verbs ride along so the cockpit renders exactly the
+    buttons the server will accept (approve/refuse everywhere; + edit for
+    ``draft_email_reply``) and the resume endpoint can gate on the SETTLED row
+    rather than re-reading the checkpoint.
     """
     interrupts = await _pending_interrupt_objects(agent, thread_id)
     if not interrupts:
@@ -654,50 +701,99 @@ async def _pending_hitl_actions(agent: Any, thread_id: uuid.UUID) -> list[dict[s
     for interrupt in interrupts:
         value = getattr(interrupt, "value", None)
         requests = value.get("action_requests") if isinstance(value, dict) else None
+        verbs = _decisions_by_action(value)
         for request in requests or ():
             if isinstance(request, dict):
-                actions.append({"tool": request.get("name"), "args": request.get("args") or {}})
+                name = request.get("name")
+                actions.append(
+                    {
+                        "tool": name,
+                        "args": request.get("args") or {},
+                        "allowed_decisions": verbs.get(name, []) if isinstance(name, str) else [],
+                    }
+                )
     return actions
 
 
-async def _pending_interrupts(agent: Any, thread_id: uuid.UUID) -> list[tuple[str, int]] | None:
-    """Pending interrupt ids + their action-request counts, for a resume (HITL-2, ADR-F071).
+async def _pending_interrupts(
+    agent: Any, thread_id: uuid.UUID
+) -> list[tuple[str, list[PendingAction]]] | None:
+    """Pending interrupt ids + their action requests, for a resume (HITL-2, ADR-F071).
 
     A resume's graph input is ``Command(resume={<interrupt_id>: {"decisions": [...]}})``, so
     the resume job must recover the interrupt id(s) at resume time — we deliberately never
     persist a langgraph-internal id in our schema (the checkpoint is the source of truth). The
-    action-request COUNT sizes each interrupt's ``decisions`` list: v1 takes ONE human decision
-    and fans it across every gated call in the paused turn (no per-call granularity until
-    ``edit`` lands). Returns ``None`` when the thread is not genuinely paused.
+    action requests size each interrupt's ``decisions`` list: ONE human decision is fanned
+    across every gated call in the paused turn (no per-call granularity).
+
+    INTAKE-4b (ADR-F087): each request's NAME and ARGS come back too, because an ``edit``
+    decision must be built against the checkpointed call — the name is taken from here
+    (never from the request body) and the human's fields merge OVER these args. Returns
+    ``None`` when the thread is not genuinely paused.
     """
-    result: list[tuple[str, int]] = []
+    result: list[tuple[str, list[PendingAction]]] = []
     for interrupt in await _pending_interrupt_objects(agent, thread_id):
         interrupt_id = getattr(interrupt, "id", None)
         value = getattr(interrupt, "value", None)
         requests = value.get("action_requests") if isinstance(value, dict) else None
-        count = len(requests) if isinstance(requests, list) else 0
-        if isinstance(interrupt_id, str) and count > 0:
-            result.append((interrupt_id, count))
+        actions: list[PendingAction] = []
+        for request in requests if isinstance(requests, list) else []:
+            if not isinstance(request, dict):
+                continue
+            name, args = request.get("name"), request.get("args")
+            actions.append(
+                PendingAction(
+                    name=name if isinstance(name, str) else None,
+                    args=dict(args) if isinstance(args, dict) else {},
+                )
+            )
+        if isinstance(interrupt_id, str) and actions:
+            result.append((interrupt_id, actions))
     return result or None
 
 
-def _build_resume_command(pending: list[tuple[str, int]], decision: dict[str, Any]) -> Command:
-    """Map each pending interrupt id to the human's decision (HITL-2, ADR-F071).
+def _build_resume_command(
+    pending: list[tuple[str, list[PendingAction]]], decision: dict[str, Any]
+) -> Command:
+    """Map each pending interrupt id to the human's decision (HITL-2, ADR-F071; F087).
 
-    One decision per action request (v1 fan-out: the single human choice applies to every
-    gated call in the turn). Fresh decision dicts per entry so a consumer can never alias
-    them. ``decision`` is the row's validated ``resume_decision``
-    (``{"type": "approve"}`` / ``{"type": "reject", "message": ...}``).
+    One decision per action request (the single human choice applies to every gated call
+    in the turn). Fresh decision dicts per entry so a consumer can never alias them.
+    ``decision`` is the row's validated ``resume_decision`` — ``{"type": "approve"}``,
+    ``{"type": "reject", "message": ...}`` or ``{"type": "edit", "edited_args": {...}}``.
+
+    ``edit`` (ADR-F087) becomes langchain's native
+    ``{"type": "edit", "edited_action": {"name", "args"}}``: the middleware rebuilds the
+    tool call from it (same call id) and the tool then EXECUTES with those args. Two
+    invariants live here and nowhere else:
+
+    * the tool NAME is the checkpointed one, never anything the client sent — the
+      decision shape can name a tool, and honouring that would turn "edit this draft"
+      into "run any tool";
+    * the args are the human's fields merged OVER the model's, so an untouched field
+      keeps its original value.
+
+    Raises ``ValueError`` (the caller settles the run ``failed``) when an ``edit`` reaches
+    a tool outside :data:`~app.agents.hitl.EDITABLE_TOOL_NAMES` — the endpoint already
+    refuses that with a 422; this is the second, checkpoint-authoritative gate.
     """
     decision_type = decision["type"]
     message = decision.get("message")
+    edited_args = decision.get("edited_args") or {}
     resume_map: dict[str, Any] = {}
-    for interrupt_id, count in pending:
+    for interrupt_id, actions in pending:
         entries: list[dict[str, Any]] = []
-        for _ in range(count):
+        for action in actions:
             entry: dict[str, Any] = {"type": decision_type}
             if decision_type == "reject" and message is not None:
                 entry["message"] = message
+            if decision_type == "edit":
+                if action.name is None or action.name not in EDITABLE_TOOL_NAMES:
+                    raise ValueError("resume: edit is not allowed for the pending tool")
+                entry["edited_action"] = {
+                    "name": action.name,
+                    "args": {**action.args, **edited_args},
+                }
             entries.append(entry)
         resume_map[interrupt_id] = {"decisions": entries}
     return Command(resume=resume_map)
@@ -987,7 +1083,9 @@ async def execute_agent_run(
         hitl_step_id = uuid.uuid4()
         hitl_created_at = datetime.now(UTC)
         hitl_name = next((a["tool"] for a in hitl_actions if isinstance(a.get("tool"), str)), None)
-        hitl_summary = _bounded(json.dumps(hitl_actions, default=str, sort_keys=True))
+        hitl_summary = _bounded(
+            json.dumps(hitl_actions, default=str, sort_keys=True), _HITL_SUMMARY_LIMIT
+        )
         await _persist_step(
             db_session_factory,
             step_id=hitl_step_id,

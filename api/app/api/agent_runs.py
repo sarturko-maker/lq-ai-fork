@@ -68,7 +68,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import get_agent_checkpointer, has_checkpoint
-from app.agents.run_service import AgentThreadBusy, start_agent_run
+from app.agents.hitl import decisions_allowed_for_step
+from app.agents.run_service import AgentThreadBusy, newest_live_run, start_agent_run
 from app.agents.stream import (
     CHANNEL_CLOSED,
     SSE_DONE,
@@ -1020,8 +1021,9 @@ async def resume_agent_run(
     """POST /api/v1/agents/runs/{run_id}/resume — HITL-2 (ADR-F071).
 
     Resolve a run paused by a stop-and-ask policy (``awaiting_input``). The
-    decision (``approve`` | ``reject``, validated by :class:`AgentRunResume`)
-    is persisted on a NEW follow-up run on the same thread — run-per-resume:
+    decision (``approve`` | ``reject`` | ``edit``, validated by
+    :class:`AgentRunResume`) is persisted on a NEW follow-up run on the same
+    thread — run-per-resume:
     the paused run keeps its intact lease and stays ``awaiting_input`` as the
     durable record of the ask. The worker drives that run with
     ``Command(resume=…)`` built from the decision, fanned across the paused
@@ -1039,6 +1041,12 @@ async def resume_agent_run(
     ``thread_busy`` on a concurrent resume (DB-enforced by the partial unique
     index). 429 at the running-run cap. ``reject`` is a first-class resume,
     distinct from cancel (which abandons the ask).
+
+    INTAKE-4b (ADR-F087): 422 ``decision_not_allowed_for_pending_tool`` when the
+    verb is not one the pending ask admits — today that is ``edit`` on anything but
+    ``draft_email_reply``. A ``reject`` carrying a ``message`` is what the cockpit
+    calls "Respond": the message becomes the tool result the model sees, so it can
+    redraft and pause again (no separate verb, no separate runner path).
     """
     run = await db.get(AgentRun, run_id)
     if run is None or run.user_id != user.id:
@@ -1056,20 +1064,12 @@ async def resume_agent_run(
     # `_pending_interrupts` is the authoritative double-execution guard — a resume
     # after the interrupt WAS consumed settles `failed` ("no pending interrupt"),
     # never double-runs the tool.
-    latest_live_run_id = (
-        await db.execute(
-            select(AgentRun.id)
-            .where(
-                AgentRun.thread_id == run.thread_id,
-                AgentRun.status.not_in(
-                    [AgentRunStatus.failed.value, AgentRunStatus.cancelled.value]
-                ),
-            )
-            .order_by(AgentRun.started_at.desc(), AgentRun.id.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if latest_live_run_id != run.id:
+    #
+    # INTAKE-4b: "the conversation's newest live run" is `run_service.newest_live_run`,
+    # shared with the intake worker's in-flight check. A second, hand-rolled copy of
+    # this rule drifted there and starved a mailbox (ADR-F087) — one definition now.
+    latest_live = await newest_live_run(db, run.thread_id)
+    if latest_live is None or latest_live.id != run.id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="run_superseded")
 
     # Matter-archived honesty guard (mirrors create_agent_run): if the paused
@@ -1099,11 +1099,13 @@ async def resume_agent_run(
             detail="too_many_running_runs",
         )
 
-    # Tool name of the pending ask for the audit row (counts/types/IDs only —
-    # never args or the decision message). The hitl_request step records it.
-    hitl_tool = (
+    # The pending ask, from the SETTLED hitl_request step (ADR-F004 — the durable
+    # row decides, not a re-read of the checkpoint): its `name` for the audit row
+    # (counts/types/IDs only — never args or the decision message), its digest for
+    # the per-tool decision gate.
+    hitl_step = (
         await db.execute(
-            select(AgentRunStep.name)
+            select(AgentRunStep.name, AgentRunStep.summary)
             .where(
                 AgentRunStep.run_id == run.id,
                 AgentRunStep.kind == AgentRunStepKind.hitl_request.value,
@@ -1111,7 +1113,21 @@ async def resume_agent_run(
             .order_by(AgentRunStep.seq.asc())
             .limit(1)
         )
-    ).scalar_one_or_none()
+    ).first()
+    hitl_tool = hitl_step[0] if hitl_step is not None else None
+    # INTAKE-4b (ADR-F087): `edit` is accepted ONLY where the pause admits it —
+    # today, only `draft_email_reply`. A digest that is missing, truncated or
+    # malformed narrows to approve/reject, so an unparseable pause can never widen
+    # the verbs. The runner re-checks the tool name against the checkpoint before
+    # it builds the Command, so this 422 is the honest early answer, not the fence.
+    allowed_decisions = decisions_allowed_for_step(
+        hitl_tool, hitl_step[1] if hitl_step is not None else None
+    )
+    if body.decision.type not in allowed_decisions:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="decision_not_allowed_for_pending_tool",
+        )
 
     # The resume run inherits the paused run's binding + resolved envelope
     # (budget_profile / max_steps / model_alias already resolved at create).

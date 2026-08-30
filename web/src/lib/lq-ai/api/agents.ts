@@ -103,14 +103,34 @@ export interface AgentRunCreate {
 }
 
 /**
- * A human's approve/reject decision on a paused (`awaiting_input`) run —
- * mirrors api `ResumeDecision` (HITL-2/3, ADR-F071). `message` is optional
- * free-text context, only meaningful for a reject; it is validated (≤2000
+ * The lawyer's edit of a pending `draft_email_reply` — mirrors api
+ * `EditedEmailReplyArgs` (INTAKE-4b, ADR-F087). An omitted `subject` keeps the
+ * agent's original argument; `body` is always sent. Rejected server-side on an
+ * oversize field or a control character (never sanitized). Recipients are NOT
+ * editable: the bridge is reply-only and derives them from the message being
+ * answered, so an unknown field here is a 422.
+ */
+export interface EditedEmailReplyArgs {
+	subject?: string;
+	body: string;
+}
+
+/**
+ * A human's decision on a paused (`awaiting_input`) run — mirrors api
+ * `ResumeDecision` (HITL-2/3, ADR-F071; ADR-F087).
+ *
+ * `message` is only valid on a `reject`: it becomes the tool result the model
+ * sees, which is why the cockpit's "Respond — tell the agent what to change" is
+ * a reject WITH a message rather than a fourth verb. It is validated (≤2000
  * chars) not sanitized, and never logged/audited server-side.
+ *
+ * `edit` carries the rewritten arguments and is accepted only where the pending
+ * ask allows it (today: `draft_email_reply`) — anything else is a 422.
  */
 export interface ResumeDecision {
-	type: 'approve' | 'reject';
+	type: 'approve' | 'reject' | 'edit';
 	message?: string;
+	edited_args?: EditedEmailReplyArgs;
 }
 
 /** POST /agents/runs/{id}/resume body. */

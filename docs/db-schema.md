@@ -2026,7 +2026,7 @@ credentials; `api` never sees them. Everything a sender controls in here is
 UNTRUSTED: boundary-validated at `app/schemas/intake.py`, fenced as DATA in the
 agent prompt, never logged or audited.
 
-### `intake_mailboxes` / `intake_threads` / `intake_messages` (0098–0100)
+### `intake_mailboxes` / `intake_threads` / `intake_messages` (0098–0101)
 
 ```sql
 -- One admin-bound mailbox → one practice area → one owner user (the queue owner,
@@ -2090,6 +2090,14 @@ CREATE TABLE intake_messages (
     -- (resolver layer 2). Opaque strings — compared, never interpreted.
     in_reply_to          TEXT,               -- CHECK length <= 500
     references_header    TEXT,               -- CHECK length <= 2000
+    -- 0101 (ADR-F087): why the approved send of THIS outbound row failed, as an
+    -- error CLASS only ('timeout', 'http_502', 'duplicate', 'not_configured', …).
+    -- Never a provider message, a body or an address — the audit contract
+    -- (counts/types/IDs) applies to this column too. NULL on every inbound row and
+    -- on every reply that was delivered. There is deliberately no outbound
+    -- provider_thread_id: the reply lands in the thread we replied into and
+    -- intake_threads.provider_thread_id already holds it (a mismatch is logged).
+    send_error           TEXT,               -- CHECK length BETWEEN 1 AND 100
     provider_timestamp   TIMESTAMPTZ,        -- provider-CLAIMED; never trusted for ordering
     run_id               UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),

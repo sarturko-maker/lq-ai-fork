@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update as sa_update
@@ -59,6 +60,69 @@ class AgentThreadBusy(Exception):
     Raised when the partial unique index ``uq_agent_runs_thread_running`` rejects
     the insert — the check-then-insert race between two concurrent follow-ups.
     """
+
+
+#: A conversation's newest live run is "in flight" at either of these statuses:
+#: ``running`` (executing) or ``awaiting_input`` (paused on a HITL approval — the
+#: lawyer owns the next move, and a second run would fork the conversation).
+IN_FLIGHT_RUN_STATUSES = (AgentRunStatus.running.value, AgentRunStatus.awaiting_input.value)
+
+#: A settled run in either of these states never consumed its thread's pending work:
+#: a resume that settled ``failed`` before driving the graph (enqueue failure, worker
+#: restart) or was ``cancelled`` leaves the ask exactly as live as it was. So neither
+#: may stand as "the newest run" when deciding what happened last on a conversation.
+_NOT_LIVE_RUN_STATUSES = (AgentRunStatus.failed.value, AgentRunStatus.cancelled.value)
+
+
+@dataclass(frozen=True)
+class ConversationRun:
+    """The newest LIVE run on a conversation — id + status, nothing else."""
+
+    id: uuid.UUID
+    status: str
+
+
+async def newest_live_run(db: AsyncSession, thread_id: uuid.UUID) -> ConversationRun | None:
+    """The conversation's newest run excluding ``failed``/``cancelled``.
+
+    THE definition of "what is happening on this conversation right now", shared by
+    every caller that needs it, because two independent copies of this rule drifted
+    once already and starved a mailbox (INTAKE-4b live test, ADR-F087):
+
+    * ``POST /agents/runs/{id}/resume`` asks "is this pause still the newest thing
+      here, or was it already resolved?" — a paused row is NEVER mutated, so its own
+      status cannot answer;
+    * the intake worker asks "may I start a run for this email?" — its old check was
+      "does ANY run on this conversation sit at running/awaiting_input", which is a
+      different question with a permanently wrong answer: the paused run stays
+      ``awaiting_input`` forever even after a resume run completed the work, so every
+      sibling thread deferred for good.
+
+    ``failed``/``cancelled`` are excluded rather than treated as terminal because a
+    resume that died before driving the graph never consumed the interrupt: the ask
+    is still live and must still be answerable (and the conversation still busy).
+    """
+    row = (
+        await db.execute(
+            select(AgentRun.id, AgentRun.status)
+            .where(
+                AgentRun.thread_id == thread_id,
+                AgentRun.status.not_in(_NOT_LIVE_RUN_STATUSES),
+            )
+            .order_by(AgentRun.started_at.desc(), AgentRun.id.desc())
+            .limit(1)
+        )
+    ).first()
+    return ConversationRun(id=row[0], status=row[1]) if row is not None else None
+
+
+async def is_conversation_in_flight(db: AsyncSession, thread_id: uuid.UUID) -> bool:
+    """Whether the conversation's newest live run is still executing or paused.
+
+    True ⇒ a new run would fork the conversation, so the caller must defer.
+    """
+    newest = await newest_live_run(db, thread_id)
+    return newest is not None and newest.status in IN_FLIGHT_RUN_STATUSES
 
 
 async def start_agent_run(

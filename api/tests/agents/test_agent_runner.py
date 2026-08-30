@@ -919,9 +919,15 @@ async def test_gated_tool_pauses_run_before_any_execution(
     assert ask.name == "send_notice"
     assert ask.parent_step_id is None
     # Display-only digest of the pending call — only the GATED tool rides the
-    # HITLRequest (the sibling is auto-approved, just not yet executed).
+    # HITLRequest (the sibling is auto-approved, just not yet executed). INTAKE-4b
+    # (ADR-F087) adds the verbs the server will accept, so the cockpit renders
+    # exactly the buttons the resume endpoint admits.
     assert json.loads(ask.summary) == [
-        {"args": {"recipient": "counterparty"}, "tool": "send_notice"}
+        {
+            "allowed_decisions": ["approve", "reject"],
+            "args": {"recipient": "counterparty"},
+            "tool": "send_notice",
+        }
     ]
 
 
@@ -1371,6 +1377,155 @@ async def test_resume_reject_without_message_still_closes_turn(
     rr, _ = await _load_run_and_steps(commit_factory, resume_run)
     assert rr.status == "completed"
     assert executed["n"] == 0
+
+
+# --- INTAKE-4b (ADR-F087): the `edit` verb ----------------------------------
+
+
+def test_build_resume_command_maps_edit_onto_the_checkpointed_call() -> None:
+    """The human's fields merge OVER the model's, and the tool NAME comes from
+    the checkpoint — never from the decision (that would be "run any tool")."""
+    from app.agents.runner import PendingAction, _build_resume_command
+
+    pending = [
+        (
+            "int-1",
+            [
+                PendingAction(
+                    name="draft_email_reply",
+                    args={"to": ["a@x.test"], "subject": "Re: NDA", "body": "Draft."},
+                )
+            ],
+        )
+    ]
+    command = _build_resume_command(
+        pending, {"type": "edit", "edited_args": {"body": "The lawyer's words."}}
+    )
+    assert command.resume == {
+        "int-1": {
+            "decisions": [
+                {
+                    "type": "edit",
+                    "edited_action": {
+                        "name": "draft_email_reply",
+                        # untouched fields keep the model's values
+                        "args": {
+                            "to": ["a@x.test"],
+                            "subject": "Re: NDA",
+                            "body": "The lawyer's words.",
+                        },
+                    },
+                }
+            ]
+        }
+    }
+
+
+def test_build_resume_command_refuses_edit_for_a_non_editable_pending_tool() -> None:
+    """The checkpoint-authoritative second gate behind the endpoint's 422."""
+    from app.agents.runner import PendingAction, _build_resume_command
+
+    for action in (
+        PendingAction(name="apply_redline", args={}),
+        PendingAction(name=None, args={}),  # malformed payload — never guessed at
+    ):
+        with pytest.raises(ValueError, match="edit is not allowed"):
+            _build_resume_command(
+                [("int-1", [action])], {"type": "edit", "edited_args": {"body": "x"}}
+            )
+
+
+def test_build_resume_command_fans_one_decision_across_every_gated_call() -> None:
+    from app.agents.runner import PendingAction, _build_resume_command
+
+    pending = [
+        ("int-1", [PendingAction(name="a", args={}), PendingAction(name="b", args={})]),
+        ("int-2", [PendingAction(name="c", args={})]),
+    ]
+    command = _build_resume_command(pending, {"type": "reject", "message": "no"})
+    assert command.resume == {
+        "int-1": {"decisions": [{"type": "reject", "message": "no"}] * 2},
+        "int-2": {"decisions": [{"type": "reject", "message": "no"}]},
+    }
+    # Fresh dicts per entry — a consumer can never alias them.
+    entries = command.resume["int-1"]["decisions"]
+    assert entries[0] is not entries[1]
+
+
+async def test_resume_edit_executes_the_tool_with_the_humans_args(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """ADR-F087 end to end through the REAL HumanInTheLoopMiddleware: what the
+    lawyer edited is what the tool receives — the model's text never runs."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agents.hitl import compile_hitl_policy
+
+    saver = InMemorySaver()
+    seen: list[dict[str, Any]] = []
+
+    def draft_email_reply(to: list[str], subject: str, body: str) -> str:
+        """Draft and send a reply to this intake email."""
+        seen.append({"to": to, "subject": subject, "body": body})
+        return "sent"
+
+    granted = frozenset({"draft_email_reply"})
+    interrupt_on = compile_hitl_policy({}, granted)  # the structural floor alone
+    assert interrupt_on is not None
+    assert interrupt_on["draft_email_reply"]["allowed_decisions"] == ["approve", "edit", "reject"]
+
+    pause_run = await make_run()
+    thread_id, user_id = await _run_and_thread_owner(commit_factory, pause_run)
+    await execute_agent_run(
+        pause_run,
+        commit_factory,
+        tools=[draft_email_reply],
+        model=ScriptedToolCallingModel(
+            responses=[
+                tool_call_message(
+                    "draft_email_reply",
+                    {"to": ["counterparty@example.net"], "subject": "Re: NDA", "body": "Draft."},
+                ),
+                final_message("unused"),
+            ]
+        ),
+        checkpointer=saver,
+        thread_id=thread_id,
+        interrupt_on=interrupt_on,
+    )
+    paused, steps = await _load_run_and_steps(commit_factory, pause_run)
+    assert paused.status == "awaiting_input"
+    assert seen == []
+    # The pause digest carries the verbs AND the whole draft, so the cockpit can
+    # render an editor off the settled row (ADR-F004 + ADR-F087).
+    digest = json.loads(next(s.summary for s in steps if s.kind == "hitl_request"))
+    assert digest[0]["allowed_decisions"] == ["approve", "edit", "reject"]
+    assert digest[0]["args"]["body"] == "Draft."
+
+    resume_run = await _insert_run_on_thread(
+        commit_factory, thread_id=thread_id, user_id=user_id, prompt="[resume: edit]"
+    )
+    await execute_agent_run(
+        resume_run,
+        commit_factory,
+        tools=[draft_email_reply],
+        model=ScriptedToolCallingModel(responses=[final_message("Sent your version.")]),
+        checkpointer=saver,
+        thread_id=thread_id,
+        interrupt_on=interrupt_on,
+        resume_decision={"type": "edit", "edited_args": {"body": "Our counsel will revert."}},
+    )
+
+    rr, _ = await _load_run_and_steps(commit_factory, resume_run)
+    assert rr.status == "completed"
+    assert seen == [
+        {
+            "to": ["counterparty@example.net"],
+            "subject": "Re: NDA",
+            "body": "Our counsel will revert.",
+        }
+    ]
 
 
 async def test_resume_path_skips_repair(

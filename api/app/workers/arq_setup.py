@@ -318,9 +318,10 @@ class WorkerSettings:
         playbook_execution_job,
         tabular_execution_job,
         autonomous_session_job,
-        # INTAKE-1 (ADR-F086): STUB body until INTAKE-3 lands the real
-        # bound-area-agent run; registered now so the substrate (envelope
-        # landing → enqueue) is independently verifiable end-to-end.
+        # INTAKE-1 (ADR-F086): the intake job. _populate_class_attrs re-wraps
+        # this entry in arq's func() with keep_result=0 (INTAKE-4b, ADR-F087) —
+        # it stays a bare callable here so the module still imports where arq is
+        # absent, which is why func() is imported lazily at all.
         intake_email_job,
         # agent_run_job is appended by _populate_class_attrs wrapped in
         # arq's func() so it carries per-function max_tries=1 + its own
@@ -365,6 +366,27 @@ def _populate_class_attrs() -> None:
         # run and fans out subagents, so an unbounded 10 can OOM the pod. Mirrors
         # document_pipeline.WorkerSettings.max_jobs.
         WorkerSettings.max_jobs = get_settings().lq_ai_agent_worker_concurrency  # type: ignore[attr-defined]
+        # INTAKE-4b (ADR-F087): keep NO arq result for the intake job.
+        #
+        # The enqueue side keys it on a deterministic ``_job_id`` (thread +
+        # message) so a redelivered webhook cannot double-queue it. But arq
+        # refuses a job id while ``arq:result:<id>`` exists, and the default keeps
+        # that key for an HOUR after the job finishes — so the requeue-on-settle
+        # hook, whose entire purpose is to re-run the SAME (thread, message) after
+        # an earlier attempt returned ``deferred``, enqueued nothing for an hour
+        # and the message starved. Found live: the send worked, the sibling thread
+        # never ran. ``keep_result=0`` narrows the dedup window to exactly what it
+        # is for — a job still QUEUED or RUNNING — and the enqueue helper now
+        # reports the refusal instead of swallowing it.
+        #
+        # ``agent_run_job`` below is NOT affected by the same trap: its job id is
+        # keyed on a run id, and a run row is enqueued exactly once (a resume is a
+        # NEW row with a NEW id), so a lingering result key can never block a
+        # legitimate enqueue. It also already treats ``None`` as fatal.
+        for index, registered in enumerate(WorkerSettings.functions):
+            if registered is intake_email_job:
+                WorkerSettings.functions[index] = arq_func(intake_email_job, keep_result=0)
+                break
         if not any(getattr(f, "name", None) == "agent_run_job" for f in WorkerSettings.functions):
             WorkerSettings.functions.append(
                 # At-most-once (ADR-F009): max_tries=1 — verified at arq

@@ -707,6 +707,17 @@ class Settings(BaseSettings):
             "/api/v1/integrations/slack/workspaces. Constant-time matched."
         ),
     )
+    # INTAKE-4b (ADR-F087): where the mail-bridge is reachable from inside the
+    # deployment's network. The ONE outbound leg email intake adds to api/ — a
+    # human-approved reply, authenticated with ``lq_ai_bridge_token`` above (the
+    # same bearer, in the other direction). No AgentMail credential is involved:
+    # the bridge remains the sole holder (ADR-F086). Bare base URL, following the
+    # ``lq_ai_gateway_url`` precedent; empty ⇒ send is not configured and the
+    # intake tool fails honestly instead of pretending to deliver.
+    lq_ai_mail_bridge_url: str = Field(
+        default="http://mail-bridge:8004",
+        description="Mail-bridge base URL for the approved-reply send (INTAKE-4b).",
+    )
     lq_ai_bridge_master_key: str = Field(
         default="",
         description=(

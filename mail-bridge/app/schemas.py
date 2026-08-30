@@ -62,6 +62,14 @@ class OutboundAttachment(BaseModel):
         return self._decoded_size
 
 
+#: INTAKE-4b (ADR-F087/F088): the matter reference the api asks us to tag the
+#: Reply-To with. Mirrors ``api/app/matters/reference.py``'s REFERENCE_PATTERN —
+#: anchored, uppercase, no separators of its own. The api sends the TAG, never an
+#: address: the bridge composes ``<local>+<tag>@<domain>`` from its OWN configured
+#: inbox, so neither the api nor the agent behind it can choose where a reply goes.
+_REPLY_TO_TAG_PATTERN = r"^[A-Z0-9]{2,6}-[A-Z0-9]{2,6}-[0-9]{4,}$"
+
+
 class SendReplyRequest(BaseModel):
     """Reply into an existing thread, keyed by the message being answered."""
 
@@ -69,6 +77,13 @@ class SendReplyRequest(BaseModel):
 
     reply_to_provider_message_id: str = Field(..., min_length=1, max_length=500)
     text: str = Field(..., min_length=1, max_length=MAX_BODY_TEXT_CHARS)
+    # INTAKE-4b: the caller's own key for this send. The api derives it from the
+    # human-approved ASK (its checkpointed tool-call id), never from a per-attempt
+    # id, so a re-execution presents the SAME key — see ADR-F087. Required: an
+    # unkeyed send cannot be told apart from a repeat, and a repeat is a second
+    # letter in someone's inbox.
+    idempotency_key: str = Field(..., min_length=1, max_length=64)
+    reply_to_tag: str | None = Field(default=None, pattern=_REPLY_TO_TAG_PATTERN, max_length=40)
     attachments: list[OutboundAttachment] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
 
     @model_validator(mode="after")

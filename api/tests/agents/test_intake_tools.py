@@ -8,8 +8,11 @@ Drives the two intake tools through the real test DB:
   neither ever writes ``projects.intake_state`` — that is provenance, ADR-F086 A1),
   reject-not-truncate validation, idempotent overwrite, and the guard receipt +
   audit carrying counts/IDs only — never the label or the note,
-* ``draft_email_reply``: records a ``direction='out'`` row and SENDS NOTHING;
-  attachment ids outside the matter are refused (no existence disclosure),
+* ``draft_email_reply`` (INTAKE-4b, ADR-F087): records a ``direction='out'`` row
+  and SENDS it through an injected fake bridge — the stamped subject, the
+  provider id, the thread transition, and the failure semantics (one attempt, no
+  retries; the reply is kept with an error CLASS and the thread goes to
+  ``error``); attachments are refused before anything is written,
 * the R7 safe-fail hook: a settled run whose thread never got an outcome parks the
   thread for the lawyer with the FIXED fork-authored note; a concluded thread and a
   non-intake run are untouched.
@@ -17,6 +20,7 @@ Drives the two intake tools through the real test DB:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -33,7 +37,9 @@ from app.agents.intake_tools import (
     NO_OUTCOME_NOTE,
     _draft_email_reply,
     _record_intake_outcome,
+    _send_key,
     build_intake_tools,
+    load_intake_thread_for_run,
     requeue_pending_intake_message,
     safe_fail_intake_thread,
 )
@@ -41,6 +47,7 @@ from app.agents.matter_fact_tools import MATTER_FACT_TOOL_NAMES
 from app.agents.matter_memory_tools import MATTER_MEMORY_TOOL_NAMES
 from app.agents.matter_roster_tools import MATTER_ROSTER_TOOL_NAMES
 from app.agents.tools import MATTER_TOOL_NAMES, MatterBinding
+from app.clients.mail_bridge import BridgeSendError, SentReply
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.file import File
@@ -230,6 +237,7 @@ def test_build_grants_exactly_the_two_intake_tools() -> None:
             minimum_inference_tier=None,
             practice_area_id=None,
         ),
+        intake_thread_id=uuid.uuid4(),
     )
     assert [t.__name__ for t in tools] == ["record_intake_outcome", "draft_email_reply"]
     assert sorted(INTAKE_TOOL_NAMES) == ["draft_email_reply", "record_intake_outcome"]
@@ -258,6 +266,7 @@ async def test_dealt_with_files_the_thread_and_closes_the_matter(
         out = await _record_intake_outcome(
             db,
             _binding(seeded),
+            intake_thread_id=seeded.thread_id,
             outcome="dealt_with",
             label="marketing",
             note="Vendor marketing email; nothing needed.",
@@ -284,6 +293,7 @@ async def test_needs_human_keeps_the_matter_open(
         await _record_intake_outcome(
             db,
             _binding(seeded),
+            intake_thread_id=seeded.thread_id,
             outcome="needs_human",
             label="NDA review",
             note="Redline drafted.",
@@ -297,6 +307,46 @@ async def test_needs_human_keeps_the_matter_open(
         assert thread.status == "awaiting_human"
         assert project.archived_at is None
         assert project.intake_state == "candidate"
+
+
+@pytest.mark.parametrize(
+    ("send_status", "outcome"),
+    [("replied", "dealt_with"), ("replied", "needs_human"), ("error", "needs_human")],
+)
+async def test_outcome_never_overwrites_a_settled_send_status(
+    commit_factory: async_sessionmaker[AsyncSession],
+    seeded: SeededIntake,
+    send_status: str,
+    outcome: str,
+) -> None:
+    """INTAKE-4b (ADR-F087): `replied` (a letter went out) and `error` (one was
+    approved and did not go) are later, stronger facts than the outcome's own
+    bookkeeping — and `error` is the ONLY place a failed delivery is visible to the
+    lawyer. Recording the outcome out of order must not erase either."""
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        thread.status = send_status
+        await db.commit()
+
+    async with commit_factory() as db:
+        out = await _record_intake_outcome(
+            db,
+            _binding(seeded),
+            intake_thread_id=seeded.thread_id,
+            outcome=outcome,
+            label="NDA review",
+            note="n",
+        )
+        await db.commit()
+
+    assert send_status in out  # the tool reports the status the thread actually has
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        assert thread.status == send_status
+        assert thread.outcome == outcome  # the outcome itself IS recorded
+        assert thread.label == "NDA review"
 
 
 @pytest.mark.parametrize(
@@ -315,7 +365,9 @@ async def test_invalid_proposals_are_rejected_and_write_nothing(
     commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake, kwargs: dict[str, str]
 ) -> None:
     async with commit_factory() as db:
-        out = await _record_intake_outcome(db, _binding(seeded), **kwargs)
+        out = await _record_intake_outcome(
+            db, _binding(seeded), intake_thread_id=seeded.thread_id, **kwargs
+        )
         await db.commit()
     assert out.startswith("Rejected")
     async with commit_factory() as db:
@@ -330,13 +382,19 @@ async def test_second_call_overwrites_last_wins(
 ) -> None:
     async with commit_factory() as db:
         await _record_intake_outcome(
-            db, _binding(seeded), outcome="dealt_with", label="spam", note="Noise."
+            db,
+            _binding(seeded),
+            intake_thread_id=seeded.thread_id,
+            outcome="dealt_with",
+            label="spam",
+            note="Noise.",
         )
         await db.commit()
     async with commit_factory() as db:
         await _record_intake_outcome(
             db,
             _binding(seeded),
+            intake_thread_id=seeded.thread_id,
             outcome="needs_human",
             note="On reflection the lawyer should see this.",
             label="unclear",
@@ -385,6 +443,9 @@ async def test_non_intake_matter_records_nothing(
                     minimum_inference_tier=None,
                     practice_area_id=None,
                 ),
+                # An id that names no thread on THIS matter: the tool re-checks the
+                # composition root's id against its own binding before acting.
+                intake_thread_id=uuid.uuid4(),
                 outcome="dealt_with",
                 label="x",
                 note="y",
@@ -401,7 +462,12 @@ async def test_guarded_dispatch_audits_counts_only_never_the_note(
     commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
 ) -> None:
     run_id = await _make_run(commit_factory, seeded)
-    tools = build_intake_tools(commit_factory, run_id=run_id, binding=_binding(seeded))
+    tools = build_intake_tools(
+        commit_factory,
+        run_id=run_id,
+        binding=_binding(seeded),
+        intake_thread_id=seeded.thread_id,
+    )
     record = next(t for t in tools if t.__name__ == "record_intake_outcome")
     secret_note = "the counterparty offered a side letter nobody should see in an audit row"
     out = await record("needs_human", "NDA review", secret_note)
@@ -423,69 +489,285 @@ async def test_guarded_dispatch_audits_counts_only_never_the_note(
 # --------------------------------------------------------------------------- #
 
 
-async def test_draft_reply_records_an_out_message_and_sends_nothing(
-    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
-) -> None:
-    run_id = await _make_run(commit_factory, seeded)
-    async with commit_factory() as db:
-        out = await _draft_email_reply(
-            db,
-            _binding(seeded),
-            run_id=run_id,
-            to=["counterparty@example.net"],
-            subject="Re: Please review the attached NDA",
-            body="Thanks — we have it and will come back to you this week.",
-            attachment_file_ids=[str(seeded.file_id)],
+class _FakeBridge:
+    """The mail-bridge send seam (ADR-F087) — records calls, never a network."""
+
+    def __init__(self, *, error: str | None = None) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._error = error
+
+    async def send_reply(
+        self,
+        *,
+        reply_to_provider_message_id: str,
+        idempotency_key: str,
+        text: str,
+        reply_to_tag: str | None = None,
+    ) -> SentReply:
+        self.calls.append(
+            {
+                "reply_to_provider_message_id": reply_to_provider_message_id,
+                "idempotency_key": idempotency_key,
+                "text": text,
+                "reply_to_tag": reply_to_tag,
+            }
         )
-        await db.commit()
-    assert "NOT sent" in out
-    assert "INTAKE-4" in out
-    async with commit_factory() as db:
-        drafts = (
+        if self._error is not None:
+            raise BridgeSendError(self._error)
+        return SentReply(
+            provider_message_id="<reply-1@email.amazonses.com>",
+            provider_thread_id="thr-provider",
+        )
+
+
+async def _outbound_rows(
+    factory: async_sessionmaker[AsyncSession], thread_id: uuid.UUID
+) -> list[IntakeMessage]:
+    async with factory() as db:
+        return list(
             (
                 await db.execute(
                     select(IntakeMessage).where(
-                        IntakeMessage.thread_id == seeded.thread_id,
-                        IntakeMessage.direction == "out",
+                        IntakeMessage.thread_id == thread_id, IntakeMessage.direction == "out"
                     )
                 )
             )
             .scalars()
             .all()
         )
-        assert len(drafts) == 1
-        draft = drafts[0]
-        assert draft.run_id == run_id
-        assert draft.to_addrs == ["counterparty@example.net"]
-        assert draft.subject == "Re: Please review the attached NDA"
-        assert draft.attachment_filenames == ["Mutual-NDA.docx"]
-        assert draft.provider_message_id.startswith("draft:")
 
 
-async def test_draft_reply_refuses_a_file_outside_this_matter(
+async def _set_reference(
+    factory: async_sessionmaker[AsyncSession], project_id: uuid.UUID, reference: str
+) -> None:
+    async with factory() as db:
+        project = await db.get(Project, project_id)
+        assert project is not None
+        project.reference = reference
+        await db.commit()
+
+
+async def test_approved_reply_is_stamped_sent_and_recorded(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """ADR-F087: the tool body runs only after a human approved it, and that IS
+    the send — one bridge call, the provider id persisted (layer 2's anchor),
+    the subject stamped with the reference, the thread ``replied``."""
+    run_id = await _make_run(commit_factory, seeded)
+    await _set_reference(commit_factory, seeded.project_id, "NWT-COM-0011")
+    bridge = _FakeBridge()
+    call_id = "call_approved_ask"
+    async with commit_factory() as db:
+        out = await _draft_email_reply(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            to=["counterparty@example.net"],
+            subject="Re: Please review the attached NDA",
+            body="Thanks — we have it and will come back to you this week.",
+            attachment_file_ids=[],
+            tool_call_id=call_id,
+            bridge=bridge,
+        )
+        await db.commit()
+
+    assert out.startswith("Sent.")
+    assert "NWT-COM-0011" in out
+    rows = await _outbound_rows(commit_factory, seeded.thread_id)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.run_id == run_id
+    assert row.to_addrs == ["counterparty@example.net"]
+    # The reference is stamped exactly once, and the recorded id is the
+    # PROVIDER's — the one an inbound References header will name (ADR-F088).
+    assert row.subject == "Re: Please review the attached NDA [NWT-COM-0011]"
+    assert row.provider_message_id == "<reply-1@email.amazonses.com>"
+    assert row.send_error is None
+    assert len(bridge.calls) == 1
+    call = bridge.calls[0]
+    # Keyed on the thread's newest INBOUND message; the idempotency key is the
+    # per-ASK key (ADR-F087 — deliberately NOT this row's id, which is minted fresh
+    # on every execution); the bridge gets the matter TAG, never an address.
+    assert call["idempotency_key"] == _send_key(seeded.thread_id, call_id)
+    assert call["idempotency_key"] != str(row.id)
+    assert call["reply_to_tag"] == "NWT-COM-0011"
+    assert call["text"] == "Thanks — we have it and will come back to you this week."
+    async with commit_factory() as db:
+        inbound = await db.get(IntakeMessage, seeded.message_id)
+        assert inbound is not None
+        assert call["reply_to_provider_message_id"] == inbound.provider_message_id
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        assert thread.status == "replied"
+
+
+async def test_a_matter_without_a_reference_still_sends_unstamped(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """A missing reference is cosmetic — it must not block the send."""
+    bridge = _FakeBridge()
+    async with commit_factory() as db:
+        out = await _draft_email_reply(
+            db,
+            _binding(seeded),
+            run_id=await _make_run(commit_factory, seeded),
+            intake_thread_id=seeded.thread_id,
+            to=["counterparty@example.net"],
+            subject="Re: NDA",
+            body="Noted.",
+            attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
+            bridge=bridge,
+        )
+        await db.commit()
+    assert out.startswith("Sent.")
+    assert bridge.calls[0]["reply_to_tag"] is None
+    rows = await _outbound_rows(commit_factory, seeded.thread_id)
+    assert rows[0].subject == "Re: NDA"
+
+
+@pytest.mark.parametrize("reason", ["http_500", "timeout", "transport", "duplicate", "unexpected"])
+async def test_a_failed_send_keeps_the_reply_and_errors_the_thread(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake, reason: str
+) -> None:
+    """No retries (ADR-F087). The approved text is kept, the failure is recorded
+    as a CLASS only, the thread goes to ``error``, and the tool tells the model
+    to conclude needs_human."""
+    bridge = _FakeBridge(error=reason)
+    async with commit_factory() as db:
+        out = await _draft_email_reply(
+            db,
+            _binding(seeded),
+            run_id=await _make_run(commit_factory, seeded),
+            intake_thread_id=seeded.thread_id,
+            to=["counterparty@example.net"],
+            subject="Re: NDA",
+            body="Noted.",
+            attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
+            bridge=bridge,
+        )
+        await db.commit()
+
+    assert out.startswith("NOT DELIVERED")
+    assert "needs_human" in out
+    assert len(bridge.calls) == 1  # exactly one attempt, ever
+    rows = await _outbound_rows(commit_factory, seeded.thread_id)
+    assert len(rows) == 1
+    assert rows[0].send_error == reason
+    assert rows[0].body_text == "Noted."
+    assert rows[0].provider_message_id.startswith("draft:")
+    async with commit_factory() as db:
+        thread = await db.get(IntakeThread, seeded.thread_id)
+        assert thread is not None
+        assert thread.status == "error"
+
+
+async def test_no_bridge_configured_is_an_honest_failure(
     commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
 ) -> None:
     async with commit_factory() as db:
         out = await _draft_email_reply(
             db,
             _binding(seeded),
-            run_id=uuid.uuid4(),
+            run_id=await _make_run(commit_factory, seeded),
+            intake_thread_id=seeded.thread_id,
+            to=["counterparty@example.net"],
+            subject="Re: NDA",
+            body="Noted.",
+            attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
+            bridge=None,
+        )
+        await db.commit()
+    assert out.startswith("NOT DELIVERED")
+    rows = await _outbound_rows(commit_factory, seeded.thread_id)
+    assert rows[0].send_error == "not_configured"
+
+
+async def test_a_thread_with_no_inbound_message_is_never_sent_into(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """The bridge is reply-only: with nothing to reply TO there is no send, and
+    we must not fall back to anything that could originate a thread."""
+    async with commit_factory() as db:
+        await db.execute(delete(IntakeMessage).where(IntakeMessage.id == seeded.message_id))
+        await db.commit()
+    bridge = _FakeBridge()
+    async with commit_factory() as db:
+        out = await _draft_email_reply(
+            db,
+            _binding(seeded),
+            run_id=await _make_run(commit_factory, seeded),
+            intake_thread_id=seeded.thread_id,
+            to=["counterparty@example.net"],
+            subject="Re: NDA",
+            body="Noted.",
+            attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
+            bridge=bridge,
+        )
+        await db.commit()
+    assert out.startswith("NOT DELIVERED")
+    assert bridge.calls == []
+    rows = await _outbound_rows(commit_factory, seeded.thread_id)
+    assert rows[0].send_error == "no_inbound_message"
+
+
+async def test_attachments_are_refused_before_anything_is_written(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """INTAKE-4b sends text only; recording "1 attachment" on a reply that goes
+    out without it would make the row lie about what the counterparty got."""
+    bridge = _FakeBridge()
+    async with commit_factory() as db:
+        out = await _draft_email_reply(
+            db,
+            _binding(seeded),
+            run_id=await _make_run(commit_factory, seeded),
+            intake_thread_id=seeded.thread_id,
             to=["counterparty@example.net"],
             subject="Re: NDA",
             body="See attached.",
-            attachment_file_ids=[str(uuid.uuid4())],
+            attachment_file_ids=[str(seeded.file_id)],
+            tool_call_id=uuid.uuid4().hex,
+            bridge=bridge,
         )
         await db.commit()
-    assert "not documents in this matter" in out
+    assert "Attachments cannot be delivered yet" in out
+    assert bridge.calls == []
+    assert await _outbound_rows(commit_factory, seeded.thread_id) == []
+
+
+async def test_a_non_intake_matter_sends_nothing(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    bridge = _FakeBridge()
+    binding = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=seeded.user_id,
+        name="Not an intake matter",
+        privileged=False,
+        minimum_inference_tier=None,
+        practice_area_id=None,
+    )
     async with commit_factory() as db:
-        count = (
-            await db.execute(
-                select(IntakeMessage).where(
-                    IntakeMessage.thread_id == seeded.thread_id, IntakeMessage.direction == "out"
-                )
-            )
-        ).scalars()
-        assert list(count) == []
+        out = await _draft_email_reply(
+            db,
+            binding,
+            run_id=uuid.uuid4(),
+            intake_thread_id=seeded.thread_id,
+            to=["counterparty@example.net"],
+            subject="Re: NDA",
+            body="Noted.",
+            attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
+            bridge=bridge,
+        )
+        await db.commit()
+    assert "not an intake thread" in out
+    assert bridge.calls == []
 
 
 @pytest.mark.parametrize(
@@ -504,7 +786,13 @@ async def test_invalid_drafts_are_rejected_and_write_nothing(
 ) -> None:
     async with commit_factory() as db:
         out = await _draft_email_reply(
-            db, _binding(seeded), run_id=uuid.uuid4(), attachment_file_ids=[], **kwargs
+            db,
+            _binding(seeded),
+            run_id=uuid.uuid4(),
+            intake_thread_id=seeded.thread_id,
+            attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
+            **kwargs,
         )
         await db.commit()
     assert out.startswith("Rejected")
@@ -517,6 +805,478 @@ async def test_invalid_drafts_are_rejected_and_write_nothing(
             )
         ).scalars()
         assert list(rows) == []
+
+
+# --------------------------------------------------------------------------- #
+# Double-send safety (ADR-F087) — the re-execution hazard, not a retry
+# --------------------------------------------------------------------------- #
+
+
+def test_draft_email_reply_takes_an_injected_tool_call_id() -> None:
+    """The whole double-send fix rests on this wiring: langchain injects the
+    CHECKPOINTED tool-call id, and the model can neither see it in the schema nor
+    set it. If a langchain/deepagents bump ever drops the injection, the key would
+    silently become "" for every ask — so pin the contract here."""
+    from langchain_core.tools import StructuredTool
+
+    tools = build_intake_tools(
+        async_sessionmaker(),
+        run_id=uuid.uuid4(),
+        binding=MatterBinding(
+            project_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            name="m",
+            privileged=False,
+            minimum_inference_tier=None,
+            practice_area_id=None,
+        ),
+        intake_thread_id=uuid.uuid4(),
+    )
+    draft = next(t for t in tools if t.__name__ == "draft_email_reply")
+    schema = StructuredTool.from_function(
+        coroutine=draft, name="draft_email_reply", description="d"
+    ).args
+    assert "tool_call_id" not in schema
+    assert {"to", "subject", "body", "attachment_file_ids"} <= set(schema)
+
+
+async def test_re_executing_the_same_ask_sends_once_and_writes_one_row(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """A worker killed between a successful send and the checkpoint write settles
+    the run ``failed``; a failed successor does NOT supersede the pause, so the card
+    stays live and Approve can run this body again on the SAME checkpointed call.
+    The counterparty must still receive exactly one letter."""
+    run_id = await _make_run(commit_factory, seeded)
+    bridge = _FakeBridge()
+    call_id = "call_the_same_checkpointed_ask"
+
+    async def approve() -> str:
+        async with commit_factory() as db:
+            out = await _draft_email_reply(
+                db,
+                _binding(seeded),
+                run_id=run_id,
+                intake_thread_id=seeded.thread_id,
+                to=["counterparty@example.net"],
+                subject="Re: NDA",
+                body="Thanks — we have it.",
+                attachment_file_ids=[],
+                tool_call_id=call_id,
+                bridge=bridge,
+            )
+            await db.commit()
+            return out
+
+    first, second = await approve(), await approve()
+
+    assert first.startswith("Sent.")
+    assert "already been sent" in second
+    assert len(bridge.calls) == 1  # the bridge is not touched a second time
+    rows = await _outbound_rows(commit_factory, seeded.thread_id)
+    assert len(rows) == 1  # and no twin row was inserted
+    assert rows[0].provider_message_id == "<reply-1@email.amazonses.com>"
+
+
+async def test_the_idempotency_key_is_the_ask_not_the_row(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """The key must be derived from the CHECKPOINTED tool-call id: a freshly minted
+    row id would present a NEW key on a second attempt and the bridge would accept
+    it. Two executions of the same ask ⇒ the same key; a different ask ⇒ a different
+    one (and both are within the bridge's 64-char cap)."""
+    bridge = _FakeBridge(error="transport")  # fail, so the row stays undelivered
+
+    async def approve(call_id: str) -> None:
+        async with commit_factory() as db:
+            await _draft_email_reply(
+                db,
+                _binding(seeded),
+                run_id=await _make_run(commit_factory, seeded),
+                intake_thread_id=seeded.thread_id,
+                to=["counterparty@example.net"],
+                subject="Re: NDA",
+                body="Noted.",
+                attachment_file_ids=[],
+                tool_call_id=call_id,
+                bridge=bridge,
+            )
+            await db.commit()
+
+    await approve("call_a")
+    await approve("call_a")
+    await approve("call_b")
+
+    keys = [c["idempotency_key"] for c in bridge.calls]
+    assert keys[0] == keys[1] != keys[2]
+    assert all(isinstance(k, str) and 1 <= len(k) <= 64 for k in keys)
+    # The failed attempt reused its own row; only the second ask made a new one.
+    rows = await _outbound_rows(commit_factory, seeded.thread_id)
+    assert len(rows) == 2
+    assert {r.send_error for r in rows} == {"transport"}
+
+
+async def test_reply_targets_the_newest_inbound_the_agent_actually_read(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """A pause can last days. A follow-up that lands meanwhile is unread text whose
+    sender the lawyer never approved replying to — and the bridge derives the
+    recipient from whichever message we key the reply on."""
+    run_id = await _make_run(commit_factory, seeded)
+    async with commit_factory() as db:
+        processed = await db.get(IntakeMessage, seeded.message_id)
+        assert processed is not None
+        processed.run_id = run_id
+        db.add(
+            IntakeMessage(
+                thread_id=seeded.thread_id,
+                provider_message_id="msg-arrived-during-the-pause",
+                direction="in",
+                from_addr="a-stranger@example.org",
+                to_addrs=["legal-intake@example.com"],
+                subject="Re: NDA",
+                body_text="me too",
+                provider_timestamp=datetime(2026, 8, 25, 9, 0, tzinfo=UTC),
+            )
+        )
+        await db.commit()
+
+    bridge = _FakeBridge()
+    async with commit_factory() as db:
+        out = await _draft_email_reply(
+            db,
+            _binding(seeded),
+            run_id=run_id,
+            intake_thread_id=seeded.thread_id,
+            to=["counterparty@example.net"],
+            subject="Re: NDA",
+            body="Noted.",
+            attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
+            bridge=bridge,
+        )
+        await db.commit()
+
+    assert out.startswith("Sent.")
+    async with commit_factory() as db:
+        read = await db.get(IntakeMessage, seeded.message_id)
+        assert read is not None
+        assert bridge.calls[0]["reply_to_provider_message_id"] == read.provider_message_id
+
+
+async def test_a_delivered_reply_blocks_a_second_one_until_new_mail_arrives(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """The DB-side guard, independent of the tool-call id: a reply already out since
+    the newest inbound short-circuits before the bridge is touched."""
+    bridge = _FakeBridge()
+
+    async def approve() -> str:
+        async with commit_factory() as db:
+            out = await _draft_email_reply(
+                db,
+                _binding(seeded),
+                run_id=await _make_run(commit_factory, seeded),
+                intake_thread_id=seeded.thread_id,
+                to=["counterparty@example.net"],
+                subject="Re: NDA",
+                body="Noted.",
+                attachment_file_ids=[],
+                tool_call_id=uuid.uuid4().hex,  # a DIFFERENT ask each time
+                bridge=bridge,
+            )
+            await db.commit()
+            return out
+
+    assert (await approve()).startswith("Sent.")
+    assert "already been sent" in await approve()
+    assert len(bridge.calls) == 1
+
+
+# --------------------------------------------------------------------------- #
+# One conversation, MANY intake threads (ADR-F088 layer 2/3) — the binding
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class SeededConversation:
+    """The live shape that crashed the first approval: three intake threads on ONE
+    agent conversation — the one being worked plus two attached mid-run."""
+
+    seeded: SeededIntake
+    agent_thread_id: uuid.UUID
+    run_id: uuid.UUID
+    worked_thread_id: uuid.UUID
+    pending_a_id: uuid.UUID
+    pending_b_id: uuid.UUID
+
+
+async def _seed_conversation(
+    factory: async_sessionmaker[AsyncSession], row: SeededIntake
+) -> SeededConversation:
+    """The worked thread (processing, its inbound stamped with the run) + two siblings
+    the resolver attached later, both still `received` with an unclaimed inbound."""
+    run_id = await _make_run(factory, row)
+    async with factory() as db:
+        worked = await db.get(IntakeThread, row.thread_id)
+        assert worked is not None
+        agent_thread_id = worked.agent_thread_id
+        assert agent_thread_id is not None
+        worked.status = "processing"
+        processed = await db.get(IntakeMessage, row.message_id)
+        assert processed is not None
+        processed.run_id = run_id  # the worker's binding, at run start
+
+        siblings: list[uuid.UUID] = []
+        # Explicit, distinct created_at: "the OLDEST pending inbound" is the contract,
+        # and two rows written in one transaction share now() to the microsecond.
+        for tag, landed_at in (
+            ("a", datetime(2026, 8, 21, 9, 0, tzinfo=UTC)),
+            ("b", datetime(2026, 8, 22, 9, 0, tzinfo=UTC)),
+        ):
+            sibling = IntakeThread(
+                mailbox_id=row.mailbox_id,
+                provider_thread_id=f"thr-{tag}-{uuid.uuid4().hex[:8]}",
+                project_id=row.project_id,
+                agent_thread_id=agent_thread_id,  # SAME conversation (ADR-F088)
+                subject="Re: Please review the attached NDA",
+                status="received",
+                auth_state="pass",
+                message_count=1,
+            )
+            db.add(sibling)
+            await db.flush()
+            db.add(
+                IntakeMessage(
+                    thread_id=sibling.id,
+                    provider_message_id=f"msg-{tag}-{uuid.uuid4().hex[:8]}",
+                    direction="in",
+                    from_addr="counterparty@example.net",
+                    to_addrs=["legal-intake@example.com"],
+                    subject="Re: Please review the attached NDA",
+                    body_text="a follow-up that landed while the run was in flight",
+                    provider_timestamp=landed_at,
+                    created_at=landed_at,
+                )
+            )
+            siblings.append(sibling.id)
+        await db.commit()
+    return SeededConversation(
+        seeded=row,
+        agent_thread_id=agent_thread_id,
+        run_id=run_id,
+        worked_thread_id=row.thread_id,
+        pending_a_id=siblings[0],
+        pending_b_id=siblings[1],
+    )
+
+
+@pytest_asyncio.fixture
+async def conversation(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> SeededConversation:
+    return await _seed_conversation(commit_factory, seeded)
+
+
+async def test_binding_picks_the_thread_this_run_was_started_for(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """Three threads share one agent conversation. The old query raised
+    MultipleResultsFound here (the live INTAKE-4b approval died on exactly this);
+    a LIMIT 1 would have picked the oldest row and been right by luck only."""
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=conversation.run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.worked_thread_id
+
+
+async def test_binding_follows_the_conversation_lineage_for_a_resumed_run(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """A resume is a NEW agent_runs row with no messages of its own (HITL-2). It must
+    still bind to the thread the paused run was working."""
+    # A resume run is a NEW agent_runs row on the SAME conversation (HITL-2), so it
+    # must be created on the existing agent thread — not a fresh one.
+    async with commit_factory() as db:
+        paused = await db.get(AgentRun, conversation.run_id)
+        assert paused is not None
+        paused.status = "awaiting_input"  # the pause the human is resolving
+        resume = AgentRun(
+            user_id=conversation.seeded.user_id,
+            thread_id=conversation.agent_thread_id,
+            project_id=conversation.seeded.project_id,
+            status="running",
+            prompt="[resume: approve]",
+            max_steps=8,
+        )
+        db.add(resume)
+        await db.commit()
+        resume_run_id = resume.id
+    assert resume_run_id != conversation.run_id
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=resume_run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.worked_thread_id
+
+
+async def test_binding_falls_back_to_the_single_working_thread(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """Nothing processed yet: the two `received` siblings are not candidates, so the
+    one thread actually being worked is unambiguous."""
+    async with commit_factory() as db:
+        processed = await db.get(IntakeMessage, conversation.seeded.message_id)
+        assert processed is not None
+        processed.run_id = None
+        await db.commit()
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=conversation.run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.worked_thread_id
+
+
+async def test_binding_fails_closed_when_it_is_genuinely_ambiguous(
+    commit_factory: async_sessionmaker[AsyncSession],
+    conversation: SeededConversation,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Two working threads and nothing processed is a BUG, not a state to guess
+    through: log it with counts/ids and grant nothing (no tools, no doctrine, no
+    thread flipped) — never MultipleResultsFound, never the wrong thread."""
+    async with commit_factory() as db:
+        processed = await db.get(IntakeMessage, conversation.seeded.message_id)
+        assert processed is not None
+        processed.run_id = None
+        sibling = await db.get(IntakeThread, conversation.pending_a_id)
+        assert sibling is not None
+        sibling.status = "processing"
+        await db.commit()
+    with caplog.at_level(logging.ERROR, logger="app.agents.intake_tools"):
+        async with commit_factory() as db:
+            bound = await load_intake_thread_for_run(
+                db,
+                project_id=conversation.seeded.project_id,
+                agent_thread_id=conversation.agent_thread_id,
+                run_id=conversation.run_id,
+            )
+    assert bound is None
+    assert any(r.__dict__.get("event") == "intake_thread_binding_ambiguous" for r in caplog.records)
+
+
+async def test_requeue_hands_back_the_oldest_pending_sibling(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """The requeue-on-settle contract is per CONVERSATION now: a mail that landed
+    mid-run is on a sibling thread, and settling this run is what frees it."""
+    async with commit_factory() as db:
+        run = await db.get(AgentRun, conversation.run_id)
+        assert run is not None
+        run.status = "completed"
+        await db.commit()
+
+    handed: list[tuple[uuid.UUID, str]] = []
+
+    async def fake_enqueue(thread_id: uuid.UUID, provider_message_id: str) -> bool:
+        handed.append((thread_id, provider_message_id))
+        return True
+
+    assert await requeue_pending_intake_message(
+        commit_factory, conversation.run_id, enqueue=fake_enqueue
+    )
+    assert len(handed) == 1
+    # The OLDEST pending inbound across the siblings — and its OWN thread id, which
+    # is what the worker keys on (not the thread this run was working).
+    assert handed[0][0] == conversation.pending_a_id
+    async with commit_factory() as db:
+        message = (
+            await db.execute(
+                select(IntakeMessage).where(IntakeMessage.thread_id == conversation.pending_a_id)
+            )
+        ).scalar_one()
+        assert handed[0][1] == message.provider_message_id
+
+
+async def test_safe_fail_parks_only_the_thread_the_run_was_working(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """The pending siblings have not been looked at by anyone — parking them would
+    tell the lawyer they are waiting on a decision that was never asked for."""
+    async with commit_factory() as db:
+        run = await db.get(AgentRun, conversation.run_id)
+        assert run is not None
+        run.status = "failed"
+        await db.commit()
+
+    assert await safe_fail_intake_thread(commit_factory, conversation.run_id) is True
+    async with commit_factory() as db:
+        worked = await db.get(IntakeThread, conversation.worked_thread_id)
+        assert worked is not None
+        assert worked.status == "awaiting_human"
+        assert worked.outcome_note == NO_OUTCOME_NOTE
+        for sibling_id in (conversation.pending_a_id, conversation.pending_b_id):
+            sibling = await db.get(IntakeThread, sibling_id)
+            assert sibling is not None
+            assert sibling.status == "received"
+            assert sibling.outcome_note is None
+
+
+async def test_the_tools_act_on_the_bound_thread_not_the_oldest_on_the_matter(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """The send path must scope its "newest inbound processed" lookup and its
+    delivered-row guard to the BOUND thread. Bind to a sibling and the reply must
+    key on THAT thread's message, not the matter's oldest."""
+    bridge = _FakeBridge()
+    async with commit_factory() as db:
+        sibling_message = (
+            await db.execute(
+                select(IntakeMessage).where(IntakeMessage.thread_id == conversation.pending_a_id)
+            )
+        ).scalar_one()
+        sibling_message.run_id = conversation.run_id
+        await db.commit()
+        expected = sibling_message.provider_message_id
+
+    async with commit_factory() as db:
+        out = await _draft_email_reply(
+            db,
+            _binding(conversation.seeded),
+            run_id=conversation.run_id,
+            intake_thread_id=conversation.pending_a_id,
+            to=["counterparty@example.net"],
+            subject="Re: NDA",
+            body="Noted.",
+            attachment_file_ids=[],
+            tool_call_id=uuid.uuid4().hex,
+            bridge=bridge,
+        )
+        await db.commit()
+
+    assert out.startswith("Sent.")
+    assert bridge.calls[0]["reply_to_provider_message_id"] == expected
+    rows = await _outbound_rows(commit_factory, conversation.pending_a_id)
+    assert len(rows) == 1
+    # The thread the run was NOT bound to is untouched.
+    assert await _outbound_rows(commit_factory, conversation.worked_thread_id) == []
+    async with commit_factory() as db:
+        worked = await db.get(IntakeThread, conversation.worked_thread_id)
+        assert worked is not None
+        assert worked.status == "processing"
 
 
 # --------------------------------------------------------------------------- #
@@ -543,7 +1303,12 @@ async def test_safe_fail_leaves_a_concluded_thread_alone(
 ) -> None:
     async with commit_factory() as db:
         await _record_intake_outcome(
-            db, _binding(seeded), outcome="dealt_with", label="spam", note="Noise."
+            db,
+            _binding(seeded),
+            intake_thread_id=seeded.thread_id,
+            outcome="dealt_with",
+            label="spam",
+            note="Noise.",
         )
         await db.commit()
     run_id = await _make_run(commit_factory, seeded, status="completed")
@@ -626,6 +1391,48 @@ async def test_requeue_hands_a_deferred_message_back_to_the_queue(
 
     assert await requeue_pending_intake_message(commit_factory, run_id, enqueue=fake_enqueue)
     assert calls == [(seeded.thread_id, pending_id)]
+
+
+async def test_requeue_reports_a_refused_enqueue_as_a_failure(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
+) -> None:
+    """ADR-F087: a refused enqueue means the message is STILL waiting and nothing
+    will pick it up — the landing endpoint already burned its own enqueue and this
+    hook is the only other producer. It must read as False, not as a success with a
+    `queued: false` field buried in an info line."""
+    run_id = await _make_run(commit_factory, seeded, status="completed")
+    async with commit_factory() as db:
+        db.add(
+            IntakeMessage(
+                thread_id=seeded.thread_id,
+                provider_message_id=f"msg-{uuid.uuid4().hex[:8]}",
+                direction="in",
+                from_addr="counterparty@example.net",
+                to_addrs=["legal-intake@example.com"],
+                body_text="Still waiting.",
+            )
+        )
+        await db.commit()
+
+    async def refused(thread_id: uuid.UUID, provider_message_id: str) -> bool:
+        return False
+
+    assert await requeue_pending_intake_message(commit_factory, run_id, enqueue=refused) is False
+    # Nothing was consumed: every inbound is still unclaimed and re-enqueueable.
+    async with commit_factory() as db:
+        inbound = (
+            (
+                await db.execute(
+                    select(IntakeMessage).where(
+                        IntakeMessage.thread_id == seeded.thread_id,
+                        IntakeMessage.direction == "in",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert inbound and all(m.run_id is None for m in inbound)
 
 
 async def test_requeue_is_a_noop_with_nothing_pending(

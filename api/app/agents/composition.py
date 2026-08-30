@@ -86,6 +86,7 @@ from app.agents.store import get_agent_store
 from app.agents.stream import RedisStreamBroker, RunStreamBroker
 from app.agents.tier_middleware import TierMemoryMiddleware
 from app.agents.tools import MatterBinding, build_matter_tools
+from app.clients.mail_bridge import BridgeClient, build_mail_bridge_client
 from app.config import get_settings
 from app.db.session import get_session_factory
 from app.models.agent_run import AgentRun
@@ -326,10 +327,19 @@ INTAKE_DOCTRINE = (
     "once — dealt_with (nothing was needed; the matter closes) or needs_human (the matter "
     "stays open for the lawyer) — with a short label and a note for the lawyer. Do this "
     "even if you decided nothing needs doing; a thread you never conclude is a thread "
-    "nobody sees. Nothing you compose leaves the system: draft_email_reply records a "
-    "draft and always STOPS the run for the lawyer's approval — so if you are going to "
-    "draft a reply, record the outcome FIRST, then draft; otherwise the run pauses "
-    "before it ever concluded."
+    "nobody sees. Nothing you compose leaves the system on your say-so: "
+    "draft_email_reply always STOPS the run for the lawyer, who approves it (possibly "
+    "after editing your wording) or sends it back with a note — so if you are going to "
+    "propose a reply, record the outcome FIRST, then propose it; otherwise the run "
+    "pauses before it ever concluded. "
+    # INTAKE-4b (ADR-F087): the redraft loop. A refusal carrying the lawyer's note
+    # comes back as this tool's RESULT, so without this line the model's natural move
+    # is to close the turn with "understood" and leave the lawyer's instruction
+    # unanswered. The UI calls that verb "Respond"; there is no separate runner path.
+    "If the lawyer sends a draft back with a note telling you what to change, that "
+    "note arrives as the result of your draft_email_reply call: do not just "
+    "acknowledge it — write a NEW draft with draft_email_reply that answers it, and "
+    "stop for them again."
 )
 
 # VM2-B (#526): skills every practice area gets regardless of its practice_area_skills
@@ -683,6 +693,7 @@ async def compose_and_execute_run(
     store_provider: Callable[[], BaseStore | None] = get_agent_store,
     skill_registry_provider: Callable[[], SkillRegistry | None] = _skill_registry_from_app_state,
     redline_service_provider: Callable[[], RedlineService] = build_redline_service,
+    mail_bridge_client_provider: Callable[[], BridgeClient | None] = build_mail_bridge_client,
 ) -> None:
     """Compose one run's dependencies and execute it end to end.
 
@@ -748,6 +759,11 @@ async def compose_and_execute_run(
         # policy onto it. The intake run is the one whose conversation IS the thread's
         # ``agent_thread_id`` — so the gate is provenance AND identity.
         is_intake_run = False
+        # INTAKE-4b (ADR-F087/F088): the ONE intake thread this run is working on,
+        # resolved in the project block below. None for every non-intake run — and
+        # also when the binding is genuinely ambiguous, which fails CLOSED (no intake
+        # tools, no doctrine) rather than guessing a thread.
+        intake_thread_id: uuid.UUID | None = None
         is_follow_up = False
         async with session_factory() as db:
             run = await db.get(AgentRun, run_id)
@@ -791,12 +807,18 @@ async def compose_and_execute_run(
                 ).scalar_one_or_none()
                 if project is not None:
                     if project.intake_state is not None:
-                        is_intake_run = (
-                            await load_intake_thread_for_run(
-                                db, project_id=project.id, agent_thread_id=thread_id
-                            )
-                            is not None
+                        # INTAKE-4b: resolve the run's intake thread ONCE, here, and
+                        # hand the id to the tools. A conversation can carry several
+                        # intake threads (ADR-F088 layer 2/3), so "the thread" is a
+                        # binding decision, not something a tool may re-derive.
+                        intake_thread = await load_intake_thread_for_run(
+                            db,
+                            project_id=project.id,
+                            agent_thread_id=thread_id,
+                            run_id=run_id,
                         )
+                        intake_thread_id = intake_thread.id if intake_thread else None
+                        is_intake_run = intake_thread_id is not None
                     binding = MatterBinding(
                         project_id=project.id,
                         user_id=run.user_id,
@@ -1153,8 +1175,18 @@ async def compose_and_execute_run(
             # "structural grant, not area data" precedent as the matter-memory tools
             # above. An ordinary cockpit chat on the same matter gets NEITHER these
             # tools nor the doctrine (S2). Grant set disjoint from every other grant.
-            if is_intake_run:
-                tools = tools + build_intake_tools(session_factory, run_id=run_id, binding=binding)
+            if is_intake_run and intake_thread_id is not None:
+                # INTAKE-4b (ADR-F087): the mail-bridge send seam is built HERE (the
+                # composition root) and injected — never reached for inside the tool.
+                # None when the deployment configured no bridge: the tool then keeps
+                # the approved reply as a draft and says so, instead of pretending.
+                tools = tools + build_intake_tools(
+                    session_factory,
+                    run_id=run_id,
+                    binding=binding,
+                    intake_thread_id=intake_thread_id,
+                    bridge=mail_bridge_client_provider(),
+                )
         # SETUP-4a (ADR-F062, supersedes ADR-F054 D1): the area's domain tool GROUPS are
         # now built by a data-driven REGISTRY LOOP, not a hardcoded per-area branch.
         # ``enabled_tool_groups`` is the area's practice_area_tool_groups rows ∩ the code
