@@ -715,7 +715,12 @@ class Settings(BaseSettings):
     # ``lq_ai_gateway_url`` precedent; empty ⇒ send is not configured and the
     # intake tool fails honestly instead of pretending to deliver.
     lq_ai_mail_bridge_url: str = Field(
-        default="http://mail-bridge:8004",
+        # F7f: empty by default so an unconfigured deployment DISABLES the send
+        # (build_mail_bridge_client: empty URL or token ⇒ None) rather than silently
+        # pointing at a host that may not exist. docker-compose supplies the real URL
+        # (LQ_AI_MAIL_BRIDGE_URL, defaulted to http://mail-bridge:8004) for api and
+        # arq-worker, so the dev/prod mail profile is unaffected.
+        default="",
         description="Mail-bridge base URL for the approved-reply send (INTAKE-4b).",
     )
     lq_ai_bridge_master_key: str = Field(

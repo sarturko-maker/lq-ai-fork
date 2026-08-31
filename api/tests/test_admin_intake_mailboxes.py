@@ -316,6 +316,15 @@ async def test_patch_updates_only_provided_fields(
     assert body["max_steps"] == 5
     assert body["owner_user_id"] == str(owner_user.id)
 
+    # F7a: an explicit JSON null for the NOT NULL ``active`` column is the canonical
+    # 422, not a 500 at commit time.
+    res_null = await ac.patch(
+        f"/api/v1/admin/intake-mailboxes/{mailbox_id}",
+        json={"active": None},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res_null.status_code == 422, res_null.text
+
 
 @pytest.mark.integration
 async def test_patch_unknown_owner_returns_404_and_does_not_apply_other_fields(

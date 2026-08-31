@@ -186,6 +186,31 @@ def test_oversize_body_is_refused_unread() -> None:
     assert pipeline.events == []
 
 
+def test_chunked_oversize_body_refused_by_streaming_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F5: a chunked delivery — no Content-Length to pre-check — is still refused
+    413 by the streaming read, which aborts the moment the running total exceeds
+    the cap rather than buffering the whole body first."""
+
+    monkeypatch.setattr("app.main._MAX_WEBHOOK_BODY", 1024)
+    pipeline = _RecordingPipeline()
+
+    def _chunks() -> Any:
+        # 8 KiB total in 512-byte chunks, well over the patched 1 KiB cap, and
+        # sent WITHOUT a Content-Length so only the streaming loop can catch it.
+        for _ in range(16):
+            yield b"x" * 512
+
+    res = _client(pipeline).post(
+        "/agentmail/webhook",
+        content=_chunks(),
+        headers={"content-type": "application/json"},
+    )
+    assert res.status_code == 413
+    assert pipeline.events == []
+
+
 def test_signed_but_unreadable_message_is_a_5xx_not_a_silent_ok() -> None:
     """A `message.received` we cannot deserialize is our bug, not junk mail.
 

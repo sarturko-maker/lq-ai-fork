@@ -224,6 +224,34 @@ async def _fails(_run_id: uuid.UUID) -> bool:
 
 
 @pytest.mark.integration
+async def test_message_is_stamped_before_the_enqueue_callback_fires(
+    commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
+) -> None:
+    """F1: composition's ``load_intake_thread_for_run`` binds a run to its inbound via
+    ``IntakeMessage.run_id`` (layer 1). That stamp MUST be durable before the run is
+    queued — otherwise the run job can compose ahead of the stamp and layer 2 guesses
+    a sibling (the #300 P1). This drives the wrapper with an enqueue stub that reads
+    the row, in a fresh session, at the moment the callback fires."""
+
+    observed: dict[str, uuid.UUID | None] = {}
+
+    async def _asserting_enqueue(run_id: uuid.UUID) -> bool:
+        async with commit_factory() as db:
+            msg = await db.get(IntakeMessage, seeded.message_id)
+            observed["stamp_at_enqueue"] = msg.run_id if msg is not None else None
+        observed["run_id"] = run_id
+        return True
+
+    out = await process_intake_thread(
+        commit_factory, get_settings(), seeded.thread_id, enqueue=_asserting_enqueue
+    )
+    assert out["status"] == "started"
+    # The stamp was already committed when the queue callback ran, and it is THIS run.
+    assert observed["run_id"] == uuid.UUID(out["run_id"])
+    assert observed["stamp_at_enqueue"] == observed["run_id"]
+
+
+@pytest.mark.integration
 async def test_happy_path_starts_one_run_owned_by_the_mailbox_owner(
     commit_factory: async_sessionmaker[AsyncSession], seeded: Seeded
 ) -> None:

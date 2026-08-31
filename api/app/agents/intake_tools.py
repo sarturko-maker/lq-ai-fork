@@ -399,19 +399,20 @@ async def load_intake_thread_for_run(
             bound = (
                 await db.execute(_newest_processed(IntakeMessage.run_id.in_(ancestors)))
             ).scalar_one_or_none()
-    if bound is None:
-        bound = (
-            await db.execute(
-                _newest_processed(
-                    IntakeMessage.run_id.in_(
-                        select(AgentRun.id).where(AgentRun.thread_id == agent_thread_id)
-                    )
-                )
-            )
-        ).scalar_one_or_none()
     if bound is not None:
         return by_id[bound]
 
+    # The LEGACY layer-2 conversation-lineage heuristic (bind to the newest inbound
+    # processed by ANY run on this conversation) was REMOVED here (F2 security-
+    # hardening, the #300 P1). On a multi-thread conversation it guessed a SIBLING
+    # thread — the wrong-thread bind that consumed two live approvals. Every
+    # legitimate binding is now covered upstream: a modern run stamps its own inbound
+    # before it composes (layer 1, guaranteed by F1's stamp-then-enqueue), a resume
+    # carries resumed_from_run_id (layer 1b), a summarise pass carries the marker
+    # (layer 0). A run that reaches here is a stray (a lawyer-typed POST /agents/runs
+    # follow-up on the intake conversation, or pre-machinery historic data), so bind
+    # ONLY the unambiguous single working thread and otherwise FAIL CLOSED — never
+    # guess. Legal matters must not be blurred by a heuristic.
     working = [t for t in candidates if t.status not in _PENDING_THREAD_STATUSES]
     if len(working) == 1:
         return working[0]

@@ -133,6 +133,28 @@ def _no_control_chars(value: str) -> str:
 _CleanText = Annotated[str, AfterValidator(_no_control_chars)]
 
 
+def _no_control_chars_subject(value: str) -> str:
+    """Stricter than :func:`_no_control_chars`, for a SUBJECT line (F7c).
+
+    A subject is a single RFC-5322 line rendered in the outbound row the lawyer
+    reads; a newline or bare CR would let a human-edited (or, on the sibling
+    ``DraftEmailReplyInput`` path, agent-drafted) subject break onto a second visual
+    line, and is defence-in-depth against header injection should a future slice ever
+    pass the subject through to the bridge (today the bridge composes its own
+    ``Re:`` subject and this value is display-only). Both are rejected even though a
+    body may keep them; a tab is the one allowed whitespace, as elsewhere.
+    """
+    for ch in value:
+        if ch == "\t":
+            continue
+        if ord(ch) < 0x20 or ord(ch) == 0x7F:
+            raise ValueError("subject must not contain control characters or line breaks")
+    return value
+
+
+_CleanSubject = Annotated[str, AfterValidator(_no_control_chars_subject)]
+
+
 class EditedEmailReplyArgs(BaseModel):
     """The lawyer's edit of a pending ``draft_email_reply`` (INTAKE-4b, ADR-F087).
 
@@ -155,7 +177,7 @@ class EditedEmailReplyArgs(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    subject: _CleanText | None = Field(
+    subject: _CleanSubject | None = Field(
         default=None, min_length=1, max_length=DRAFT_REPLY_SUBJECT_MAX_CHARS
     )
     body: _CleanText = Field(min_length=1, max_length=DRAFT_REPLY_BODY_MAX_CHARS)

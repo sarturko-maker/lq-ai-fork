@@ -52,6 +52,7 @@ from app.agents.run_service import (
     NOT_LIVE_RUN_STATUSES,
     is_conversation_in_flight,
 )
+from app.api.agent_runs import _MAX_CONCURRENT_RUNS_PER_USER
 from app.api.dependencies import ActiveUser, MutatingUser
 from app.db.session import get_db
 from app.models.agent_run import AgentRun, AgentRunStep
@@ -216,14 +217,20 @@ def _thread_page_select(user_id: uuid.UUID) -> tuple[Any, ColumnElement[int]]:
     # reason to wait.
     ask_run = aliased(AgentRun, name="waiting_ask_run")
     sibling = aliased(IntakeThread, name="waiting_sibling")
+    sibling_mailbox = aliased(IntakeMailbox, name="waiting_sibling_mailbox")
     waiting = (
         select(sibling.id.label("thread_id"), sibling.subject.label("subject"))
         .select_from(IntakeMessage)
         .join(sibling, sibling.id == IntakeMessage.thread_id)
+        .join(sibling_mailbox, sibling_mailbox.id == sibling.mailbox_id)
         .join(ask_run, ask_run.id == IntakeMessage.run_id)
         .where(
             sibling.agent_thread_id == IntakeThread.agent_thread_id,
             sibling.id != IntakeThread.id,
+            # F7e defence-in-depth: the sibling's subject must never leak across an
+            # owner boundary. Same mailbox-owner fence the outer query applies, inside
+            # the lateral so a cross-owner sibling is never even selected.
+            sibling_mailbox.owner_user_id == user_id,
             IntakeMessage.direction == "in",
             ask_run.thread_id == IntakeThread.agent_thread_id,
             ask_run.status == AgentRunStatus.awaiting_input.value,
@@ -313,7 +320,9 @@ def _row_to_read(row: Row[Any], live_asks: dict[uuid.UUID, IntakeLiveAskRead]) -
     if row.project_id is not None:
         project = IntakeThreadProjectRead(
             id=row.project_id,
-            name=row.project_name,
+            # F4: a matter name can carry bidi/control chars (agent-named from email);
+            # neutralise it for display exactly as the subject field does.
+            name=single_line_neutralised(row.project_name),
             reference=row.project_reference,
             archived=row.project_archived_at is not None,
         )
@@ -642,6 +651,22 @@ async def summarise_intake_thread(
         raise HTTPException(status_code=409, detail="thread_busy")
     if row.project_id is None or row.project_archived_at is not None:
         raise HTTPException(status_code=409, detail="matter_closed")
+
+    # F7d: the same per-user flood brake POST /agents/runs applies — a summarise pass
+    # is a real run, and this convenience must not let a user outrun the cap by
+    # queueing summaries. Count the caller's running runs; 429 at/over the ceiling.
+    running_count: int = (
+        await db.execute(
+            select(func.count())
+            .select_from(AgentRun)
+            .where(
+                AgentRun.user_id == user.id,
+                AgentRun.status == AgentRunStatus.running.value,
+            )
+        )
+    ).scalar_one()
+    if running_count >= _MAX_CONCURRENT_RUNS_PER_USER:
+        raise HTTPException(status_code=429, detail="too_many_running_runs")
 
     outcome = await enqueue_intake_summarise_job(thread.id)
     if outcome == "duplicate":

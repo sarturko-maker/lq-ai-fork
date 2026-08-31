@@ -5,47 +5,21 @@ then CLAUDE.md, then the ADRs/plans named below.
 
 ## State
 
-- Branch: `intake-5a1-uat-fixes` — **INTAKE-5a.1 built, reviewed, live-verified; PR #300**.
-  Migrations **0103** (`projects.name_source`, `agent_runs.resumed_from_run_id` + index) and
-  **0104** (`intake_threads.summarise_pass_run_id`). No new ADR (implements plan #298 rulings +
-  maintainer UAT rulings recorded in the plan's memory note); F042 pattern extended to matter
-  names. Dev DB at 0104; api/arq-worker/ingest-worker/web rebuilt from this branch.
-- INTAKE milestone: 0..4b + 5 plan + 5a done (#290/#291/#293/#294/#296/#297/#298/#299),
-  5a.1 = this PR. Next: **INTAKE-5b** (human attach, ADR-F089), then INTAKE-6 acceptance.
-- Live evidence: `docs/fork/evidence/intake-5a1/` (P1 reproduction + recovery, agent-renamed
-  matter, summarise-now with sticky status, the second live-found race fix `90c418bf`).
-- Untracked on purpose: `sample-documents/` except `commercial-intake-pack/`, 4 scenario live
-  tests, PYMUPDF + DEEPSEEK-HARNESS research, `docs/fork/evidence/{demo-rehearsal,memory-demo-rehearsal}/`.
-
-## Done (INTAKE-5a.1 — this PR; maintainer UAT 2026-08-30)
-
-- **A — agent names the matter.** `record_intake_outcome` requires `matter_title` (≤80, essence);
-  rename only while `intake_state='candidate'` AND `name_source != 'human'` via one conditional
-  UPDATE (human rename wins, race-safe); `PATCH /projects` stamps `'human'`; UI + agent prompt
-  both render `REF · name`. A summarise pass notes the title but never renames.
-- **B — honest deferred state + backfill.** `IntakeThreadRead.waiting_on {thread_id, subject}`
-  ("Waiting for your decision on '…'"); `POST /intake/threads/{id}/summarise` queues a
-  READ-ONLY conclude pass (marker `summarise_pass_run_id` written before enqueue; no draft
-  tool, no area/matter-write tools — `SUMMARISE_PASS_TOOL_NAMES` pins the set; writes no
-  thread status — `replied`/`handled` sticky; safe-fail exempt; refusals in English, 409/422
-  taxonomy; archived matters refuse `matter_closed`).
-- **C — readable side card.** Chips (outcome/sender check/label), 3-line clamped note with
-  Show more, `REF · name` matter link.
-- **D — P1: resume bound to the wrong sibling thread.** Two live approvals were consumed with
-  nothing sent (delivered-row guard failed closed). `agent_runs.resumed_from_run_id` recorded
-  by the resume endpoint; `load_intake_thread_for_run` layer 1b walks the resume lineage
-  (bounded, cycle-safe); legacy layer 2 kept only for historic rows. Recovery: un-stamp the
-  inbound message (`run_id=NULL`) + `enqueue_intake_email_job` — both threads re-read, summaries
-  written, matter renamed; agent judged no further reply needed (clarification already sent).
-- **Live-found #2 (`90c418bf`):** lost start race errored the thread — `AgentThreadBusy(str(thread.id))`
-  read an expired ORM attr after the failed flush (async lazy-refresh → PendingRollbackError).
-  Busy id now read before the flush, rollback before raise, worker defers PendingRollbackError.
-- Review (fresh-context Opus): 1 BLOCKER (resumed summarise pass regained full tools + legacy
-  binding) + S2–S6 — all fixed; verified chain-walk safety, marker-before-enqueue, fences.
-- Suites: full api `-m "not provider"` on `53245e19` 4254/10 (2 env, 1 sighup load-flake green
-  in isolation, 7 fixed since); touched on `4b8ae843` 310 passed; worker+tools+lifecycle on
-  `90c418bf` **150 passed** (incl. the race regression); migrations 0103+0104 up→down²→up on
-  throwaway pgvector; mypy 259 files clean ×3; ruff clean; web check 0 errors, vitest 1466.
+- Branch: `intake-sec-hardening` — **INTAKE security-hardening pass; PR pending**. A fresh-context
+  adversarial security review of the whole email-intake series (#290–#300) + verified fixes (F1–F7).
+  **No migration** (auth_state column/CHECK already admit pass/fail/unknown). Report + live evidence:
+  `docs/fork/evidence/intake-security-review/` (README = findings + not-prod-ready list; f3-live-proof).
+- Prior: INTAKE 0..4b + 5 plan + 5a + 5a.1 (#290–#300). Next feature slice remains **INTAKE-5b**
+  (human attach, ADR-F089) — unchanged by this pass.
+- Fixes: F1 stamp-before-enqueue (finishes the #300 P1); F2 remove layer-2 sibling-guess (fail closed);
+  F3 honest auth_state (DMARC parse, method-anchored, never fake "pass"); F4 Trojan-Source neutralise
+  name/label/note; F5 webhook body streaming cap; F6 drop dead /send attachments + cap; F7 six small
+  correctness/contract fixes. Documented-not-fixed: rate limiting / work amplification, injection
+  blast radius on writes (HITL-gate record_intake_outcome), dedicated send token, dead-letter, full
+  authserv-id AR parsing, layer-2 forward/CC transferability, prod webhook never run.
+- Verified: full api `-m "not provider"` (counts in PR); mail-bridge 123; mypy api 259 + mail-bridge
+  --strict clean; ruff clean; F3 proven live vs captured provider payload; two fresh-context diff
+  reviewers (caught+fixed F3 DMARC-forgery regex, F2 dead code, F7c agent-subject asymmetry in-slice).
 
 ## Next slice — INTAKE-5b — human attach (1 day)
 

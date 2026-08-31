@@ -30,8 +30,10 @@ import httpx
 from agentmail import AsyncAgentMail, MessageReceivedEvent
 from agentmail.core.unchecked_base_model import construct_type
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from pydantic import ValidationError
 from svix.webhooks import Webhook, WebhookVerificationError
 
 from .attachments import AttachmentFetcher
@@ -54,6 +56,33 @@ _HTTP_TIMEOUT_SECONDS = 30.0
 #: documented 1 MB event cap while bounding what an unauthenticated caller can
 #: make this process buffer.
 _MAX_WEBHOOK_BODY = 2 * 1024 * 1024
+
+#: An approved reply is bounded free text plus a handful of short keys — no
+#: attachments (F6a). A generous ceiling that still refuses a caller (even one
+#: holding the bridge token) trying to make the process buffer arbitrary bytes.
+_MAX_SEND_BODY = 2 * 1024 * 1024
+
+
+async def _read_capped_body(request: Request, *, limit: int) -> bytes:
+    """Read the request body, refusing (413) the moment it exceeds ``limit``.
+
+    A streaming read: the running total is checked BEFORE each chunk is
+    appended, so an oversized delivery — including a chunked one with no
+    Content-Length to pre-check — is refused without ever being buffered whole.
+    Mirrors the running-total-abort shape of ``attachments._stream``. A declared
+    Content-Length over the cap is a fast-path reject before a byte is read.
+    """
+
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status_code=413, detail="payload too large")
+    buf = bytearray()
+    async for chunk in request.stream():
+        if len(buf) + len(chunk) > limit:
+            # Abort before appending: the total never exceeds the cap in memory.
+            raise HTTPException(status_code=413, detail="payload too large")
+        buf.extend(chunk)
+    return bytes(buf)
 
 
 def _require_bridge_token(request: Request) -> None:
@@ -249,9 +278,17 @@ def create_app(
         summary="Send one human-approved reply into an existing thread",
     )
     async def send_reply(
-        payload: SendReplyRequest,
+        request: Request,
         mail_sender: Annotated[MailSender, Depends(_get_sender)],
     ) -> SendReplyResponse:
+        # F6b: read the body under a hard cap (mirrors the webhook) instead of
+        # letting FastAPI buffer an unbounded body before validating it, then
+        # validate manually so the 422 envelope is unchanged for callers.
+        body = await _read_capped_body(request, limit=_MAX_SEND_BODY)
+        try:
+            payload = SendReplyRequest.model_validate_json(body)
+        except ValidationError as exc:
+            raise RequestValidationError(exc.errors()) from None
         # INTAKE-4b (ADR-F087): a repeated idempotency key is REFUSED, never
         # delivered a second time. The key is echoed nowhere and the detail names
         # no content — the caller already knows which send it retried.
@@ -288,11 +325,10 @@ def create_app(
                 )
                 raise HTTPException(status_code=413, detail="payload too large")
 
-            # Svix signs the RAW body bytes — never the re-serialized JSON.
-            body = await request.body()
-            if len(body) > _MAX_WEBHOOK_BODY:
-                # Chunked delivery: no Content-Length to pre-check against.
-                raise HTTPException(status_code=413, detail="payload too large")
+            # Svix signs the RAW body bytes — never the re-serialized JSON. F5:
+            # a bounded streaming read so a chunked delivery with no Content-Length
+            # to pre-check is still refused before it is buffered whole.
+            body = await _read_capped_body(request, limit=_MAX_WEBHOOK_BODY)
             try:
                 webhook.verify(body, dict(request.headers))
             except WebhookVerificationError:

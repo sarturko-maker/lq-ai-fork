@@ -259,6 +259,19 @@ gap and is in `events-captured.jsonl` (lines 9+). Facts:
   do not rely on raw headers for threading.
 - Undeclared-by-SDK fields present here too: `organization_id`, `pod_id`, `smtp_id`.
 
+> **Correction (2026-08-30, INTAKE security review).** The blanket "`headers` absent/empty on the
+> wire" above is over-general and was contradicted by this addendum's OWN captured frame:
+> `events-captured.jsonl` line 13 (this external Gmail-sourced `message.received`) carries a fully
+> populated `payload.message.headers` — `Authentication-Results`, `DKIM-Signature`/`ARC-*`, etc. —
+> including the receiver-prepended verdict `Authentication-Results: amazonses.com; spf=pass … dkim=pass
+> … dmarc=pass …`. `construct_type` maps that straight onto the SDK `Message.headers` field
+> `normalize_message` reads. So: raw headers should NOT be relied on for THREADING (the typed
+> `in_reply_to`/`references` fields remain correct there), but the **sender-authentication verdict IS on
+> the wire when the sender's infra emits it**, and the original `auth_state="pass"` constant was
+> discarding it. The security slice makes `auth_state` honest (`"unknown"` unless a real
+> `Authentication-Results` DMARC verdict is present). An empty-`headers` message (some senders/paths, as
+> first observed) simply yields `"unknown"` — never a false "pass".
+
 With this, every semantic the mail-bridge depends on has been observed live: subscribe/ack,
 `message.received` (external), `message.sent` + `message.delivered` (self-send), attachment
 download (presigned URL → bytes, sha256-verified), cold `send`, `reply` threading by

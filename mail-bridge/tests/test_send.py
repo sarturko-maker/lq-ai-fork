@@ -10,13 +10,10 @@ send a matter TAG but never an address.
 
 from __future__ import annotations
 
-import base64
-
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.main import create_app
-from app.normalize import MAX_ATTACHMENT_BYTES
+from app.main import _MAX_SEND_BODY, create_app
 from app.schemas import SendReplyRequest, SendReplyResponse
 from tests.conftest import BRIDGE_TOKEN, INBOX
 
@@ -102,24 +99,6 @@ def test_happy_path_returns_provider_ids_only() -> None:
     assert sender.requests[0].text == "Noted, thanks."
 
 
-def test_attachments_round_trip() -> None:
-    sender = _RecordingSender()
-    payload = {
-        **_BODY,
-        "attachments": [
-            {
-                "filename": "redline.docx",
-                "content_type": "application/octet-stream",
-                "content_b64": base64.b64encode(b"docx").decode(),
-            }
-        ],
-    }
-    res = _client(sender).post("/send", json=payload, headers=_AUTH)
-
-    assert res.status_code == 200
-    assert sender.requests[0].attachments[0].filename == "redline.docx"
-
-
 def test_unknown_field_rejected() -> None:
     """extra="forbid": a caller cannot smuggle recipients past reply-only."""
 
@@ -129,37 +108,27 @@ def test_unknown_field_rejected() -> None:
     assert sender.requests == []
 
 
-def test_oversize_attachment_rejected() -> None:
+def test_attachments_field_removed() -> None:
+    """F6a: attachments were dead surface — the field is gone and now forbidden."""
+
     sender = _RecordingSender()
     payload = {
         **_BODY,
-        "attachments": [
-            {
-                "filename": "huge.bin",
-                "content_b64": base64.b64encode(b"z" * (MAX_ATTACHMENT_BYTES + 1)).decode(),
-            }
-        ],
+        "attachments": [{"filename": "redline.docx", "content_b64": "ZG9jeA=="}],
     }
     res = _client(sender).post("/send", json=payload, headers=_AUTH)
     assert res.status_code == 422
     assert sender.requests == []
 
 
-def test_too_many_attachments_rejected() -> None:
-    sender = _RecordingSender()
-    one = {"filename": "a.bin", "content_b64": base64.b64encode(b"a").decode()}
-    res = _client(sender).post("/send", json={**_BODY, "attachments": [one] * 11}, headers=_AUTH)
-    assert res.status_code == 422
+def test_oversize_send_body_refused() -> None:
+    """F6b: a body over the send cap is refused 413 without being handled."""
 
-
-def test_invalid_base64_rejected() -> None:
     sender = _RecordingSender()
-    res = _client(sender).post(
-        "/send",
-        json={**_BODY, "attachments": [{"filename": "a.bin", "content_b64": "!!!not-b64!!!"}]},
-        headers=_AUTH,
-    )
-    assert res.status_code == 422
+    payload = {**_BODY, "text": "z" * (_MAX_SEND_BODY + 1)}
+    res = _client(sender).post("/send", json=payload, headers=_AUTH)
+    assert res.status_code == 413
+    assert sender.requests == []
 
 
 def test_empty_text_rejected() -> None:
@@ -301,13 +270,6 @@ async def test_sender_calls_reply_keyed_by_message_id_only() -> None:
             reply_to_provider_message_id="<CAF-abc123@mail.gmail.com>",
             text="Noted, thanks.",
             idempotency_key="row-1",
-            attachments=[
-                {  # type: ignore[list-item]
-                    "filename": "redline.docx",
-                    "content_type": "application/octet-stream",
-                    "content_b64": base64.b64encode(b"docx").decode(),
-                }
-            ],
         )
     )
 
@@ -315,9 +277,8 @@ async def test_sender_calls_reply_keyed_by_message_id_only() -> None:
     assert args == (INBOX, "<CAF-abc123@mail.gmail.com>")
     assert kwargs["text"] == "Noted, thanks."
     assert "to" not in kwargs and "cc" not in kwargs and "bcc" not in kwargs
-    attachments = kwargs["attachments"]
-    assert isinstance(attachments, list)
-    assert attachments[0].filename == "redline.docx"
+    # F6a: the send is text-only — no attachments kwarg is passed at all.
+    assert "attachments" not in kwargs
     assert result.provider_thread_id == "2e1c9f73-4e29-424c-8404-c8cd03306c44"
     # The caller's key is handed to the provider's own idempotency guard too.
     assert kwargs["idempotency_key"] == "row-1"
