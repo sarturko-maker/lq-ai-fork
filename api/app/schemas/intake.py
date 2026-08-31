@@ -66,7 +66,12 @@ _MAX_ATTACHMENT_B64_CHARS = (MAX_ATTACHMENT_DECODED_BYTES * 4 // 3) + 1024
 # (ADR-F086 security posture #2/#3). Everything else the bridge forwards is
 # dropped at this boundary — the doctrine (INTAKE-3) never sees, and the
 # agent prompt never fences, header names/values outside this set.
-ALLOWED_HEADER_KEYS = frozenset({"Auto-Submitted", "Precedence", "In-Reply-To", "References"})
+# "Authentication-Results" carries the receiver-derived sender-authenticity verdict
+# (F3): the bridge already parsed it into ``auth_state``; the api carries the raw value
+# for transparency ONLY and never re-parses it (a forged header must not be re-trusted).
+ALLOWED_HEADER_KEYS = frozenset(
+    {"Auto-Submitted", "Precedence", "In-Reply-To", "References", "Authentication-Results"}
+)
 _HEADER_VALUE_MAX_CHARS = 500
 # INTAKE-4a (ADR-F088): ``References`` is the ONE header that grows without bound
 # — every hop appends the message it answered — and it is the one the layer-2
@@ -78,7 +83,10 @@ _HEADER_VALUE_MAX_CHARS = 500
 # tail. A trim can bisect the oldest ``<id>`` token; the parser requires both
 # angle brackets, so a bisected token is simply not a token.
 _REFERENCES_VALUE_MAX_CHARS = 2_000
-_TAIL_TRUNCATED_HEADERS = frozenset({"References"})
+# ``Authentication-Results`` joins the tail-truncated set: the DMARC verdict tends to
+# sit at the END of the value, so keeping the tail (like References) preserves the
+# most-useful part within the same 2 000-char cap (F3, transparency-only).
+_TAIL_TRUNCATED_HEADERS = frozenset({"References", "Authentication-Results"})
 
 
 def _reject_nul_bytes(value: str) -> str:
@@ -164,7 +172,7 @@ class InboundEmailAttachment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     filename: _NulFreeStr = Field(..., min_length=1, max_length=500)
-    content_type: str = Field(default="application/octet-stream", max_length=200)
+    content_type: _NulFreeStr = Field(default="application/octet-stream", max_length=200)
     content_b64: str = Field(..., min_length=1, max_length=_MAX_ATTACHMENT_B64_CHARS)
 
     _decoded: bytes = PrivateAttr(default=b"")
@@ -368,8 +376,10 @@ class RecordIntakeOutcomeInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
     outcome: IntakeOutcome
-    label: _NulFreeStr = Field(min_length=1, max_length=INTAKE_LABEL_MAX_CHARS)
-    note: _NulFreeStr = Field(min_length=1, max_length=INTAKE_NOTE_MAX_CHARS)
+    # F4b: label and note are single-glance display text (no newline is legitimate in
+    # either) — reject control/bidi chars, same as matter_title/summary, not just NUL.
+    label: _PlainLineStr = Field(min_length=1, max_length=INTAKE_LABEL_MAX_CHARS)
+    note: _PlainLineStr = Field(min_length=1, max_length=INTAKE_NOTE_MAX_CHARS)
     matter_title: _PlainLineStr = Field(min_length=1, max_length=INTAKE_MATTER_TITLE_MAX_CHARS)
     summary: list[IntakeSummaryItem] = Field(min_length=1, max_length=INTAKE_SUMMARY_MAX_ITEMS)
 
@@ -390,7 +400,11 @@ class DraftEmailReplyInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
     to: list[_NulFreeAddr] = Field(min_length=1, max_length=DRAFT_REPLY_MAX_RECIPIENTS)
-    subject: _NulFreeStr = Field(min_length=1, max_length=DRAFT_REPLY_SUBJECT_MAX_CHARS)
+    # _PlainLineStr (not _NulFreeStr): the agent drafts this subject FROM untrusted
+    # inbound mail and it is rendered in the outbound row the lawyer reads, so it gets
+    # the same control+bidi rejection as the summary/label/note (F4/F7c) — a one-line
+    # subject never legitimately carries a line break or a bidi override.
+    subject: _PlainLineStr = Field(min_length=1, max_length=DRAFT_REPLY_SUBJECT_MAX_CHARS)
     body: _NulFreeStr = Field(min_length=1, max_length=DRAFT_REPLY_BODY_MAX_CHARS)
     # File ids must belong to THIS matter — enforced by the tool against the DB
     # (a foreign id is refused the way a cross-user read is: "not found").

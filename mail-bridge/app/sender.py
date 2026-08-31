@@ -32,7 +32,7 @@ import logging
 from collections import OrderedDict
 from typing import Any
 
-from agentmail import AsyncAgentMail, SendAttachment
+from agentmail import AsyncAgentMail
 
 from .schemas import SendReplyRequest, SendReplyResponse
 
@@ -93,18 +93,11 @@ class MailSender:
         # The SDK's OMIT sentinel is each optional field's default; passing an
         # explicit ``None`` would serialize ``"reply_to": null`` instead of
         # leaving the field out, so an untagged send omits the kwarg entirely.
+        # F6a: a reply carries text only — the attachments field was dead surface
+        # (draft_email_reply never delivers them) and is gone.
         kwargs: dict[str, Any] = {
             "text": request.text,
             "idempotency_key": request.idempotency_key,
-            "attachments": [
-                SendAttachment(
-                    filename=a.filename,
-                    content_type=a.content_type,
-                    content_disposition="attachment",
-                    content=a.content_b64,
-                )
-                for a in request.attachments
-            ],
         }
         if reply_to is not None:
             kwargs["reply_to"] = reply_to
@@ -115,7 +108,6 @@ class MailSender:
             "mail-bridge: reply sent",
             extra={
                 "event": "mail_reply_sent",
-                "attachments": len(request.attachments),
                 "thread_id": response.thread_id,
                 "tagged": request.reply_to_tag is not None,
             },

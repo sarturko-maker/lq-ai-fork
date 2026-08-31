@@ -202,8 +202,66 @@ def _bound_headers(message: Message) -> dict[str, str]:
             cleaned = _clean(str(value), limit=MAX_HEADER_VALUE_CHARS)
             if cleaned:
                 headers[key] = cleaned
+        ar = lowered.get("authentication-results")
+        if isinstance(ar, (list, tuple)):
+            ar = ar[0] if ar else None
+        if isinstance(ar, str):
+            cleaned = _clean_tail(ar, limit=MAX_REFERENCES_VALUE_CHARS)
+            if cleaned:
+                # Carried for api/UI transparency (bounded); the bridge already
+                # derived auth_state from it — the api does NOT re-parse it (F3).
+                headers["Authentication-Results"] = cleaned
 
     return headers
+
+
+#: The DMARC verdict inside an Authentication-Results value: the alignment-aware
+#: result, preferred over raw spf/dkim. Case-insensitive.
+# Anchored to an Authentication-Results METHOD boundary (start-of-string or a
+# `;` separator), NOT a bare `\b`: an AR value places attacker-controlled tokens
+# (`envelope-from=`, `helo=` — the SMTP MAIL FROM local-part and HELO) BEFORE the
+# real `dmarc=` result, so a `\b`-anchored search would match `envelope-from=dmarc=
+# pass@evil.com` and let a spoofer whose mail genuinely fails DMARC forge a "pass".
+# Methods are `;`-delimited, so the true verdict always follows `^`/`;` + optional
+# whitespace. (Full trust still needs the receiver's authserv-id — deferred, see
+# docs/fork/evidence/intake-security-review/README.md item 3.)
+_DMARC_VERDICT = re.compile(r"(?:^|;)\s*dmarc\s*=\s*([A-Za-z]+)", re.IGNORECASE)
+
+
+def _auth_state_from_headers(headers: object) -> str:
+    """Derive ``auth_state`` from the receiver-prepended Authentication-Results header.
+
+    Only the FIRST (topmost = most-recently-prepended = the receiving infra's) AR
+    value is trusted: a sender can forge their own AR header, but the receiving infra
+    (AgentMail's, ``amazonses.com`` in the probe) prepends the real one above it. From
+    that value the DMARC verdict is read — ``dmarc=pass`` → ``"pass"``, ``dmarc=fail``
+    → ``"fail"``, anything else / absent / no AR header at all → ``"unknown"``. Never
+    raises; when in doubt it fails to ``"unknown"`` (a neutral UI state), never
+    ``"pass"``.
+    """
+
+    if not isinstance(headers, dict):
+        return "unknown"
+    value: object = None
+    for key, raw_value in headers.items():
+        if str(key).lower() == "authentication-results":
+            value = raw_value
+            break
+    if isinstance(value, (list, tuple)):
+        # A dict collapses duplicate keys; a list preserves order — the receiver's is
+        # first. Never concatenate: a forged trailing header must not be read.
+        value = value[0] if value else None
+    if not isinstance(value, str):
+        return "unknown"
+    match = _DMARC_VERDICT.search(value)
+    if match is None:
+        return "unknown"
+    verdict = match.group(1).lower()
+    if verdict == "pass":
+        return "pass"
+    if verdict == "fail":
+        return "fail"
+    return "unknown"
 
 
 def _coerce_timestamp(value: object) -> str:
@@ -241,13 +299,12 @@ def normalize_message(message: Message, *, inbox_id: str) -> dict[str, Any]:
     :mod:`app.attachments`), so they are filled in by the pipeline; this
     function stays pure and synchronously testable.
 
-    ``auth_state`` is ``"pass"``: v1 forwards plain ``message.received`` only —
-    AgentMail routes unauthenticated/spam arrivals to the
-    ``.unauthenticated``/``.spam`` event variants, and the subscriber's
-    ``messages.list`` call excludes them explicitly. Carrying a real ``fail``/
-    ``unknown`` through to the thread (and capping the agent ladder on it) is
-    **deferred to INTAKE-3, plan security posture #2**
-    (``docs/fork/plans/INTAKE-INBOX-plan.md``) — ADR-F086 does not decide it.
+    ``auth_state`` is derived honestly from the receiver-prepended
+    Authentication-Results header via :func:`_auth_state_from_headers`: the topmost
+    (real) AR value's DMARC verdict maps pass/fail, and anything absent or
+    unrecognised is ``"unknown"`` (a neutral UI state) — never a hardcoded ``"pass"``
+    (F3 security-hardening). The prompt's ``_UNAUTHENTICATED_CAUTION`` branch is thus
+    now reachable for fail/unknown arrivals.
     """
 
     body = message.text or getattr(message, "extracted_text", None) or ""
@@ -272,7 +329,7 @@ def normalize_message(message: Message, *, inbox_id: str) -> dict[str, Any]:
             "timestamp": _coerce_timestamp(message.timestamp),
             "text": text,
             "headers": _bound_headers(message),
-            "auth_state": "pass",
+            "auth_state": _auth_state_from_headers(getattr(message, "headers", None)),
             "attachments": [],
         },
     }

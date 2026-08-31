@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.agent_runs import BudgetProfile
 
@@ -49,8 +49,22 @@ class IntakeMailboxUpdate(BaseModel):
 
     active: bool | None = None
     owner_user_id: uuid.UUID | None = None
+    # An explicit JSON null legitimately CLEARS this (the handler nulls the column,
+    # which is nullable) — so, deliberately, NOT covered by _reject_explicit_null.
     default_budget_profile: BudgetProfile | None = None
     max_steps: int | None = Field(default=None, ge=1, le=600)
+
+    @field_validator("active")
+    @classmethod
+    def _reject_explicit_null(cls, value: bool | None) -> bool:
+        """F7a: an explicit ``{"active": null}`` matches the ``None`` arm and would
+        reach the NOT NULL ``active`` column, crashing the commit (500) instead of the
+        canonical 422. Validators don't run for UNSET defaults, so ``active`` simply
+        omitted stays a partial-update no-op; only a *provided* null is rejected here
+        (reject, don't sanitize). Mirrors practice_areas._reject_explicit_null."""
+        if value is None:
+            raise ValueError("must be a boolean when provided (null is not allowed)")
+        return value
 
 
 class IntakeMailboxResponse(BaseModel):

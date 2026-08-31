@@ -569,6 +569,9 @@ async def test_resume_rejects_invalid_body(
         {"decision": {"type": "edit", "edited_args": {**good_args, "subject": "s" * 999}}},
         # Control characters are rejected, never stripped (header-injection surface).
         {"decision": {"type": "edit", "edited_args": {**good_args, "subject": "Re:\rBcc: x"}}},
+        # F7c: a bare newline in the SUBJECT is header-injection surface too (a body
+        # may legitimately keep newlines, but a subject is one header value).
+        {"decision": {"type": "edit", "edited_args": {**good_args, "subject": "Re: NDA\nBcc: x"}}},
         {"decision": {"type": "edit", "edited_args": {**good_args, "body": "hi\x00there"}}},
         {"decision": {"type": "edit", "edited_args": {"body": "no body key?", "nope": 1}}},
         {"decision": {"type": "edit", "edited_args": {"subject": "only"}}},  # body required

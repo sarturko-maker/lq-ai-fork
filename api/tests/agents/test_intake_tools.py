@@ -645,6 +645,14 @@ def _bad(**overrides: object) -> dict[str, object]:
         _bad(label="x" * 201),
         _bad(note="y" * 2001),
         _bad(label="x\x00y"),
+        # F4b — label and note are single-glance display text (rendered into the
+        # Inbox list): the same control/bidi rejection as matter_title/summary, not
+        # just NUL. A newline in a "one-glance" note is never legitimate, and a bidi
+        # override re-orders the glyphs the lawyer reads (Trojan Source in a row).
+        _bad(label="Approved ‮gnidnep tidua"),  # bidi override in label
+        _bad(note="Handled\nsecond line"),  # newline in note
+        _bad(note="Done ‭by counsel"),  # bidi in note
+        _bad(label="tag\x1b[31m"),  # ANSI escape in label
         # INTAKE-5a (ruling 7) — the summary's own bounds.
         _bad(summary=[]),  # zero bullets is not an account of anything
         _bad(summary=[{"title": "t", "text": "x"}] * 6),  # more than five
@@ -1284,6 +1292,27 @@ def test_draft_email_reply_takes_an_injected_tool_call_id() -> None:
     assert {"to", "subject", "body", "attachment_file_ids"} <= set(schema)
 
 
+def test_agent_drafted_subject_rejects_control_and_bidi_chars() -> None:
+    """F7c: the agent drafts the reply subject FROM untrusted inbound mail and it is
+    shown in the outbound row, so it takes the same control+bidi rejection as the
+    summary/label/note — a bidi override or a line break in a one-line subject is a
+    display-spoof (Trojan Source), never legitimate content. Body still allows them."""
+    from pydantic import ValidationError
+
+    from app.schemas.intake import DraftEmailReplyInput
+
+    ok = DraftEmailReplyInput(to=["a@b.com"], subject="Re: your NDA", body="ok")
+    assert ok.subject == "Re: your NDA"
+    bidi_subject = "routine" + chr(0x202E) + "danger"  # RLO override (Trojan Source)
+    for bad in (bidi_subject, "line one\nline two", "tab\tsplit"):
+        with pytest.raises(ValidationError):
+            DraftEmailReplyInput(to=["a@b.com"], subject=bad, body="fine")
+    # A body may still carry newlines — only the one-line subject is constrained.
+    assert DraftEmailReplyInput(
+        to=["a@b.com"], subject="Re: ok", body="para one\n\npara two"
+    ).body.startswith("para one")
+
+
 async def test_re_executing_the_same_ask_sends_once_and_writes_one_row(
     commit_factory: async_sessionmaker[AsyncSession], seeded: SeededIntake
 ) -> None:
@@ -1683,12 +1712,16 @@ async def test_a_resume_of_a_resume_follows_the_whole_chain(
         assert bound.id == conversation.worked_thread_id
 
 
-async def test_a_historic_resume_still_uses_the_legacy_lineage_heuristic(
+async def test_a_stray_run_on_a_modern_conversation_never_guesses_the_stamped_sibling(
     commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
 ) -> None:
-    """No backfill: a resume written before migration 0103 carries no parent link and
-    falls through to layer 2 exactly as it always did — which is the behaviour this
-    test pins, bug and all, so a future change to it is deliberate."""
+    """F2 (defence-in-depth behind F1 / the #300 P1): before F2 a lineage-less run
+    (a lawyer-typed follow-up, or a pre-0103 historic resume) reaching layer 2 was
+    bound to the conversation's NEWEST processed inbound — a SIBLING thread — which is
+    exactly the mis-bind that consumed the live approval. This conversation is MODERN
+    (its worked inbound, and now a sibling's, are stamped), so F2 SKIPS the layer-2
+    guess and falls through to the single working thread: the one actually being
+    worked, never the stamped sibling."""
     await _sibling_replied_more_recently(commit_factory, conversation)
     resume_run_id = await _make_resume(commit_factory, conversation, parent_run_id=None)
     async with commit_factory() as db:
@@ -1699,7 +1732,64 @@ async def test_a_historic_resume_still_uses_the_legacy_lineage_heuristic(
             run_id=resume_run_id,
         )
         assert bound is not None
-        assert bound.id == conversation.pending_a_id
+        # The single working thread — NOT the stamped sibling the old heuristic named.
+        assert bound.id == conversation.worked_thread_id
+        assert bound.id != conversation.pending_a_id
+
+
+async def test_f2_modern_conversation_stampless_run_safe_parks_instead_of_binding_sibling(
+    commit_factory: async_sessionmaker[AsyncSession],
+    conversation: SeededConversation,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """F2 test (b): a MODERN conversation (a sibling IS stamped) with a stampless,
+    lineage-less run and MORE THAN ONE working thread must return None (safe-park),
+    never bind the stamped sibling the legacy layer-2 heuristic would have picked."""
+    # A sibling replied and its inbound is now the newest stamped message.
+    await _sibling_replied_more_recently(commit_factory, conversation)
+    async with commit_factory() as db:
+        # Two working threads ⇒ the single-working-thread fallback is ambiguous.
+        pending_a = await db.get(IntakeThread, conversation.pending_a_id)
+        assert pending_a is not None
+        pending_a.status = "processing"
+        await db.commit()
+    stray_run_id = await _make_resume(commit_factory, conversation, parent_run_id=None)
+    with caplog.at_level(logging.ERROR, logger="app.agents.intake_tools"):
+        async with commit_factory() as db:
+            bound = await load_intake_thread_for_run(
+                db,
+                project_id=conversation.seeded.project_id,
+                agent_thread_id=conversation.agent_thread_id,
+                run_id=stray_run_id,
+            )
+    assert bound is None  # NOT the stamped pending_a sibling.
+    assert any(r.__dict__.get("event") == "intake_thread_binding_ambiguous" for r in caplog.records)
+
+
+async def test_a_historic_no_stamp_stray_run_binds_only_the_single_working_thread(
+    commit_factory: async_sessionmaker[AsyncSession], conversation: SeededConversation
+) -> None:
+    """F2 test (a): the legacy layer-2 lineage guess was REMOVED, so even on a
+    purely-historic conversation (NO message stamped at all) a lineage-less run no
+    longer guesses the newest processed inbound — it binds ONLY the unambiguous single
+    working thread. Here exactly one thread is being worked, so that is the bind; the
+    ambiguous case (covered by the sibling test) returns None."""
+    async with commit_factory() as db:
+        # Unstamp the worked inbound so the whole conversation carries zero stamps.
+        processed = await db.get(IntakeMessage, conversation.seeded.message_id)
+        assert processed is not None
+        processed.run_id = None
+        await db.commit()
+    stray_run_id = await _make_resume(commit_factory, conversation, parent_run_id=None)
+    async with commit_factory() as db:
+        bound = await load_intake_thread_for_run(
+            db,
+            project_id=conversation.seeded.project_id,
+            agent_thread_id=conversation.agent_thread_id,
+            run_id=stray_run_id,
+        )
+        assert bound is not None
+        assert bound.id == conversation.worked_thread_id
 
 
 async def test_a_summarise_pass_binds_to_the_thread_it_names(

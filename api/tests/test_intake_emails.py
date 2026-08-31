@@ -661,6 +661,18 @@ async def test_nul_byte_in_header_value_returns_422(
 
 
 @pytest.mark.integration
+async def test_nul_byte_in_attachment_content_type_returns_422(
+    client: AsyncClient, mailbox: IntakeMailbox
+) -> None:
+    """F7b: content_type is free text on the wire — a NUL must be rejected at the
+    boundary (reject, don't sanitize) like every other free-text field."""
+    res = await _post(
+        client, _envelope(attachments=[_attachment(content_type="application/pdf\x00")])
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.integration
 async def test_aggregate_attachment_cap_returns_422(
     client: AsyncClient, mailbox: IntakeMailbox
 ) -> None:

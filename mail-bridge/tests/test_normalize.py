@@ -37,10 +37,91 @@ def test_full_mapping() -> None:
     assert message["cc"] == []
     assert message["text"] == "Please review the attached NDA."
     assert message["timestamp"].startswith("2026-08-29T20:14:39")
-    # v1 subscribes to plain message.received only; the .unauthenticated/.spam
-    # variants are not forwarded, so a message that reaches here passed.
-    assert message["auth_state"] == "pass"
+    # F3: auth_state is derived honestly from the Authentication-Results header; the
+    # default probe payload carries none, so a message with no verdict is "unknown"
+    # (a neutral UI state), never a hardcoded "pass".
+    assert message["auth_state"] == "unknown"
     assert message["attachments"] == []
+
+
+_REAL_AR = (
+    "amazonses.com; spf=pass (spfCheck: domain of _spf.google.com designates "
+    "209.85.221.177 as permitted sender) client-ip=209.85.221.177; "
+    "envelope-from=s.arturko@googlemail.com; helo=mail-vk1-f177.google.com; "
+    "dkim=pass header.i=@googlemail.com; dmarc=pass header.from=googlemail.com;"
+)
+_FORGED_AR = "attacker.example; spf=pass; dkim=pass; dmarc=pass header.from=victim.com;"
+
+
+def test_auth_state_real_pass_header_reads_pass() -> None:
+    assert normalize._auth_state_from_headers({"Authentication-Results": _REAL_AR}) == "pass"
+
+
+def test_auth_state_fail_header_reads_fail() -> None:
+    fail = _REAL_AR.replace("dmarc=pass", "dmarc=fail")
+    assert normalize._auth_state_from_headers({"Authentication-Results": fail}) == "fail"
+
+
+def test_auth_state_absent_is_unknown() -> None:
+    assert normalize._auth_state_from_headers({}) == "unknown"
+    assert normalize._auth_state_from_headers(None) == "unknown"
+
+
+def test_auth_state_ignores_dmarc_forged_into_an_earlier_ar_token() -> None:
+    # `envelope-from=` / `helo=` are attacker-controlled (SMTP MAIL FROM local-part,
+    # HELO) and appear in the AR value BEFORE the real `dmarc=`. A `\b`-anchored regex
+    # would match the forged token first and upgrade a genuine fail to "pass"; the
+    # method-boundary anchor must read only the real `; dmarc=fail`.
+    via_envelope_from = (
+        "amazonses.com; spf=fail (spfCheck: no) client-ip=1.2.3.4; "
+        "envelope-from=dmarc=pass@evil.com; helo=mail.evil.com; "
+        "dmarc=fail header.from=victim.com;"
+    )
+    assert (
+        normalize._auth_state_from_headers({"Authentication-Results": via_envelope_from}) == "fail"
+    )
+    via_helo = "amazonses.com; helo=dmarc=pass.evil.com; dmarc=fail header.from=victim.com;"
+    assert normalize._auth_state_from_headers({"Authentication-Results": via_helo}) == "fail"
+    # A leading dmarc method (no authserv-id prefix before it) still parses.
+    assert normalize._auth_state_from_headers({"Authentication-Results": "dmarc=pass"}) == "pass"
+
+
+def test_auth_state_no_dmarc_verdict_is_unknown() -> None:
+    # spf/dkim present but no DMARC (the alignment-aware verdict) → unknown.
+    no_dmarc = "amazonses.com; spf=pass; dkim=pass;"
+    assert normalize._auth_state_from_headers({"Authentication-Results": no_dmarc}) == "unknown"
+
+
+def test_auth_state_garbage_is_unknown() -> None:
+    assert normalize._auth_state_from_headers({"Authentication-Results": "]{[ nonsense"}) == (
+        "unknown"
+    )
+    assert normalize._auth_state_from_headers({"Authentication-Results": 12345}) == "unknown"
+
+
+def test_auth_state_trusts_only_the_first_receiver_header() -> None:
+    # A sender-forged AR sits BELOW the receiver's real one (a list preserves order);
+    # only the FIRST (topmost) is read, so a forged dmarc=pass under a real dmarc=fail
+    # cannot upgrade the verdict.
+    real_fail = _REAL_AR.replace("dmarc=pass", "dmarc=fail")
+    headers = {"Authentication-Results": [real_fail, _FORGED_AR]}
+    assert normalize._auth_state_from_headers(headers) == "fail"
+
+
+def test_auth_state_case_insensitive_key_and_verdict() -> None:
+    headers = {"authentication-results": "recv; DMARC=PASS header.from=x.com;"}
+    assert normalize._auth_state_from_headers(headers) == "pass"
+
+
+def test_authentication_results_is_carried_in_bound_headers() -> None:
+    # F3(2): the raw AR value is forwarded (bounded) for api/UI transparency.
+    from tests.conftest import make_message
+
+    envelope = normalize_message(
+        make_message(headers={"Authentication-Results": _REAL_AR}), inbox_id=INBOX
+    )
+    assert envelope["message"]["auth_state"] == "pass"
+    assert envelope["message"]["headers"]["Authentication-Results"].endswith("googlemail.com;")
 
 
 def test_missing_subject_becomes_empty_string() -> None:

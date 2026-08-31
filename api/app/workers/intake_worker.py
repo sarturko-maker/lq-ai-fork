@@ -240,6 +240,36 @@ async def process_intake_thread(
         max_steps = mailbox.max_steps or DEFAULT_INTAKE_MAX_STEPS
 
         thread.status = "processing"
+
+        async def _stamp_then_enqueue(run_id: uuid.UUID) -> bool:
+            """Stamp the inbound message with its run_id, THEN queue it — in order.
+
+            F1 (security-hardening): composition's ``load_intake_thread_for_run``
+            reads ``IntakeMessage.run_id`` (layer 1) to bind the run to its own
+            message; queueing first opens a window in which the run job composes
+            before the stamp lands and layer 2 guesses a sibling. ``start_agent_run``
+            commits (releasing the row lock) before it calls this, so the fresh
+            session cannot deadlock against the first. The stamp is only durable when
+            the enqueue succeeds: if the queue rejects the run the message is left
+            UNCLAIMED (run_id NULL) so a later re-enqueue re-claims it cleanly — a
+            stuck stamp on a failed run would lose the email forever.
+            """
+            async with session_factory() as stamp_db:
+                marked = await stamp_db.get(IntakeMessage, message_id)
+                if marked is None:
+                    return False
+                marked.run_id = run_id
+                await stamp_db.commit()
+            if await enqueue(run_id):
+                return True
+            # Enqueue failed — un-stamp so the message stays claimable.
+            async with session_factory() as unstamp_db:
+                stale = await unstamp_db.get(IntakeMessage, message_id)
+                if stale is not None:
+                    stale.run_id = None
+                    await unstamp_db.commit()
+            return False
+
         try:
             run = await start_agent_run(
                 db,
@@ -252,7 +282,7 @@ async def process_intake_thread(
                 # Fixed, fork-authored — never the email's subject (ADR-F086).
                 title=INTAKE_THREAD_TITLE,
                 settings=settings,
-                enqueue=enqueue,
+                enqueue=_stamp_then_enqueue,
             )
         except (AgentThreadBusy, PendingRollbackError):
             # Lost the race to a concurrent job on the same conversation; the same
@@ -279,9 +309,9 @@ async def process_intake_thread(
             )
             return {"status": "error", "reason": "run_start_failed", "thread_id": str(thread_id)}
 
-        # start_agent_run committed; re-attach the rows this session still needs.
+        # start_agent_run committed; re-attach the row this session still needs
+        # (the message was already stamped/un-stamped by _stamp_then_enqueue).
         thread = await db.get(IntakeThread, thread_id)
-        message = await db.get(IntakeMessage, message_id)
 
         if run.status != AgentRunStatus.running.value:
             # The enqueue failed, so start_agent_run already settled the run
@@ -307,8 +337,8 @@ async def process_intake_thread(
             thread.status = "processing"
             if thread.agent_thread_id is None:
                 thread.agent_thread_id = run.thread_id
-        if message is not None:
-            message.run_id = run.id
+        # F1: message.run_id is stamped by _stamp_then_enqueue BEFORE the run job
+        # composes (so layer-1 binding hits its own stamp), not post-hoc here.
         await db.commit()
 
         log.info(

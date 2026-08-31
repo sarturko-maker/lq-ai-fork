@@ -1434,6 +1434,58 @@ async def test_summarise_queues_one_pass_for_a_settled_summary_less_thread(
     assert seeded.thread.summary is None
 
 
+async def test_summarise_is_throttled_by_the_per_user_concurrent_run_cap(
+    client: AsyncClient, db_session: AsyncSession, owner: User, queued: list[uuid.UUID]
+) -> None:
+    """F7d: a summarise pass is a real run, so the same per-user flood brake that
+    POST /agents/runs applies must gate it — at the cap, 429 and nothing queued."""
+    from app.api.agent_runs import _MAX_CONCURRENT_RUNS_PER_USER
+
+    seeded = await _settled_summary_less_thread(db_session, owner)
+    # Fill the per-user running-run cap on OTHER conversations (one running run per
+    # thread is the DB rule, so each gets its own agent thread).
+    for _ in range(_MAX_CONCURRENT_RUNS_PER_USER):
+        at = AgentThread(user_id=owner.id, project_id=seeded.project.id, title="busy")
+        db_session.add(at)
+        await db_session.flush()
+        db_session.add(
+            AgentRun(
+                user_id=owner.id,
+                thread_id=at.id,
+                project_id=seeded.project.id,
+                status="running",
+                prompt="busy",
+                max_steps=8,
+                started_at=_BASE_TIME,
+            )
+        )
+    await db_session.flush()
+
+    resp = await client.post(f"{_LIST}/{seeded.thread.id}/summarise", headers=_bearer(owner))
+    assert resp.status_code == 429, resp.text
+    assert resp.json()["detail"] == "too_many_running_runs"
+    assert queued == []
+
+
+async def test_project_name_is_neutralised_in_the_row(
+    client: AsyncClient, db_session: AsyncSession, owner: User
+) -> None:
+    """F4a: a matter name is untrusted display text (the agent names it from the
+    email). It is neutralised for the row exactly as the subject is — line breaks
+    collapsed, marker-shaped dash runs broken up — so it cannot forge an Inbox line."""
+    mailbox = await _mailbox(db_session, owner)
+    project = await _matter(db_session, owner, name="Contoso\nNDA --------- pending")
+    await _seed_thread(db_session, owner, mailbox=mailbox, project=project)
+
+    resp = await client.get(_LIST, headers=_bearer(owner))
+    assert resp.status_code == 200, resp.text
+    (item,) = resp.json()["items"]
+    name = item["project"]["name"]
+    assert "\n" not in name
+    assert "---------" not in name  # the dash run is broken up
+    assert name == "Contoso NDA - - - pending"
+
+
 async def test_summarise_is_a_404_for_another_users_thread(
     client: AsyncClient,
     db_session: AsyncSession,
